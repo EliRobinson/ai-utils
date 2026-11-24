@@ -1,5 +1,5 @@
 # CI for the ai-utils marketplace: one job, `validate`. Rules and how to fix a
-# failure: docs/agents/ci.md. scripts/validate-plugins.py checks this file.
+# failure: docs/agents/ci.md. scripts/workflow_rules.py checks this file.
 name: ci
 
 on:
@@ -12,10 +12,11 @@ on:
 permissions:
   contents: read
 
+# A new push to a PR cancels that PR's older run. Every other run has a group of
+# its own, so each commit on main gets its own run.
 concurrency:
-  group: ci-${{ github.ref }}
-  # A new push to a PR cancels its older run; runs on main always finish.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   validate:

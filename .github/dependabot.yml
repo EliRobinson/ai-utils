@@ -9,5 +9,9 @@ updates:
     # Wait a week after a release, so a bad release is caught before we pin it.
     cooldown:
       default-days: 7
+    # One PR per week for all actions, so one ticket and one review gate.
+    groups:
+      actions:
+        patterns: ["*"]
     commit-message:
       prefix: ci

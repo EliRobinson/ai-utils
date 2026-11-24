@@ -19,9 +19,10 @@ plugins/
 .claude/settings.json            wires the guard and review-gate hooks
 docs/agents/                     agent rules: git workflow, review gate, coordinator prompt, ...
 .github/workflows/ci.yml         CI: the `validate` job (see docs/agents/ci.md)
+.github/dependabot.yml           weekly bumps of the pinned actions
 AGENTS.md                        agent rules for this repo (CLAUDE.md links to it)
 LICENSE, SECURITY.md             MIT license, how to report a security problem
-scripts/                         validate-plugins.py (the test gate) and its tests
+scripts/                         validate-plugins.py (the test gate), workflow_rules.py,
                                  test_validate_plugins.py, build-skill-bundles.py,
                                  hook scripts (symlinks into agent-roster)
 ```
@@ -93,9 +94,8 @@ that `accessibility-critic` and `implementer-ui` list exactly the read-only
 that plugin's edit gate, that agent-roster declares the plugin at its pinned version, that every
 install command adds its marketplace at the pinned commit, and that no doc
 outside a changelog still mentions the accessibility plugin it replaced. It
-also runs the unit tests in `scripts/test_*.py`, each skill's
-`scripts/check-*.mjs` self-check when Node is installed, and the CI workflow
-rules.
+also runs the unit tests, the skill self-checks and the CI workflow rules
+([docs/agents/ci.md](docs/agents/ci.md)).
 
 ## Using these skills in the Claude apps
 
