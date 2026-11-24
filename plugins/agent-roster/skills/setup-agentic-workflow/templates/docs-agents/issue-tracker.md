@@ -1,6 +1,12 @@
 # Ticketing tool
 
-This file is the repo's one setting for where tickets live. Every agent reads it before it searches, views, files, edits, closes or links a ticket, and uses only the commands below. To change the tool, or to move from a CLI to an MCP server, edit this file. No plugin release is needed.
+This file is the setting for where tickets live. Every agent reads it before it searches, views, files, edits, closes or links a ticket, and uses only the commands below. To change the tool, or to move from a CLI to an MCP server, edit this file, or rerun the `setup-agentic-workflow` skill and ask it to change the ticketing tool. No plugin release is needed.
+
+Agents look for the setting in this order, and use the first one they find:
+
+1. the repo's `docs/agents/issue-tracker.md`;
+2. the owner's own `~/.claude/agent-roster/issue-tracker.md`, for every repo that has no file of its own;
+3. neither: the tool is GitHub Issues, through `gh issue`.
 
 ## Setting
 
@@ -10,8 +16,9 @@ This file is the repo's one setting for where tickets live. Every agent reads it
 - **In branch names:** `123`, as in `<username>/123/<short-description>`
 - **Link:** `https://github.com/{{GITHUB_REPO}}/issues/<id>`
 - **Close from a PR:** `Closes #<id>` in the PR body
+- **MCP prefix:** none
 
-**Access** is `cli` or `mcp`. It picks a column of the table below. To move from the CLI to an MCP server, fill the `mcp` column, then change this one line.
+**Access** is `cli` or `mcp`. It picks a column of the table below. To move from the CLI to an MCP server, fill the `mcp` column, then change this one line. **MCP prefix** is the start of the server's tool names, such as `mcp__<server>__`, or `none` for a CLI.
 
 ## Commands
 
@@ -32,7 +39,8 @@ This file is the repo's one setting for where tickets live. Every agent reads it
 - File, search, edit and close tickets only in the tool set here, with the commands above.
 - Creating or editing a ticket needs the owner's yes first. One standing yes: after round 2 of the review gate, `pr-finisher` files each open non-blocker finding as a ticket, as `review-gate.md` says.
 - Put every value in a command inside single quotes. Write a `'` inside a value as `'\''`. Or pass the text from a file (`--body-file`). Never put report, note or finding text inside double quotes, because the shell runs `$(...)` and backticks there. If a command in the table double-quotes a value, quote it with single quotes anyway.
-- Agents reach a tool through MCP only if their `tools:` list names the server's tools. Switching **Access** to `mcp` therefore also needs a repo copy of `ticket-writer` and `pr-finisher` in `.claude/agents/` that lists them.
+- Every agent may read tickets, with the Search and View commands. Of the agents, only `ticket-writer` and `pr-finisher` create, edit, comment on, label or close them.
+- Agents reach an MCP tool only if their `tools:` list names it. The agent-roster agents name no ticketing tool, so with **Access** `mcp` the setup writes tracker copies of them: each copy adds the Search and View tools from the `mcp` column, and the copies of `ticket-writer` and `pr-finisher` add every tool in it. Copies for the owner's file go in `~/.claude/agents/agent-roster/`; a repo whose own file sets `mcp` gets them in `.claude/agents/`. Rerun the setup after each agent-roster update, so the copies match the new agents.
 - When the tool is not GitHub Issues, never create GitHub issues or Jira tickets. If a plan, brief or ticket names one, switch it to this tool. If an existing GitHub issue seems to need attention, do not act on it: the coordinator puts it on the Asks board, and any other agent reports it to its coordinator.
 - A branch names its ticket as **In branch names** shows. A review finding filed as a ticket is recorded as `[filed <ticket ID>]`.
 - When **Close from a PR** is `none`, the merge does not close the ticket. After the merge, close it with the Close command.

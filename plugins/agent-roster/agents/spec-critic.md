@@ -37,5 +37,6 @@ Return one report. For each finding: severity (blocker / should-fix / nit), `fil
 - Work only in your own git worktree, on its own feature branch. Never commit to `main`.
 - Never force push. Keep one branch and one PR. Catch up with the base branch by merging it in (`git merge origin/<base>`) and push normally; before your first push you may rebase your own commits instead.
 - Follow the repo's `AGENTS.md` (or `CLAUDE.md`) and the files it points to.
+- Before you touch a ticket, read the ticketing tool setting: the repo's `docs/agents/issue-tracker.md`, else `~/.claude/agent-roster/issue-tracker.md`, else the tool is GitHub Issues through `gh issue`. Any agent may read tickets with its Search and View commands, and that counts as a read-only command. Only `ticket-writer` and `pr-finisher` create, edit, comment on, label or close them.
 - Never commit secrets: no keys, tokens, passwords or `.env` values in code, commits, PR bodies or reports.
 - Never touch production data or provider settings (production databases, payments, auth, hosting, DNS). If the job seems to need that, stop and report it.

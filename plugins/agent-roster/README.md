@@ -39,7 +39,7 @@ skills/thermo-nuclear-code-quality-review/
 
 The critics never edit files. The critics that use a skill have `Skill` only to load it: `agent-roster:thermo-nuclear-code-quality-review`, `marketing-skills:copy-editing` and `impeccable`. `accessibility-critic` loads no skill; it uses the `accessibility-agents` plugin's read-only MCP tools: its scans, its checks and `get_specialist` for the specialists' checklists. `mechanical-editor` has `Skill` only to open the `accessibility-agents` edit gate (see "What the plugin adds to every session"). `pr-finisher` runs every critic on every PR and writes the `## Review` record that the `setup-agentic-workflow` review-gate hook checks.
 
-Every agent prompt carries the same rules: own worktree and feature branch; one branch and one PR per item, catch up by merging the base branch in once pushed, never force push; follow the repo's `AGENTS.md`; never commit secrets; never touch production data or provider settings.
+Every agent prompt carries the same rules: own worktree and feature branch; one branch and one PR per item, catch up by merging the base branch in once pushed, never force push; follow the repo's `AGENTS.md`; read tickets through the ticketing tool setting, and leave writing them to `ticket-writer` and `pr-finisher`; never commit secrets; never touch production data or provider settings.
 
 ## Skills the agents need
 
@@ -156,7 +156,7 @@ Then it installs:
 
 - a guardrails block in `AGENTS.md`, with `CLAUDE.md` as a symlink to it;
 - `docs/agents/git-workflow.md`, `review-gate.md` and `multi-agent.md`;
-- `docs/agents/issue-tracker.md`, the ticketing tool setting (see below);
+- the ticketing tool setting (see below): `~/.claude/agent-roster/issue-tracker.md`, `docs/agents/issue-tracker.md` if the repo gets its own, and tracker copies for an MCP tracker;
 - `docs/agents/coordinator-prompt.md`, the coordinator prompt filled in for that repo;
 - the reviewer agents into `.claude/agents/`, copied from `agents/` here;
 - `scripts/agent-hook-shell.mjs`, the shell reader both hooks share;
@@ -174,38 +174,53 @@ The reviewer agents and the coordinator prompt have one copy each, in `agents/` 
 
 ## The ticketing tool
 
-Each repo sets where its tickets live in one file it owns: `docs/agents/issue-tracker.md`. The plugin never names the tool. `ticket-writer`, `route-work`, the coordinator prompt, `pr-finisher`, the implementers' branch rule and the guardrails all read that file. With no file, the tool is GitHub Issues through `gh`.
+The plugin never names a ticketing tool. Agents find it in a setting file, and use the first one they find:
 
-The file has a `## Setting` list (tool, access, ticket ID, its form in branch names, link, how a PR closes a ticket), a `## Commands` table with a `cli` and an `mcp` column, and the ticket rules. The **Access** line picks the column. So moving a tool from its CLI to an MCP server is a change to that line once the `mcp` column is filled, plus repo copies of `ticket-writer` and `pr-finisher` in `.claude/agents/` whose `tools:` lists name the server's tools. No plugin release is needed.
+1. the repo's `docs/agents/issue-tracker.md`, for a repo with its own setting;
+2. the owner's `~/.claude/agent-roster/issue-tracker.md`, for every other repo;
+3. neither: GitHub Issues, through `gh`.
+
+`setup-agentic-workflow` asks once which tool you use: GitHub Issues (the default), or another one, reached through its CLI or its MCP server (give its tool prefix, `mcp__<server>__`). It writes your answer to `~/.claude/agent-roster/issue-tracker.md`, and asks whether the repo needs its own file. To change it later, rerun the skill and say "change ticketing tool", or edit the file.
+
+The file has a `## Setting` list (tool, access, MCP prefix, ticket ID, its form in branch names, link, how a PR closes a ticket), a `## Commands` table with a `cli` and an `mcp` column, and the ticket rules. The **Access** line picks the column. Every agent may read tickets with the Search and View commands. Only `ticket-writer` and `pr-finisher` create, edit, comment on, label or close them.
 
 The setup learns a CLI's commands from its own `--help`, and an MCP server's from its tool list. It never guesses. With a tool other than GitHub Issues set, agents never create GitHub issues or Jira tickets, and an existing GitHub issue that needs attention goes on the Asks board.
 
-A worked example, for a repo whose tickets live in Spotlight, reached through its CLI. No Spotlight CLI was installed when this was written, so the commands are placeholders; the setup fills them from `spotlight --help`:
+### How agents reach an MCP tracker
+
+A CLI needs nothing more: the agents with `Bash` run its commands (`researcher` has no `Bash`, so it reads tickets only through MCP). An MCP tracker needs tracker copies. An agent holds only the tools its `tools:` list names, and these lists name no tracker. So for **Access** `mcp`, the setup writes a copy of each agent to `~/.claude/agents/agent-roster/` (or the repo's `.claude/agents/` for a repo whose own file sets `mcp`) with the tracker's Search and View tools added, and every tracker tool for `ticket-writer` and `pr-finisher`. Each copy names the agent-roster version it came from. A coordinator calls a copy by its plain name, such as `implementer-engine`. A repo's own `.claude/agents/` files win over your copies.
+
+After each agent-roster update, rerun the setup and say "change ticketing tool" to refresh the copies. Until then they run the older prompts, and `route-work` asks you to rerun it.
+
+Why copies, and not agents that take every tool you have: an agent with no `tools:` list, or with only a `disallowedTools` list, also takes every other MCP tool in your session, such as mail, payments or a database. The read-only critics read untrusted diffs, so a prompt injection there could use them. A copy adds only the tracker's tools, so each agent keeps its current limits: the critics, `lookup` and `researcher` still have no `Edit` or `Write`.
+
+A worked example, for a repo whose tickets live in an in-house tracker reached through its CLI, called `tix` here. The commands are placeholders; the setup fills them from `tix --help`:
 
 ```markdown
 ## Setting
 
-- **Tool:** Spotlight
+- **Tool:** Tix
 - **Access:** cli
-- **Ticket ID:** `<from spotlight --help>`
-- **In branch names:** `<from spotlight --help, lowercased>`, as in `<username>/<ticket>/<short-description>`
-- **Link:** `<from spotlight --help>`
+- **Ticket ID:** `<from tix --help>`
+- **In branch names:** `<from tix --help, lowercased>`, as in `<username>/<ticket>/<short-description>`
+- **Link:** `<from tix --help>`
 - **Close from a PR:** none
+- **MCP prefix:** none
 
 ## Commands
 
 | Action | `cli` | `mcp` |
 | --- | --- | --- |
-| Search | `<from spotlight --help>` | `<not set>` |
-| View | `<from spotlight --help>` | `<not set>` |
-| Create | `<from spotlight --help>` | `<not set>` |
-| Edit | `<from spotlight --help>` | `<not set>` |
-| Comment | `<from spotlight --help>` | `<not set>` |
-| Label | `<from spotlight --help>` | `<not set>` |
-| Close | `<from spotlight --help>` | `<not set>` |
+| Search | `<from tix --help>` | `<not set>` |
+| View | `<from tix --help>` | `<not set>` |
+| Create | `<from tix --help>` | `<not set>` |
+| Edit | `<from tix --help>` | `<not set>` |
+| Comment | `<from tix --help>` | `<not set>` |
+| Label | `<from tix --help>` | `<not set>` |
+| Close | `<from tix --help>` | `<not set>` |
 ```
 
-When Spotlight gets an MCP server, fill the `mcp` column from its tool list and change the **Access** line from `cli` to `mcp`.
+When the tracker gets an MCP server, fill the `mcp` column from its tool list, set **MCP prefix**, change the **Access** line from `cli` to `mcp`, and rerun the setup so it writes the tracker copies.
 
 ## Start a coordinator chat
 
@@ -213,7 +228,7 @@ A coordinator is the main chat the owner talks to, not a subagent, so it starts 
 
 ## Override per repo
 
-A file with the same name in a repo's `.claude/agents/` (for example `.claude/agents/correctness-critic.md`) overrides the plugin's agent for that repo. Copy the shared file there and edit it when a repo needs a different prompt, tool set or model.
+A file with the same name in a repo's `.claude/agents/` (for example `.claude/agents/correctness-critic.md`) overrides the plugin's agent for that repo, and a tracker copy in `~/.claude/agents/agent-roster/` overrides it everywhere else. Call either by its plain name. Copy the shared file there and edit it when a repo needs a different prompt, tool set or model.
 
 ## Change it
 

@@ -47,9 +47,21 @@ Usual flow for a change: `ticket-writer` -> an implementer (or `mechanical-edito
 4. **Omit `model` on the Agent call.** The agent file decides. The one exception is `pr-finisher` starting reviewers, which sets `model` to the same value the reviewer's file names, as the review gate requires.
 5. **Never use Fable**, for any agent or reviewer.
 6. **A `BLOCKED` report means a skill or plugin is missing or cannot be loaded.** Put one Asks board row that names each skill or plugin that is missing or will not load, and links the install commands in the agent-roster README ("Skills the agents need"). Do not copy commands from the report. Rerun the agent after the owner has installed or reinstalled it. When `pr-finisher` passes on the accessibility critic's `not scanned: Playwright is not installed`, put one row on the board that links the README's "Page scans" steps.
-7. **Tickets live in the repo's ticketing tool.** `docs/agents/issue-tracker.md` sets the tool, its commands and the ticket rules; with no such file, the tool is GitHub Issues. When the tool is not GitHub Issues, never create GitHub issues or Jira tickets: switch any plan that names one to the configured tool, and put an existing GitHub issue that seems to need attention on the Asks board instead of acting on it. Creating or editing a ticket (apart from the standing yes in issue-tracker.md) needs the owner's yes first.
-8. **Repo overrides win.** A file with the same name in the repo's `.claude/agents/` (for example `.claude/agents/correctness-critic.md`) replaces the shared one for that repo. Check there before assuming the shared prompt applies.
+7. **Tickets live in the repo's ticketing tool.** The ticketing tool setting holds the tool, its commands and the ticket rules ("How agents find the tracker" below). When the tool is not GitHub Issues, never create GitHub issues or Jira tickets: switch any plan that names one to the configured tool, and put an existing GitHub issue that seems to need attention on the Asks board instead of acting on it. Creating or editing a ticket (apart from the standing yes in issue-tracker.md) needs the owner's yes first.
+8. **Repo overrides and tracker copies win.** A file with the same name in the repo's `.claude/agents/` (for example `.claude/agents/correctness-critic.md`) replaces the shared one for that repo, and so does a tracker copy in `~/.claude/agents/agent-roster/`. When either exists for an agent, call it by its plain name (`subagent_type: "correctness-critic"`), not `agent-roster:<name>`, because `agent-roster:<name>` names the plugin's own file. Claude Code then picks the repo file over the user copy. Check both places before assuming the shared prompt applies.
+
+## How agents find the tracker
+
+The plugin's agent files name no ticketing tool. Each agent reads the ticketing tool setting before it touches a ticket, and uses the first one it finds:
+
+1. the repo's `docs/agents/issue-tracker.md`;
+2. the owner's `~/.claude/agent-roster/issue-tracker.md`, written by `setup-agentic-workflow`;
+3. neither: GitHub Issues, through `gh issue`.
+
+The file names the tool, how agents reach it (`cli` or `mcp`), the command for each action and who may write. Every agent may read tickets; only `ticket-writer` and `pr-finisher` create, edit, comment on, label or close them.
+
+A CLI needs nothing more: agents with `Bash` run its commands. An MCP server is reached only through tracker copies, because an agent holds only the tools its `tools:` list names. The setup writes one per agent with the tracker's read tools added (all its tools for `ticket-writer` and `pr-finisher`); rule 8 says how to call them. If the comment at the top of a tracker copy's body names an older agent-roster version than the one installed, put one Asks board row asking the owner to rerun `setup-agentic-workflow` and pick "change ticketing tool", which refreshes the copies.
 
 ## Briefing an agent
 
-Each agent starts with only what you give it. Include: the ticket ID and link in the repo's ticketing tool, the branch name to use, the repo and base branch, what done looks like, and anything you already know (files, decisions, constraints). Ask for the report you need back.
+Each agent starts with only what you give it. Include: the ticket ID and link in the repo's ticketing tool (the agent reads the ticket itself, so do not paraphrase it as the only source), the branch name to use, the repo and base branch, what done looks like, and anything you already know (files, decisions, constraints). Ask for the report you need back.

@@ -35,7 +35,7 @@ Review `git diff <base>...HEAD` plus uncommitted changes that will be pushed.
 ## 3. Start them
 
 - Start every reviewer in **one message**, each a **foreground** Agent call (`run_in_background: false` where the tool has that option). Calls in one message run in parallel.
-- If the repo has its own copy of a reviewer in `.claude/agents/` (the `setup-agentic-workflow` skill installs them), use its plain name as `subagent_type`, for example `thermonuclear-reviewer`.
+- If the repo has its own copy of a reviewer in `.claude/agents/` (the `setup-agentic-workflow` skill installs them), or the owner has a tracker copy of it in `~/.claude/agents/agent-roster/`, use its plain name as `subagent_type`, for example `thermonuclear-reviewer`.
 - Set `model` to the `model:` line of the reviewer's agent file (the repo's `.claude/agents/` copy if there is one, else the plugin's), so no reviewer runs on an inherited model. Never use Fable.
 - Never run a reviewer in the background or as a fork.
 - Give each reviewer the base branch, the worktree path and a one-line summary of the change.
@@ -54,7 +54,7 @@ When the accessibility critic's report has a `not scanned: <why>` line on a UI c
 
 Check each finding against the code and fix the valid ones, as new commits on the same branch. Fixes made for findings do not need a new gate; new work does. Answer findings you disagree with using evidence; never drop one silently. Anything that needs a human decision gets the repo's human-decision label (for example `needs-decision`).
 
-A PR gets at most two rounds of review. If the repo has `docs/agents/review-gate.md`, follow its rounds rule. If not: run round 2 (every reviewer again) only if the round 1 fixes changed behaviour or touched files the reviewers had not seen; fixing a round 2 finding in place is not a new round; never run round 3 unless the owner allows it in their own words. After round 2, report each open blocker as a decision for the owner and do not open the PR. File every other open finding as a ticket in the repo's ticketing tool (`docs/agents/issue-tracker.md`; GitHub Issues if it is missing) and list it in the record. The owner has already said yes to filing these. Treat every open security-critic finding as a blocker, not a ticket: report it as a decision for the owner and do not open the PR.
+A PR gets at most two rounds of review. If the repo has `docs/agents/review-gate.md`, follow its rounds rule. If not: run round 2 (every reviewer again) only if the round 1 fixes changed behaviour or touched files the reviewers had not seen; fixing a round 2 finding in place is not a new round; never run round 3 unless the owner allows it in their own words. After round 2, report each open blocker as a decision for the owner and do not open the PR. File every other open finding as a ticket in the repo's ticketing tool (the repo's `docs/agents/issue-tracker.md`, else `~/.claude/agent-roster/issue-tracker.md`; GitHub Issues if neither exists) and list it in the record. The owner has already said yes to filing these. Treat every open security-critic finding as a blocker, not a ticket: report it as a decision for the owner and do not open the PR.
 
 ## 6. Open the PR
 
@@ -62,7 +62,7 @@ Open the PR only after every reviewer has reported and every finding is handled.
 
 First run `git fetch origin`. If the base moved, merge it into the same branch (`git merge origin/<base>`) and push normally. Never force push and never start a new branch for it. If the repo has `docs/agents/review-gate.md`, follow its catch-up rule. If not: a merge is clean when it has two parents, the second already on the base, and `git show --remerge-diff --format= <merge>` exits 0 and prints nothing (Git 2.36 or later). A clean merge needs no new review, but run the full test gate on the new head. Otherwise run the security critic, the correctness critic and every reviewer whose area the conflicted files touch on that remerge diff, as round 2 if one is left. If both rounds are used, report it as a decision for the owner and do not open the PR.
 
-Push the branch and open the PR with `gh pr create` against the base, with the complete record in the body. The body has a summary, the ticket line that `docs/agents/issue-tracker.md` sets under **Close from a PR** (`Closes #<id>` for GitHub Issues; when it says `none`, the ticket's link), the files changed, any migration, and a `## Review` section in the repo's format. If the repo has `docs/agents/review-gate.md`, follow it exactly; a hook may check it. Otherwise use this shape:
+Push the branch and open the PR with `gh pr create` against the base, with the complete record in the body. The body has a summary, the ticket line that the ticketing tool setting gives under **Close from a PR** (`Closes #<id>` for GitHub Issues; when it says `none`, the ticket's link), the files changed, any migration, and a `## Review` section in the repo's format. If the repo has `docs/agents/review-gate.md`, follow it exactly; a hook may check it. Otherwise use this shape:
 
 ```markdown
 ## Review
@@ -84,7 +84,7 @@ Rounds: 1
 - DRY critic: <what was found> [declined: <why>]
 ```
 
-`Rounds:` is `1` or `2` (higher only with an `Owner allowed round N:` line). The table and the finding lines count every round. Each finding line ends with `[fixed]`, `[declined: <why>]` or `[filed <ticket ID>]` (such as `#123` or `SPOT-42`). Note any human waiver under the table. Never merge the PR.
+`Rounds:` is `1` or `2` (higher only with an `Owner allowed round N:` line). The table and the finding lines count every round. Each finding line ends with `[fixed]`, `[declined: <why>]` or `[filed <ticket ID>]` (such as `#123` or `PROJ-42`). Note any human waiver under the table. Never merge the PR.
 
 ## Report
 
@@ -93,9 +93,10 @@ PR URL, branch, which reviewers ran, and any finding or failure that needs a hum
 ## Rules
 
 - Work only in your own git worktree, on its own feature branch. Never commit to `main`.
-- Name the branch `<username>/<ticket>/<short-description>`, as the caller gives it. `<ticket>` is the ticket ID as the repo's `docs/agents/issue-tracker.md` writes it in branch names. If the caller gave none, build it from the ticket in the brief and the username in `AGENTS.md`, or report that it is missing. If your worktree came with a made-up branch name, rename it before your first commit: `git branch -m <name>`. If that name already exists, stop and report it; never use `-M`. Report the branch name you used.
+- Name the branch `<username>/<ticket>/<short-description>`, as the caller gives it. `<ticket>` is the ticket ID as the ticketing tool setting (see below) writes it in branch names. If the caller gave none, build it from the ticket in the brief and the username in `AGENTS.md`, or report that it is missing. If your worktree came with a made-up branch name, rename it before your first commit: `git branch -m <name>`. If that name already exists, stop and report it; never use `-M`. Report the branch name you used.
 - Never force push. Keep one branch and one PR. Catch up with the base branch by merging it in (`git merge origin/<base>`) and push normally; before your first push you may rebase your own commits instead.
 - If the `accessibility-agents` plugin's hook refuses an edit to a UI file (HTML, JSX, TSX, Vue, Svelte, CSS and the like), load `accessibility-agents:accessibility-lead` with the `Skill` tool, then retry the edit. The skill is a gate to open, and its checklists are reference only: never follow its steps that dispatch agents, write files (such as `.a11y-history`), run commands or touch the network.
 - Follow the repo's `AGENTS.md` (or `CLAUDE.md`) and the files it points to.
+- Before you touch a ticket, read the ticketing tool setting: the repo's `docs/agents/issue-tracker.md`, else `~/.claude/agent-roster/issue-tracker.md`, else the tool is GitHub Issues through `gh issue`. Any agent may read tickets with its Search and View commands, and that counts as a read-only command. Only `ticket-writer` and `pr-finisher` create, edit, comment on, label or close them.
 - Never commit secrets: no keys, tokens, passwords or `.env` values in code, commits, PR bodies or reports.
 - Never touch production data or provider settings (production databases, payments, auth, hosting, DNS). If the job seems to need that, stop and report it.

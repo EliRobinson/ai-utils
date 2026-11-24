@@ -1,6 +1,6 @@
 ---
 name: setup-agentic-workflow
-description: Use when the user wants to set up their agent workflow in a repo or a new coordinator chat, for example "set up agent workflow", "set up worktrees and the review gate here", "add agent rules to this repo", "onboard this coordinator", "use Spotlight (or Linear, Jira) for tickets", or when starting a new repo that agents will work in. Sets up the worktree and branch rules, the ticketing tool setting, the review gate and its reviewer skills, the Asks board link, and the coordinator prompt. In a coordinator chat this is the one job the chat does itself, because the agents and rules it installs may not exist yet.
+description: Use when the user wants to set up their agent workflow in a repo or a new coordinator chat, for example "set up agent workflow", "set up worktrees and the review gate here", "add agent rules to this repo", "onboard this coordinator", "use Linear (or Jira, or our own tracker) for tickets", "change ticketing tool", or when starting a new repo that agents will work in. Sets up the worktree and branch rules, the ticketing tool setting, the review gate and its reviewer skills, the Asks board link, and the coordinator prompt. In a coordinator chat this is the one job the chat does itself, because the agents and rules it installs may not exist yet.
 ---
 
 # Set up the agentic workflow
@@ -19,7 +19,7 @@ You set up the owner's agent workflow in the repo you are run in. The workflow:
 - only the Board Router watches the board for live pings; a coordinator never does (it reads the board at every check-in), never messages the router back, and handles a ping as the `asks-board` skill's "If you are a project coordinator" section says;
 - the reviewers have the skills and plugins they need (copy editing, design, accessibility);
 - an ownership registry outside the repo keeps concurrent sessions apart;
-- tickets live in one ticketing tool (GitHub Issues unless the owner picks another), set in one repo file, `docs/agents/issue-tracker.md`, that every agent reads;
+- tickets live in one ticketing tool (GitHub Issues unless the owner picks another), set in the repo's `docs/agents/issue-tracker.md` or the owner's `~/.claude/agent-roster/issue-tracker.md`, which every agent reads; with an MCP tracker, agents reach it through tracker copies that add only its tools;
 - follow-up work is a ticket in that tool, and every behaviour change adds tests and docs;
 - unit tests are DRY (parametrized tables, shared fixtures) and check one behaviour per test.
 
@@ -42,6 +42,8 @@ Resolve every path from the skill folder, never from the plugin-root variable, s
 
 ## Steps
 
+If the owner asks only to change the ticketing tool ("change ticketing tool"), or to refresh the tracker copies after an agent-roster update, do only steps 1.14 and 1.16, the ticketing tool part of step 3, and "The ticketing tool setting" below, then report. Nothing else changes.
+
 ### 1. Look before you change anything
 
 From the repo root (`git rev-parse --show-toplevel`), work out:
@@ -59,8 +61,9 @@ From the repo root (`git rev-parse --show-toplevel`), work out:
 11. **The Asks board.** Whether `~/.claude/asks-board.md` exists (the board link and owner name). If it does, load `ArtifactData` with ToolSearch, and read the board's `routes` row for the project slug (step 1.15): `get`, collection `routes`, `doc_id` = the slug. Note whether it is missing, points at `<Repo name> Coordinator`, or points at some other chat. If the `Artifact` tools are not in this session, say so; the board then goes on the owner's by-hand list.
 12. **Reviewer skills.** Whether the skills the reviewers need are available: `agent-roster:thermo-nuclear-code-quality-review` (Cursor's skill, vendored in the agent-roster plugin, so it is there whenever the plugin is installed; the standalone bundle does not carry it), `marketing-skills:copywriting` and `marketing-skills:copy-editing`, and `impeccable` (or `impeccable:impeccable`). Also whether `accessibility-agents@community-access`, which agent-roster needs installed and enabled, has its MCP server connected in this session: its `mcp__plugin_accessibility-agents_accessibility-agents__get_specialist` tool is there (load it with ToolSearch). It needs no login. Check the pin, against the reviewed commit `a538edc9edfb98cdd8bae96d6b79542874b478f7`. In `~/.claude/plugins/known_marketplaces.json`, the `community-access` entry must have `source.repo` `Community-Access/accessibility-agents` and `source.ref` equal to that commit. In `~/.claude/plugins/installed_plugins.json`, `gitCommitSha` for `accessibility-agents@community-access` must equal it too. If `source.repo` is another repo, do not trust it, and tell the owner. If the repo is right but either value is missing or different, the plugin is not pinned; step 2 offers to re-pin it. If the server is connected, check whether its page scans can run: take `installPath` for `accessibility-agents@community-access` from `claude plugin list --json`, and look for `<installPath>/mcp-server/node_modules/playwright`, and for a Chromium build in Playwright's browser cache (`~/Library/Caches/ms-playwright/chromium-*` on macOS, `~/.cache/ms-playwright/chromium-*` on Linux). Scans can run only with both. The standalone bundle does not declare the plugin as a dependency, so a chat that runs it must install the plugin itself.
 13. **The branch username.** The GitHub login (`gh api user --jq .login`), lowercased. Fall back to the first word of `git config user.name`, lowercased. Keep only `a-z`, `0-9` and `-`, and trim `-` from both ends.
-14. **The ticketing tool.** Read `docs/agents/issue-tracker.md` if it exists: its **Tool** and **Access** lines are the current setting. An older file with no `## Setting` section (for example one written by another skill) still names the tool in its title. Note what `AGENTS.md` says about issues or tickets, and whether the repo has GitHub issues turned on (`gh repo view --json hasIssuesEnabled`).
+14. **The ticketing tool.** Read `docs/agents/issue-tracker.md` if it exists: its **Tool** and **Access** lines are the repo's setting. Read `~/.claude/agent-roster/issue-tracker.md` too: it is the owner's own setting, for repos with no file of their own. An older file with no `## Setting` section (for example one written by another skill) still names the tool in its title. Note what `AGENTS.md` says about issues or tickets, and whether the repo has GitHub issues turned on (`gh repo view --json hasIssuesEnabled`).
 15. **The project slug.** The repo name, lowercased, with every run of characters that is not a letter or digit turned into `-`. It is the Asks board tab and `{{PROJECT}}` in the coordinator prompt.
+16. **Tracker copies.** The files in `~/.claude/agents/agent-roster/`, and the agent-roster version in the comment at the top of each body. Note any other file under `~/.claude/agents/` whose `name` is an agent-roster agent's name.
 
 Tell the owner what you found in a few lines.
 
@@ -86,7 +89,7 @@ Ask one question. Show two names and let the owner correct them in the same answ
 
 - the owner's name for the merge rule and the coordinator prompt: the first word of `git config user.name`, or "the owner" if that is empty;
 - the `<username>` for branch names, from step 1.13 (if it is empty, ask for one), with an example such as `sam/123/fix-login`;
-- the ticketing tool: the one step 1.14 found, or GitHub Issues if none. If the owner names another tool, they also say whether agents reach it through a CLI or an MCP server;
+- the ticketing tool, asked once: the one step 1.14 found, or GitHub Issues if none. If the owner names another tool, they also say whether agents reach it through a CLI or an MCP server, and for an MCP server, its tool prefix (`mcp__<server>__`). Also ask whether this repo gets its own `docs/agents/issue-tracker.md`. Recommend yes when the repo has other people on it or uses a tool other than the owner's own setting; recommend no when the owner's `~/.claude/agent-roster/issue-tracker.md` already names this repo's tool;
 - the merge style: `merge` (a merge commit), `squash` or `rebase`. Recommend `squash`; the **Merge style** section of `templates/docs-agents/git-workflow.md` says why. If step 1.8 shows exactly one allowed and it is `merge` or `squash`, recommend that one.
   - If only `rebase` is allowed (every repo set up before agent-roster 1.9.0), recommend `squash`, with the reason from that same section.
   - If the owner picks `merge`, say it drops the linear-history rule.
@@ -95,7 +98,7 @@ Ask one question. Show two names and let the owner correct them in the same answ
 Then learn the tool's commands. GitHub Issues needs nothing more: the template already has them. For any other tool, never guess a command:
 
 - **CLI:** check it is installed (`command -v <cli>`). Run `<cli> --help`, then `<cli> <subcommand> --help` for each subcommand that looks like it searches, views, creates, edits, comments on, labels or closes a ticket. Take each command, and the shape of a ticket ID, from that output. If the CLI is not installed, or its help does not show an action, ask the owner one question: how to install it, or the exact command. An action nobody can name stays `<not set>`. Write every value placeholder in single quotes, and pass a body by file where the CLI has a file option.
-- **MCP:** find the server's tools (load them with ToolSearch). Take the tool names for each action from that list. If the server is not connected, ask the owner to connect it, or to give the tool names. The agents `ticket-writer` and `pr-finisher` reach an MCP tool only if their `tools:` list names it: for `mcp` access, copy both into `.claude/agents/`, add the server's tools to their `tools:` lists, and say so in the report.
+- **MCP:** find the server's tools (load them with ToolSearch, searching for the prefix). Take the tool names for each action from that list. Search and View must be tools that only read; if the only tool for one of them also writes, leave it `<not set>`. If the server is not connected, ask the owner to connect it, or to give the tool names. Agents reach these tools only through tracker copies; "The ticketing tool setting" below writes them.
 
 Then the choice:
 
@@ -135,7 +138,8 @@ For each file below: if it is missing, create it. If it exists and is identical,
 3. **Settings.** Run `node <skill folder>/scripts/merge-settings.mjs <repo>`. It prints the merged `.claude/settings.json` and writes nothing. Show what it adds and ask. On a yes, run it again with `--write`. It keeps every existing setting and hook, but rewrites the file with 2-space indent.
 4. **Reviewer agents.** Copy every reviewer file listed under "Where your files are" into `.claude/agents/`. Keep their models. Never set one to Fable. On an upgrade, if `.claude/agents/spec-security-copy-critic.md` exists, it is the old combined reviewer that `spec-critic`, `security-critic` and `copy-critic` replace: ask, and on a yes delete it. Update `scripts/review-gate-hook.mjs`, `docs/agents/review-gate.md` and the `AGENTS.md` guardrails bullet in the same change, so the hook and the record name the same reviewers. The newer hook also needs a `Rounds:` line in every record: tell the owner that open PRs need one added before they can leave draft or merge.
 5. **Docs.** Copy `templates/docs-agents/git-workflow.md`, `review-gate.md` and `multi-agent.md` into `docs/agents/`. Replace `{{REGISTRY_PATH}}` with the registry path. In `git-workflow.md`, set the **Merge style** line to the style from step 3. If the repo already has a file on that topic under another name, merge into it instead. If an older copy of one of these files differs from the template, show the diff and replace the old rules (such as a new branch and PR whenever `main` moves) rather than keeping both.
-   - **The ticketing tool setting.** Copy `templates/docs-agents/issue-tracker.md` to `docs/agents/issue-tracker.md`, and replace `{{GITHUB_REPO}}` with `owner/name`. For GitHub Issues that is all. For another tool, fill the `## Setting` lines and the `## Commands` table with what step 3 learned: **Tool**, **Access** (`cli` or `mcp`), **Ticket ID**, **In branch names** (letters, digits and `-` only), **Link**, and **Close from a PR** (`none` unless the tool closes a ticket from a line in the PR body). Put the commands in the column that **Access** names, and `<not set>` in the other column and for any action nobody could name. Keep the rest of the file as it is. The file must then name no `gh issue` command.
+   - **The ticketing tool setting.** Follow "The ticketing tool setting" below. If the repo gets its own file, copy `templates/docs-agents/issue-tracker.md` to `docs/agents/issue-tracker.md`, and replace `{{GITHUB_REPO}}` with `owner/name`. For GitHub Issues that is all. For another tool, fill the `## Setting` lines and the `## Commands` table with what step 3 learned: **Tool**, **Access** (`cli` or `mcp`), **MCP prefix**, **Ticket ID**, **In branch names** (letters, digits and `-` only), **Link**, and **Close from a PR** (`none` unless the tool closes a ticket from a line in the PR body). Put the commands in the column that **Access** names, and `<not set>` in the other column and for any action nobody could name. Keep the rest of the file as it is. The file must then name no `gh issue` command.
+   - If the repo gets no file of its own, write none, and in every file this step installs, point each link to `docs/agents/issue-tracker.md` at `~/.claude/agent-roster/issue-tracker.md` instead.
    - If `docs/agents/issue-tracker.md` already exists without a `## Setting` section, show the diff and propose replacing it with the filled template, keeping any section of its own that the template lacks.
 6. **Coordinator prompt.** Fill `coordinator/coordinator-prompt.md` and write it to `docs/agents/coordinator-prompt.md`:
    - `{{CHAT_NAME}}`: "<Repo name> Coordinator"; `{{PROJECT}}`: the project slug from step 1.15 (or the one the owner chose in step 4); `{{REPO_PATH}}`: the main checkout; `{{GITHUB_REPO}}`: `owner/name`; `{{OWNER}}`: the name from step 3; `{{BRANCH_USER}}`: the branch username from step 3; `{{REGISTRY_PATH}}`: the registry; `{{MERGE_LOCK}}`: `merge-lock` in the registry's folder; `{{TEST_GATE}}`: the command from step 1.7, or `<your full test command>` if you could not tell; `{{TICKETING_TOOL}}`: the **Tool** line of `docs/agents/issue-tracker.md`; `{{MERGE_STYLE}}`: the merge style from step 3.
@@ -190,13 +194,27 @@ Finish with a short report:
 
 - what you installed, created, merged or skipped, file by file;
 - the self-check result;
-- the ticketing tool: its name, access (`cli` or `mcp`), and any action left `<not set>`;
+- the ticketing tool: its name, access (`cli` or `mcp`), any action left `<not set>`, where the setting lives (the repo, the owner's file, or both), and the tracker copies written or removed, with the tools each one gained;
 - the PR link (option A);
 - the Asks board: its link, and whether this project has a route;
 - the reviewer skills and the `accessibility-agents` plugin: which are ready and which are missing, and whether page scans can run;
 - `docs/agents/coordinator-prompt.md`: paste it as the first message of a new chat to start a coordinator, after filling in the job. Name that chat exactly as the board's route says (`<Repo name> Coordinator`). When it starts, it sets its `sessionId` on the route and adds a test ask, so the owner can check the ping;
 - for option A: delete the registry row when the setup PR merges;
 - what the owner must do by hand: anything from steps 2 and 4 they said no to (the commands are in the agent-roster README, under "Skills the agents need"), repo settings if they chose B, git hooks, the test gate in the coordinator prompt if you could not tell it, and restarting Claude Code so the new hooks load.
+
+## The ticketing tool setting
+
+The owner's own setting lives in `~/.claude/agent-roster/issue-tracker.md`, outside every repo. It applies to each repo that has no `docs/agents/issue-tracker.md`. Step 3 asks for the tool once; this section writes it. A rerun with "change ticketing tool" comes straight here, and may change the answer.
+
+1. **The owner's file.** Fill `templates/docs-agents/issue-tracker.md` as step 6.5 says, with the tool from step 3. For GitHub Issues, set **Link** to `https://github.com/<owner>/<repo>/issues/<id>`, with `<owner>/<repo>` left as written, since it differs per repo. Write it to `~/.claude/agent-roster/issue-tracker.md`. If the file exists and differs, show the diff and ask. Skip this file when the owner only gave this repo a tool of its own.
+2. **Tracker copies**, only when the setting that applies has **Access** `mcp`. An agent holds only the tools its `tools:` list names, and the plugin's agent files name no ticketing tool. So write one copy of each agent file in the plugin's `agents/` folder (`<skill folder>/../../agents/`; the standalone bundle carries only the reviewers, so say the agent-roster plugin is needed for the rest):
+   - Keep the file as it is, but add tools to the end of its `tools:` line: the Search and View tools from the `mcp` column for every agent, and every tool in that column for `ticket-writer` and `pr-finisher`. Add nothing else: never the whole server prefix, never a `disallowedTools` list, and never remove the `tools:` line, because an agent with no `tools:` list holds every tool in the session, other MCP servers included.
+   - Add one comment as the first line of the body: `<!-- agent-roster <version> tracker copy of <name>. Rerun setup-agentic-workflow ("change ticketing tool") after each agent-roster update. -->`, with the version from `<skill folder>/../../.claude-plugin/plugin.json`. Keep the frontmatter valid: a file whose frontmatter does not parse loads with no `tools:` limit.
+   - For the owner's setting, write the copies to `~/.claude/agents/agent-roster/<name>.md`. Replace older copies there. If step 1.16 found another file under `~/.claude/agents/` with the same `name`, show it and ask before you write.
+   - For a repo whose own file sets `mcp`, write the copies to the repo's `.claude/agents/` instead, as part of step 6.4, and replace the reviewer copies there.
+   - A repo's `.claude/agents/` files win over the owner's copies. If the repo keeps reviewer copies there but has no file of its own, and the owner's setting is `mcp`, those reviewers cannot reach the tracker: recommend giving the repo its own file, so the repo's copies can name the tracker's tools.
+3. **Moving away from MCP.** When the setting that applies is no longer `mcp`, delete the copies this setup wrote (the ones whose body starts with the comment above), after a yes.
+4. **Tell the coordinator.** A coordinator calls a tracker copy by its plain name; the `route-work` skill, rule 8, says so. Tell the owner to restart Claude Code, so running chats load the new copies.
 
 ## Checklist
 
@@ -205,7 +223,8 @@ Finish with a short report:
 - [ ] Missing installs asked in one batch before any other question, then a reload and a second run
 - [ ] Asks board and project route ready (no route written over), or listed as missing
 - [ ] Reviewer skills and the `accessibility-agents` plugin ready, or listed as missing
-- [ ] Ticketing tool asked with the names; for a tool other than GitHub Issues, every command taken from its `--help` or tool list, none guessed
+- [ ] Ticketing tool asked once with the names, and whether the repo gets its own file; for a tool other than GitHub Issues, every command taken from its `--help` or tool list, none guessed
+- [ ] `~/.claude/agent-roster/issue-tracker.md` written or kept; with `mcp`, tracker copies written with only the tracker's tools added, read tools only except for `ticket-writer` and `pr-finisher`
 - [ ] Registry exists; ticket filed in the configured tool and row added before the worktree (option A)
 - [ ] Branch named `<username>/<ticket>/agentic-workflow`
 - [ ] Four hook files in `scripts/`, self-check passed before wiring
