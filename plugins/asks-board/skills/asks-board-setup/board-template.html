@@ -13,6 +13,7 @@
   --muted: #54626a;
   --line: #d6dbd3;
   --line-strong: #a9b2a6;
+  --control-line: #6f7a6c;
   --accent: #1f5f8b;
   --accent-ink: #ffffff;
   --accent-soft: #e1ecf5;
@@ -31,7 +32,7 @@
 /* The dark tokens are written twice (system setting, and data-theme="dark"): keep both blocks the same. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #121819; --panel: #1a2224; --panel-2: #161d1f; --ink: #e6ebe8; --muted: #a0adae; --line: #2c383b; --line-strong: #4a585c;
+    --bg: #121819; --panel: #1a2224; --panel-2: #161d1f; --ink: #e6ebe8; --muted: #a0adae; --line: #2c383b; --line-strong: #4a585c; --control-line: #7b8a8f;
     --accent: #78b8e3; --accent-ink: #0b1820; --accent-soft: #1c3242;
     --ok: #74d3a0; --error: #ff9a8f; --error-soft: #3a1f1d;
     --do: #74d3a0; --decide: #e9b955; --approve: #e5a0d6; --code-bg: #232c2f; --skeleton: #222b2e;
@@ -40,7 +41,7 @@
   }
 }
 :root[data-theme="dark"] {
-  --bg: #121819; --panel: #1a2224; --panel-2: #161d1f; --ink: #e6ebe8; --muted: #a0adae; --line: #2c383b; --line-strong: #4a585c;
+  --bg: #121819; --panel: #1a2224; --panel-2: #161d1f; --ink: #e6ebe8; --muted: #a0adae; --line: #2c383b; --line-strong: #4a585c; --control-line: #7b8a8f;
   --accent: #78b8e3; --accent-ink: #0b1820; --accent-soft: #1c3242;
   --ok: #74d3a0; --error: #ff9a8f; --error-soft: #3a1f1d;
   --do: #74d3a0; --decide: #e9b955; --approve: #e5a0d6; --code-bg: #232c2f; --skeleton: #222b2e;
@@ -59,6 +60,7 @@ header { display: grid; gap: 6px; }
 h1 { font-weight: 700; font-size: 1.75rem; line-height: 1.2; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
 .summary { margin: 0; font-size: 1.0625rem; display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .summary strong { font-variant-numeric: tabular-nums; }
+.summary > span + span::before { content: "·"; margin-right: 14px; color: var(--muted); }
 .sub { color: var(--muted); margin: 0; font-size: 0.9375rem; max-width: 62ch; }
 
 /* Filters: chips with aria-pressed */
@@ -97,6 +99,7 @@ h3.group-head { font-size: 0.9375rem; font-weight: 700; color: var(--muted); mar
 .meta { color: var(--muted); font-size: 0.875rem; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: center; }
 .meta > span { display: inline-flex; gap: 5px; align-items: center; }
 .kind { font-weight: 700; }
+.meta .proj { font-weight: 700; color: var(--ink); }
 .kind.do { color: var(--do); } .kind.decide { color: var(--decide); } .kind.approve { color: var(--approve); }
 .title { font-weight: 700; font-size: 1.0625rem; line-height: 1.35; margin: 0; overflow-wrap: anywhere; }
 .closed .title { font-weight: 400; color: var(--muted); }
@@ -105,7 +108,7 @@ h3.group-head { font-size: 0.9375rem; font-weight: 700; color: var(--muted); mar
 
 /* Options */
 .options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 8px; }
-.opt { font: inherit; text-align: left; border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink); padding: 10px 12px; border-radius: 10px; cursor: pointer; display: grid; gap: 2px; min-height: 48px; align-content: start; }
+.opt { font: inherit; text-align: left; border: 1px solid var(--control-line); background: var(--panel); color: var(--ink); padding: 10px 12px; border-radius: 10px; cursor: pointer; display: grid; gap: 2px; min-height: 48px; align-content: start; }
 .opt:hover { border-color: var(--accent); }
 .opt .key { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .opt .key b { font-family: var(--mono); font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
@@ -115,7 +118,10 @@ h3.group-head { font-size: 0.9375rem; font-weight: 700; color: var(--muted); mar
 .opt.chosen { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .opt.chosen .tag { background: var(--accent-ink); color: var(--accent); }
 .opt.nokey { border-style: dashed; color: var(--muted); cursor: default; }
-.opt.nokey:hover { border-color: var(--line-strong); }
+.opt.nokey:hover { border-color: var(--control-line); }
+/* Answered cards are quieter: the chosen option is outlined, not filled. */
+.wait .opt.chosen { background: var(--accent-soft); color: var(--ink); border-width: 2px; }
+.wait .opt.chosen .tag { background: var(--accent); color: var(--accent-ink); }
 
 /* Actions */
 .actions { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-left: -8px; }
@@ -151,7 +157,7 @@ code { font-family: var(--mono); font-size: 0.86em; background: var(--code-bg); 
 .note { background: var(--accent-soft); border-radius: 10px; padding: 8px 12px; font-size: 0.9375rem; overflow-wrap: anywhere; }
 .compose { display: grid; gap: 8px; }
 .compose label { font-weight: 700; font-size: 0.9375rem; }
-textarea { font: inherit; width: 100%; min-height: 88px; border: 1px solid var(--line-strong); border-radius: 10px; padding: 10px 12px; background: var(--panel); color: var(--ink); resize: vertical; caret-color: var(--accent); }
+textarea { font: inherit; width: 100%; min-height: 88px; border: 1px solid var(--control-line); border-radius: 10px; padding: 10px 12px; background: var(--panel); color: var(--ink); resize: vertical; caret-color: var(--accent); }
 textarea:focus-visible { outline-offset: 0; border-color: var(--accent); }
 .thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
 .thumb { margin: 0; display: grid; gap: 4px; justify-items: start; }
@@ -201,7 +207,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
   <div class="filters" id="projects" role="group" aria-label="Show project" hidden></div>
   <section aria-labelledby="h-open">
     <div class="section-head">
-      <h2 id="h-open">To do <span class="n" id="n-open"></span></h2>
+      <h2 id="h-open" tabindex="-1" data-k="h-open">To do <span class="n" id="n-open"></span></h2>
       <div class="filters" id="kinds" role="group" aria-label="Show kind" hidden></div>
     </div>
     <div class="list" id="open" aria-busy="true">
@@ -212,12 +218,12 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
   </section>
   <section aria-labelledby="h-wait" id="wait-wrap" hidden>
     <h2 id="h-wait">Waiting for the chat <span class="n" id="n-wait"></span></h2>
-    <p class="section-note">You answered these. The chat closes each one when it acts.</p>
+    <p class="section-note">You’ve handled these. The chat closes each one when it acts.</p>
     <div class="list" id="wait"></div>
   </section>
   <details class="closed-wrap" id="closed-wrap" hidden>
     <summary><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg><span class="h2" id="h-closed">Closed <span class="n" id="n-closed"></span></span></summary>
-    <div class="list" id="closed"></div>
+    <div class="list" id="closed" role="group" aria-labelledby="h-closed"></div>
   </details>
   <p class="sr" id="status" role="status"></p>
 </main>
@@ -240,7 +246,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
   function statusOf(a) {
     const st = String(a.status || "open");
     // Own keys only: a status such as "constructor" must not reach Object.prototype.
-    return Object.hasOwn(STATUS, st) ? STATUS[st] : { section: "wait", label: "Status not recognised: " + oneLine(st) };
+    return Object.hasOwn(STATUS, st) ? STATUS[st] : { section: "wait", label: "Status not recognized: " + oneLine(st) };
   }
   function byCreated(x, y) { return String(x.createdAt).localeCompare(String(y.createdAt)); }
   function sections(rows) {
@@ -248,6 +254,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     for (const d of rows) out[statusOf(d.data).section].push(d);
     out.open.sort((x, y) => byCreated(x.data, y.data));
     out.closed.sort((x, y) => String(y.data.updatedAt).localeCompare(String(x.data.updatedAt)));
+    out.closedTotal = out.closed.length;
     out.closed = out.closed.slice(0, 40);
     return out;
   }
@@ -256,27 +263,36 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
   function stamp(patch, now) {
     return Object.assign({ updatedAt: now }, patch, { ackAt: null });
   }
-  // Text on one line (a line break could add a fake line to the ping text). An object or
+  const LINE_BREAKS = /[\r\n\v\f\u0085\u2028\u2029]+/g;
+  // Text on one line (a line break could add a fake line to the ping text), without
+  // invisible format or control characters (they can reorder or hide text). An object or
   // list is not text, so it counts as missing.
   function oneLine(v) {
     if (v == null || typeof v === "object") return "";
-    return String(v).replace(/[\r\n\v\f\u0085\u2028\u2029]+/g, " ").trim();
+    return String(v).replace(LINE_BREAKS, " ").replace(/\t/g, " ").replace(/[\p{Cc}\p{Cf}]/gu, "").trim();
   }
   // At most n characters, cut on whole characters, with "…" when cut.
   function cut(s, n) {
     const cps = [...s];
     return cps.length > n ? cps.slice(0, n - 1).join("") + "…" : s;
   }
-  // One value in the ping header: one line, without the header's own marks (| = [ ]),
-  // at most 80 characters, so a row cannot add or fake a header field.
+  // One value in the ping header: one line, letters, digits, spaces and plain punctuation
+  // only (look-alikes are folded first, so no | = [ ] of any width), at most 80 characters,
+  // so a row cannot add or fake a header field.
   function headerValue(v, fallback) {
-    const s = oneLine(v).replace(/[|=[\]]/g, " ").replace(/\s+/g, " ").trim();
+    const s = oneLine(v).normalize("NFKC").replace(/[^\p{L}\p{N}\p{M} ._\-'’()&,:\/#@+]/gu, " ").replace(/[ǀǁǂǃ]/g, " ").replace(/\s+/g, " ").trim();
     return cut(s || fallback, 80);
   }
+  // A ping reaches the chat only when the header names the ask and its project exactly as
+  // the row does: the router looks both up by that name.
+  function pingable(d) {
+    const id = oneLine(d.id), p = oneLine(d.data.project);
+    return id !== "" && headerValue(id, "") === id && (p === "" || headerValue(p, "") === p);
+  }
   // Row text inside a ping line: in quotes, so the router reads it as the ask's words and
-  // not the owner's. One line, no quote marks of its own, at most n characters.
+  // not the owner's. One line, no quote marks of its own of any kind, at most n characters.
   function quoted(v, n) {
-    return "\"" + cut(oneLine(v).replace(/["“”]/g, "'"), n) + "\"";
+    return "\"" + cut(oneLine(v).normalize("NFKC").replace(/["'`\p{Pi}\p{Pf}′″‴‵‶‷〝〞〟「」『』„‟＂＇]/gu, " ").replace(/\s+/g, " ").trim(), n) + "\"";
   }
   // One option's key and label, each on one line. Rows use {key, label}; a row written with
   // {id, label} still works, and an empty key falls back to id. A bare string is its own
@@ -303,24 +319,27 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
       key, label, chosen, rec, writable,
       cls: "opt" + (!writable ? " nokey" : chosen ? " chosen" : rec ? " rec" : ""),
       text: key || "(no key)",
-      send: writable ? {
-        patch: { status: "answered", answer: key },
-        said: "Sent “" + key + "”.",
-        ping: "{{OWNER}} chose option " + quoted(key, 40) + (label ? ": " + quoted(label, 200) : "") + ".",
-      } : null,
+      send: writable ? ACTIONS.answer(key, label) : null,
     };
   }
-  // The other clicks, as data: what each writes (patch), what the page says (said), and
-  // the line the ping carries (ping; null sends no ping). Each is called the same way.
+  // Every click, as data: what it writes (patch), what the page says (said), and the line
+  // the ping carries (ping; null sends no ping). Each is called the same way.
   const ACTIONS = {
+    answer: (key, label) => ({
+      patch: { status: "answered", answer: key },
+      said: "Answered “" + key + "”.",
+      ping: "{{OWNER}} chose option " + quoted(key, 40) + (label ? ": " + quoted(label, 200) : "") + ".",
+    }),
     done: () => ({ patch: { status: "done" }, said: "Marked done.", ping: "{{OWNER}} marked this done." }),
     reopen: () => ({ patch: { status: "open", answer: null }, said: "Moved back to To do.", ping: null }),
     dismiss: () => ({ patch: { status: "dismissed" }, said: "Marked not needed.", ping: "{{OWNER}} marked this not needed." }),
     note: (text, imgs, now) => {
       const t = String(text == null ? "" : text).trim();
+      const patch = { note: t || null, noteImages: imgs, noteAt: now };
+      if (!t && !imgs.length) return { patch, said: "Note removed.", ping: "{{OWNER}} removed their note." };
       return {
-        patch: { note: t || null, noteImages: imgs, noteAt: now },
-        said: "Note sent.",
+        patch,
+        said: "Note saved.",
         ping: "{{OWNER}} left a note" + (imgs.length ? " with " + imgs.length + " image(s)" : "") + ":\n" + (t || "(no text)"),
       };
     },
@@ -337,6 +356,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
   // The longest start of s, cut on whole characters, that fits in max bytes ("…" when cut).
   function fitBytes(s, max) {
     if (bytes(s) <= max) return s;
+    if (max < bytes("…")) return "";
     const cps = [...s];
     let lo = 0, hi = cps.length;
     while (lo < hi) {
@@ -360,6 +380,27 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
   function projectOf(d) { return headerValue(d.data.project, "general"); }
   function fromOf(d) { return headerValue(d.data.from, "a chat"); }
   function titleOf(a) { return oneLine(a.title) || "(no title)"; }
+  // The row has a saved note: text that is not blank, or an image.
+  function hasNote(a) { return oneLine(a.note) !== "" || imageList(a.noteImages).length > 0; }
+  // Send note needs something to do: new text, an image, or an old note to remove.
+  function noteButton(text, picCount, hadNote) {
+    const blank = !String(text == null ? "" : text).trim() && !picCount;
+    return { disabled: blank && !hadNote, label: blank && hadNote ? "Remove note" : "Send note" };
+  }
+  // Project chips: projects with something open or waiting, and the chosen one if it still
+  // has rows. With fewer than two chips there is no filter, so the view is All (the saved
+  // choice is kept for later). named: cards say their project.
+  function projectView(rows, chosen) {
+    const all = sections(rows);
+    const live = countBy(all.open.concat(all.wait), projectOf);
+    const projects = [...live.keys()];
+    if (chosen !== ALL && !live.has(chosen) && rows.some((d) => projectOf(d) === chosen)) projects.push(chosen);
+    const project = projects.length < 2 ? ALL : pickProject(chosen, projects);
+    return { all, projects, project, named: project === ALL && countBy(rows, projectOf).size > 1 };
+  }
+  // Redraw now, or later: never while a click's anchorFor is pending (the card node must
+  // stay), and not while the user types in a note unless they caused the redraw.
+  function drawNow(s) { return !s.anchoring && (s.user || !s.typing); }
   // A row's image list: only entries with an id, so one bad entry cannot break the page.
   function imageList(v) { return Array.isArray(v) ? v.filter((p) => p && typeof p === "object" && oneLine(p.id) !== "") : []; }
   function pickProject(saved, projects) { return projects.includes(saved) ? saved : ALL; }
@@ -394,16 +435,19 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     }
     return [...m].sort((x, y) => x[0].localeCompare(y[0]));
   }
+  // Focus keys: every control that can hold focus carries data-k, so focus comes back to
+  // the same control after a redraw.
+  function fkey(k, id) { return k + ":" + id; }
   // Where focus goes after a redraw, first match wins. A control that was in To do goes to
   // its card's receipt when the card left; otherwise the same control; when that is gone
   // (a receipt that ended), the card's checkbox in its new section.
   function focusOrder(f) {
     if (!f) return [];
     const out = [];
-    if (f.inOpen && f.card) out.push("rcpt:" + f.card);
+    if (f.inOpen && f.card) out.push(fkey("rcpt", f.card));
     out.push(f.k);
-    if (f.card) out.push("chk:" + f.card);
-    return out;
+    if (f.card) out.push(fkey("chk", f.card));
+    return [...new Set(out)];
   }
   function ago(iso, now) {
     if (!iso) return "";
@@ -425,23 +469,27 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
   const flashes = new Map();
   // Row id -> the number of its latest click, so an older click's result never shows last.
   const clicks = new Map();
-  const FLASH_MS = 15000, ERROR_MS = 60000, LOAD_MS = 10000, ANCHOR_WAIT_MS = 2000;
-  // anchoring: clicks whose anchorFor has not settled; the page is not redrawn meanwhile,
-  // so the card node anchorFor got stays in place. held: a live update came in while the
-  // user was typing; it is drawn when they leave the box.
-  let focusNext = null, flashTimer = 0, anchoring = 0, held = false;
+  // Rows with a click whose anchorFor has not settled: a second click on them does nothing.
+  const busy = new Set();
+  const FLASH_MS = 15000, ERROR_MS = 60000, LOAD_MS = 10000, ANCHOR_WAIT_MS = 2000, IDLE_MS = 30000;
+  // Redraws go through requestRender (see drawNow). anchoring: clicks whose anchorFor has
+  // not settled. dirty: a redraw was put off; flush() draws it once it may.
+  let focusNext = null, flashTimer = 0, anchoring = 0, dirty = false, pointerDown = false, lastInput = 0;
   const PROJECT_KEY = "asks.project";
+  const ALL_PROJECTS = fkey("chip", "project"), ALL_KINDS = fkey("chip", "kind");
+  const NO_KEY_ADVICE = "Write a note to tell the chat instead.";
   try { project = localStorage.getItem(PROJECT_KEY) || ALL; } catch (e) {}
 
+  const CHECK = '<path d="M20 6 9 17l-5-5"/>';
   const ICONS = {
-    do: '<path d="M20 6 9 17l-5-5"/>',
+    do: CHECK,
     decide: '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M6 8.5v1A3.5 3.5 0 0 0 9.5 13h5A3.5 3.5 0 0 0 18 9.5v-1M12 13v2.5"/>',
     approve: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     note: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
     more: '<path d="m6 9 6 6 6-6"/>',
     dismiss: '<path d="M18 6 6 18M6 6l12 12"/>',
     image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
-    ok: '<path d="M20 6 9 17l-5-5"/>',
+    ok: CHECK,
     busy: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     error: '<circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/>',
   };
@@ -462,9 +510,6 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     for (const c of [].concat(kids || [])) if (c) n.append(c);
     return n;
   }
-  // Focus keys: every control that can hold focus carries data-k, so focus comes back to
-  // the same control after a redraw.
-  const fkey = (k, id) => k + ":" + id;
 
   // The same text twice is cleared first, so a screen reader announces it again.
   const REANNOUNCE_MS = 100;
@@ -500,14 +545,15 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     const b = el("button", { class: "btn line", type: "button", text: "Copy", "data-k": k });
     b.addEventListener("click", () => {
       const t = getText();
-      const done = () => { b.textContent = "Copied"; setTimeout(() => (b.textContent = "Copy"), 1500); };
-      try { navigator.clipboard.writeText(t).then(done, () => (b.textContent = "Select it")); }
-      catch (e) { b.textContent = "Select it"; }
+      const done = () => { b.textContent = "Copied"; say("Copied."); setTimeout(() => (b.textContent = "Copy"), 1500); };
+      const fail = () => { b.textContent = "Select it"; say("Could not copy. Select the text and copy it."); };
+      try { navigator.clipboard.writeText(t).then(done, fail); }
+      catch (e) { fail(); }
     });
     return b;
   }
   // Detail text: paragraphs, "- " bullets, "1. " steps, ``` fenced code with a Copy button.
-  function renderDetail(src, id) {
+  function renderDetail(src, id, card) {
     const box = el("div", { class: "detail", id });
     const lines = String(src || "").replace(/\r/g, "").split("\n");
     let i = 0, blocks = 0;
@@ -518,9 +564,11 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
         while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
         i++;
         const text = buf.join("\n");
+        const n = ++blocks;
         // The code scrolls sideways, so it takes keyboard focus to scroll.
-        box.append(el("div", { class: "code" }, [el("pre", { tabindex: "0", role: "region", "aria-label": "Code" }, [el("code", { text })]),
-          copyBtn(() => text, fkey("copy" + blocks++, id))]));
+        box.append(el("div", { class: "code" }, [
+          el("pre", { tabindex: "0", role: "region", "aria-label": "Code " + n, "data-k": fkey("code" + n, card), "data-card": card }, [el("code", { text })]),
+          copyBtn(() => text, fkey("copy" + n, card))]));
         continue;
       }
       const bullet = /^\s*[-*] (.*)/, step = /^\s*\d+[.)] (.*)/;
@@ -538,17 +586,19 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     }
     return box;
   }
-  // list is an imageList(). With onRemove, each image gets a Remove button (focus key rmN:id).
-  function thumbs(list, onRemove, id) {
+  // list is an imageList(). Links and Remove buttons carry focus keys <set>N:<card>.
+  function thumbs(list, set, card, onRemove) {
     const box = el("div", { class: "thumbs" });
     list.forEach((p, i) => {
-      const src = "/_blob/" + oneLine(p.id);
+      const src = "/_blob/" + encodeURIComponent(oneLine(p.id));
       const caption = oneLine(p.caption);
+      const name = "Open image " + (i + 1) + (caption ? ": " + caption : "");
       const fig = el("figure", { class: "thumb" }, [
-        el("a", { href: src, target: "_blank", rel: "noopener", "aria-label": "Open image " + (i + 1) }, [el("img", { src, alt: caption || "Screenshot " + (i + 1) })]),
+        el("a", { href: src, target: "_blank", rel: "noopener", "aria-label": name, "data-k": fkey(set + i, card), "data-card": card },
+          [el("img", { src, alt: caption || "Screenshot " + (i + 1) })]),
       ]);
       if (caption) fig.append(el("figcaption", { class: "hint", text: caption }));
-      if (onRemove) fig.append(el("button", { class: "btn", type: "button", "data-k": fkey("rm" + i, id), text: "Remove image " + (i + 1), onclick: () => onRemove(i) }));
+      if (onRemove) fig.append(el("button", { class: "btn", type: "button", "data-k": fkey("rm" + i, card), "data-card": card, text: "Remove image " + (i + 1), onclick: () => onRemove(i) }));
       box.append(fig);
     });
     return box;
@@ -557,20 +607,24 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     const c = composers.get(id);
     if (!assets || !files.length || !c) return;
     flash(id, "Uploading " + files.length + " image" + (files.length > 1 ? "s" : "") + "…", "busy", where);
-    render();
+    requestRender(true);
     for (const f of files) {
-      try { const r = await assets.upload(f); c.pics.push({ id: r.id }); }
-      catch (e) { flash(id, "Could not upload " + (f.name || "the image") + ". Try a smaller PNG or JPG.", "error", where); render(); return; }
+      let r = null;
+      try { r = await assets.upload(f); } catch (e) {}
+      // The box was sent or closed meanwhile: this upload has nowhere to go.
+      if (composers.get(id) !== c) return;
+      if (!r) { flash(id, "Could not upload " + (f.name || "the image") + ". Try a smaller PNG or JPG.", "error", where); requestRender(true); return; }
+      c.pics.push({ id: r.id });
     }
     flash(id, "Image added. Press Send note to save it.", "ok", where);
-    render();
+    requestRender(true);
   }
 
   // Ping: post a comment on the ask's own thread and send it to Claude.
   // One Board Router chat watches this board and forwards each ping to the
   // project's chat, named in the routes collection.
   async function ping(d, anchorP, what) {
-    if (!comments) return false;
+    if (!comments || !pingable(d)) return false;
     let can = "off";
     try { can = await comments.canSendToClaude(); } catch (e) { return false; }
     if (can !== "available") return false;
@@ -598,26 +652,34 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     }
   }
 
+  // anchorFor needs the click's user gesture, so it is called right here, synchronously.
+  function anchorOf(node) {
+    if (!comments || !node) return null;
+    try { return Promise.resolve(comments.anchorFor(node)).catch(() => null); } catch (e) { return null; }
+  }
   // One viewer action: save send.patch, ping the asking chat with send.ping, and show the
   // result next to the card. anchorFor runs first, inside the click (it needs the gesture).
-  // No redraw runs until it settles (or ANCHOR_WAIT_MS passes), so its card node stays put.
+  // No redraw runs until it settles (or ANCHOR_WAIT_MS passes), so its card node stays put;
+  // meanwhile the row is busy and further clicks on it do nothing.
   function act(ev, d, send, where) {
+    if (busy.has(d.id)) return;
     const node = ev && ev.currentTarget && ev.currentTarget.closest ? ev.currentTarget.closest("article") : null;
-    const anchorP = comments && node ? comments.anchorFor(node).catch(() => null) : null;
+    const anchorP = anchorOf(node);
+    busy.add(d.id);
+    if (node) node.setAttribute("aria-busy", "true");
     const pinged = send.ping ? ping(d, anchorP, send.ping) : Promise.resolve(false);
     const seq = (clicks.get(d.id) || 0) + 1;
     clicks.set(d.id, seq);
     flash(d.id, "Saving…", "busy", where, true);
     const saved = write(d.id, send.patch);
-    if (anchorP) {
-      anchoring++;
-      Promise.race([anchorP, new Promise((r) => setTimeout(r, ANCHOR_WAIT_MS))]).then(() => { anchoring--; render(); });
-    } else render();
+    const settled = anchorP ? Promise.race([anchorP, new Promise((r) => setTimeout(r, ANCHOR_WAIT_MS))]) : Promise.resolve();
+    if (anchorP) anchoring++;
+    settled.then(() => { if (anchorP) anchoring--; busy.delete(d.id); requestRender(true); });
     Promise.all([saved, pinged]).then(([err, sent]) => {
       if (clicks.get(d.id) !== seq) return;
       if (err) flash(d.id, err, "error", where);
       else flash(d.id, resultText(send.said, !!send.ping, sent), "ok", where);
-      render();
+      requestRender(false);
     });
   }
 
@@ -647,7 +709,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     const a = d.data, now = Date.now();
     const k = kindOf(a);
     const live = where !== "closed";
-    const titleId = "t-" + d.id;
+    const titleId = "t-" + d.id, detailId = "d-" + d.id, composeId = "c-" + d.id;
     const item = el("article", { class: "card " + where, "aria-labelledby": titleId });
     const check = ctl("input", "chk", d, { type: "checkbox", class: "check", "aria-label": "Done: " + titleOf(a) });
     check.checked = where !== "open";
@@ -660,7 +722,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     const state = [where !== "open" ? statusOf(a).label : "", chose ? "you chose " + chose : ""].filter(Boolean).join(" · ");
     const meta = el("div", { class: "meta" }, [
       el("span", { class: "kind " + k }, [icon(k), KIND_LABEL[k]]),
-      showProject ? el("span", { text: projectOf(d) }) : null,
+      showProject ? el("span", { class: "proj", text: projectOf(d) }) : null,
       el("span", { text: fromOf(d) }),
       el("span", { text: ago(where === "open" ? a.createdAt : a.updatedAt || a.createdAt, now) }),
       state ? el("span", { class: "state", text: state[0].toUpperCase() + state.slice(1) }) : null,
@@ -668,7 +730,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     main.append(el("div", { class: "head" }, [meta, el("h" + level, { class: "title", id: titleId }, [inline(titleOf(a))])]));
 
     const images = imageList(a.images);
-    if (live && images.length) main.append(thumbs(images));
+    if (live && images.length) main.append(thumbs(images, "img", d.id));
     if (live && Array.isArray(a.options) && a.options.length) {
       const opts = el("div", { class: "options", role: "group", "aria-label": "Answers" });
       let noKey = false;
@@ -684,26 +746,27 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
         ]));
       });
       main.append(opts);
-      if (noKey) main.append(el("p", { class: "hint", text: "An option marked (no key) can’t be sent. Write a note to tell the chat instead." }));
+      if (noKey) main.append(el("p", { class: "hint", text: "An option marked (no key) can’t be sent. " + NO_KEY_ADVICE }));
     }
-    const noteImages = imageList(a.noteImages);
-    if (a.note || noteImages.length) {
+    const saved = hasNote(a);
+    if (saved) {
       const n = el("div", { class: "note" }, [el("strong", { text: "Your note: " }), oneLine(a.note) === "" ? "" : String(a.note)]);
-      if (noteImages.length) n.append(thumbs(noteImages));
+      const noteImages = imageList(a.noteImages);
+      if (noteImages.length) n.append(thumbs(noteImages, "nimg", d.id));
       main.append(n);
     }
 
     const row = el("div", { class: "actions" });
     if (a.detail) {
       const showing = openDetails.has(d.id);
-      row.append(ctl("button", "det", d, { class: "btn", type: "button", "aria-expanded": String(showing), "aria-controls": "d-" + d.id,
-        onclick: () => { showing ? openDetails.delete(d.id) : openDetails.add(d.id); render(); } }, [showing ? "Hide details" : "Details", icon("more")]));
+      row.append(ctl("button", "det", d, { class: "btn", type: "button", "aria-expanded": String(showing), "aria-controls": detailId,
+        onclick: () => { showing ? openDetails.delete(d.id) : openDetails.add(d.id); requestRender(true); } }, [showing ? "Hide details" : "Details", icon("more")]));
     }
     const composing = live && composers.has(d.id);
     if (live) {
       row.append(ctl("button", "nb", d, Object.assign({ class: "btn", type: "button", "aria-expanded": String(composing),
-        onclick: () => { if (composing) closeNote(d); else openNote(d); render(); } }, composing ? { "aria-controls": "c-" + d.id } : {}),
-        [icon("note"), a.note ? "Edit note" : "Add a note"]));
+        onclick: () => { if (composing) closeNote(d); else openNote(d); requestRender(true); } }, composing ? { "aria-controls": composeId } : {}),
+        [icon("note"), saved ? "Edit note" : "Add a note"]));
     }
     if (where === "open") {
       row.append(ctl("button", "dis", d, { class: "btn", type: "button",
@@ -713,36 +776,35 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     // A card that left To do shows its result on the receipt there, not twice.
     const f = flashes.get(d.id);
     if (f && now < f.until && !(where !== "open" && hasReceipt(f, now))) main.append(feedbackLine(f));
-    if (a.detail && openDetails.has(d.id)) main.append(renderDetail(a.detail, "d-" + d.id));
-    if (composing) main.append(composer(d, where));
+    if (a.detail && openDetails.has(d.id)) main.append(renderDetail(a.detail, detailId, d.id));
+    if (composing) main.append(composer(d, where, composeId));
     item.append(main);
     return item;
   }
 
   function noKeyClick(d, where) {
-    flash(d.id, "This option has no key, so nothing was sent. Write a note to tell the chat instead.", "error", where);
+    flash(d.id, "This option has no key, so nothing was sent. " + NO_KEY_ADVICE, "error", where);
     openNote(d);
-    render();
+    requestRender(true);
   }
 
-  function composer(d, where) {
+  function composer(d, where, id) {
     const a = d.data;
     const c = composers.get(d.id);
     const taId = "note-" + d.id, hintId = "nh-" + d.id;
     const ta = ctl("textarea", "ta", d, { id: taId, "aria-describedby": hintId });
     ta.value = c.draft != null ? c.draft : a.note == null ? "" : String(a.note);
-    // Send note needs something to send: text, an image, or an old note to clear.
-    const hadNote = !!a.note || imageList(a.noteImages).length > 0;
-    const blank = () => !ta.value.trim() && !c.pics.length && !hadNote;
-    const sendBtn = ctl("button", "send", d, { class: "btn primary", type: "button" }, ["Send note"]);
-    sendBtn.disabled = blank();
-    ta.addEventListener("input", () => { c.draft = ta.value; sendBtn.disabled = blank(); });
+    const hadNote = hasNote(a);
+    const sendBtn = ctl("button", "send", d, { class: "btn primary", type: "button" });
+    const sync = () => { const b = noteButton(ta.value, c.pics.length, hadNote); sendBtn.disabled = b.disabled; sendBtn.textContent = b.label; };
+    sync();
+    ta.addEventListener("input", () => { c.draft = ta.value; sync(); });
     ta.addEventListener("paste", (ev) => {
       const files = [...(ev.clipboardData ? ev.clipboardData.files : [])].filter((f) => f.type.startsWith("image/"));
       if (files.length) { ev.preventDefault(); addPics(d.id, files, where); }
     });
     const send = (ev) => {
-      if (blank()) return;
+      if (sendBtn.disabled) return;
       const note = ACTIONS.note(ta.value, c.pics.slice(), new Date().toISOString());
       closeNote(d);
       act(ev, d, note, where);
@@ -751,28 +813,25 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     ta.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); send(ev); } });
     const btns = el("div", { class: "actions" }, [
       sendBtn,
-      ctl("button", "cancel", d, { class: "btn", type: "button", onclick: () => { closeNote(d); render(); } }, ["Cancel"]),
+      ctl("button", "cancel", d, { class: "btn", type: "button", onclick: () => { closeNote(d); requestRender(true); } }, ["Cancel"]),
     ]);
-    const box = el("div", { class: "compose", id: "c-" + d.id }, [el("label", { for: taId, text: "Note for " + fromOf(d) })]);
+    const box = el("div", { class: "compose", id }, [el("label", { for: taId, text: "Note for " + fromOf(d) })]);
     box.append(ta);
     if (assets) {
       const fi = el("input", { type: "file", accept: "image/*", multiple: "", hidden: "" });
       fi.addEventListener("change", () => { addPics(d.id, [...fi.files], where); fi.value = ""; });
       btns.append(fi, ctl("button", "img", d, { class: "btn", type: "button", onclick: () => fi.click() }, [icon("image"), "Add image"]));
-      box.append(el("p", { class: "hint", id: hintId, text: "Paste a screenshot into the box, or add an image. Ctrl or ⌘ + Enter sends." }));
-    } else {
-      box.append(el("p", { class: "hint", id: hintId, text: "Ctrl or ⌘ + Enter sends." }));
     }
-    if (c.pics.length) box.append(thumbs(c.pics, (i) => { c.pics.splice(i, 1); focusNext = fkey("ta", d.id); render(); }, d.id));
+    box.append(el("p", { class: "hint", id: hintId, text: (assets ? "Paste a screenshot into the box, or add an image. " : "") + "Ctrl or ⌘ + Enter sends." }));
+    if (c.pics.length) box.append(thumbs(c.pics, "pic", d.id, (i) => { c.pics.splice(i, 1); focusNext = fkey("ta", d.id); requestRender(true); }));
     box.append(btns);
     return box;
   }
 
   function receipt(d) {
-    const f = flashes.get(d.id);
-    return el("div", { class: "receipt", tabindex: "-1", "data-k": fkey("rcpt", d.id), "data-card": d.id }, [
+    return ctl("div", "rcpt", d, { class: "receipt", tabindex: "-1" }, [
       el("p", { class: "title" }, [inline(titleOf(d.data))]),
-      feedbackLine(f),
+      feedbackLine(flashes.get(d.id)),
     ]);
   }
 
@@ -810,27 +869,43 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
   }
   function find(k) { return [...document.querySelectorAll("[data-k]")].find((n) => n.dataset.k === k) || null; }
   function giveFocus(f) {
+    // A focus the user asked for (open a note, Show all kinds) may scroll; one that only
+    // follows a redraw must not move the page.
+    if (focusNext) {
+      const n = find(focusNext) || find("h-open");
+      focusNext = null;
+      if (n && n !== document.activeElement) { n.focus(); return; }
+    }
     let n = null;
-    if (focusNext) { n = find(focusNext); focusNext = null; }
-    for (const k of n ? [] : focusOrder(f)) if ((n = find(k))) break;
+    for (const k of focusOrder(f)) if ((n = find(k))) break;
     if (!n || n === document.activeElement) return;
-    n.focus();
-    if (f && f.sel && n.tagName === "TEXTAREA" && n.dataset.k === f.k) n.setSelectionRange(f.sel[0], f.sel[1]);
+    n.focus({ preventScroll: true });
+    if (f.sel && n.tagName === "TEXTAREA" && n.dataset.k === f.k) n.setSelectionRange(f.sel[0], f.sel[1]);
+  }
+
+  // Every redraw goes through here. user: the user's own action asked for it.
+  // Returns whether it drew now.
+  function requestRender(user) {
+    if (!docs || !drawNow({ anchoring, typing: typing(), user })) { dirty = true; return false; }
+    render();
+    return true;
+  }
+  // Draw a put-off redraw, but not between a pointer press and its click: replacing the
+  // control under the pointer would lose the click.
+  function flush() { if (dirty && !pointerDown) requestRender(false); }
+  // Typing: a note box that is still open has focus, and was typed in lately.
+  function typing() {
+    const a = document.activeElement;
+    return !!(a && a.tagName === "TEXTAREA" && composers.has(a.dataset.card) && Date.now() - lastInput < IDLE_MS);
   }
 
   function render() {
-    if (!docs || anchoring) return;
-    held = false;
+    dirty = false;
     const focus = takeFocus();
     const now = Date.now();
-    const all = sections(docs);
-    // Project chips: projects with something open or waiting, and the chosen one.
-    const live = countBy(all.open.concat(all.wait), projectOf);
-    const projects = [...live.keys()];
-    if (project !== ALL && !live.has(project) && docs.some((d) => projectOf(d) === project)) projects.push(project);
-    project = pickProject(project, projects);
-    // Cards name their project in the All view when there is more than one.
-    const named = project === ALL && countBy(docs, projectOf).size > 1;
+    const view = projectView(docs, project);
+    const all = view.all, projects = view.projects;
+    project = view.project;
 
     // Summary across every project.
     const sum = $("summary"); sum.replaceChildren();
@@ -843,21 +918,21 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     const pBox = $("projects"); pBox.replaceChildren();
     pBox.hidden = projects.length < 2;
     const openBy = countBy(all.open, projectOf);
-    const setProject = (p) => { project = p; try { localStorage.setItem(PROJECT_KEY, p); } catch (e) {} render(); sayFilter(); };
+    const setProject = (p) => { project = p; try { localStorage.setItem(PROJECT_KEY, p); } catch (e) {} if (requestRender(true)) sayFilter(); };
     pBox.append(el("span", { class: "filters-label", "aria-hidden": "true", text: "Project" }),
-      chip("All", all.open.length, project === ALL, () => setProject(ALL), "chip:project", "projects"));
-    for (const p of projects) pBox.append(chip(p, openBy.get(p) || 0, project === p, () => setProject(p), fkey("chip:project", p)));
+      chip("All", all.open.length, project === ALL, () => setProject(ALL), ALL_PROJECTS, "projects"));
+    for (const p of projects) pBox.append(chip(p, openBy.get(p) || 0, project === p, () => setProject(p), fkey(ALL_PROJECTS, p)));
 
     const scoped = inProject(docs, project);
     const mine = sections(scoped);
     // Kind filter for To do, shown when its asks are of more than one kind.
     const kindsBy = countBy(mine.open, (d) => kindOf(d.data));
-    const setKind = (x) => { kind = x; render(); sayFilter(); };
+    const setKind = (x) => { kind = x; if (requestRender(true)) sayFilter(); };
     const kBox = $("kinds"); kBox.replaceChildren();
     kBox.hidden = kindsBy.size < 2 && kind === ALL;
     if (!kBox.hidden) {
-      kBox.append(chip("All", mine.open.length, kind === ALL, () => setKind(ALL), "chip:kind", "kinds"));
-      for (const x of KINDS) if (kindsBy.has(x) || kind === x) kBox.append(chip(KIND_LABEL[x], kindsBy.get(x) || 0, kind === x, () => setKind(x), fkey("chip:kind", x)));
+      kBox.append(chip("All", mine.open.length, kind === ALL, () => setKind(ALL), ALL_KINDS, "kinds"));
+      for (const x of KINDS) if (kindsBy.has(x) || kind === x) kBox.append(chip(KIND_LABEL[x], kindsBy.get(x) || 0, kind === x, () => setKind(x), fkey(ALL_KINDS, x)));
     }
 
     // To do.
@@ -873,23 +948,24 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
         box.append(el("div", { class: "group" }, [el("h3", { class: "group-head" }, [p, el("span", { class: "n", text: n ? String(n) : "" })]), ...draw(list, 4, false)]));
       }
     } else {
-      box.append(...draw(items, 3, named));
+      box.append(...draw(items, 3, view.named));
     }
     if (!items.length) {
       const where = project === ALL ? "" : " in " + project;
       if (!docs.length) box.append(empty("No asks yet", "When a chat needs something from you, it shows up here. You don’t need to reload."));
       else if (mine.open.length) box.append(empty("No " + KIND_LABEL[kind].toLowerCase() + " asks" + where, "",
         el("button", { class: "btn line", type: "button", "data-k": "empty-all",
-          onclick: () => { focusNext = "chip:kind"; setKind(ALL); } }, ["Show all kinds"])));
+          onclick: () => { focusNext = ALL_KINDS; setKind(ALL); } }, ["Show all kinds"])));
       else box.append(empty("Nothing needs you" + where, "New asks show up here as soon as a chat adds them."));
     }
 
-    // Waiting for the chat, and Closed.
+    // Waiting for the chat, and Closed (the newest 40; the count says when there are more).
     for (const where of ["wait", "closed"]) {
       const b = $(where); b.replaceChildren();
-      for (const d of mine[where]) b.append(card(d, where, named, 3));
-      $("n-" + where).textContent = mine[where].length ? String(mine[where].length) : "";
-      $(where + "-wrap").hidden = !mine[where].length;
+      for (const d of mine[where]) b.append(card(d, where, view.named, 3));
+      const n = mine[where].length, more = where === "closed" && mine.closedTotal > n;
+      $("n-" + where).textContent = n ? (more ? n + " newest of " + mine.closedTotal : String(n)) : "";
+      $(where + "-wrap").hidden = !n;
     }
 
     // Banner.
@@ -900,19 +976,17 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     }
 
     giveFocus(focus);
-    // Redraw when the next flash ends, so its receipt or line goes away; not while typing.
+    // Redraw when the next flash ends, so its receipt or line goes away.
     clearTimeout(flashTimer);
     let next = Infinity;
     for (const [id, f] of flashes) { if (f.until <= now) flashes.delete(id); else next = Math.min(next, f.until); }
-    if (next < Infinity) flashTimer = setTimeout(tick, next - now + 50);
+    if (next < Infinity) flashTimer = setTimeout(() => requestRender(false), next - now + 50);
   }
-  function typing() { return !!(document.activeElement && document.activeElement.tagName === "TEXTAREA"); }
-  function tick() { if (typing()) flashTimer = setTimeout(tick, 5000); else render(); }
 
   async function start() {
     const c = window.claude;
     db = c && c.use ? await c.use("db").catch(() => null) : null;
-    c && c.use && c.use("assets").then((a) => { assets = a; render(); }, () => {});
+    c && c.use && c.use("assets").then((a) => { assets = a; requestRender(false); }, () => {});
     c && c.use && c.use("comments").then((x) => { comments = x; }, () => {});
     if (!db) {
       showOpen(empty("Sign in to see your asks", "Open this page while signed in to claude.ai. The board lives in your account."));
@@ -921,12 +995,11 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     db.collection("asks").onSnapshot((snap) => {
       docs = snap.docs.filter((s) => s.exists).map((s) => ({ id: s.id, data: s.data() }));
       if (lost) { lost = false; $("banner").replaceChildren(); }
-      // While the user types, a live update waits until they leave the box.
-      if (typing()) held = true; else render();
+      requestRender(false);
     }, () => {
       lost = true;
       // Once the board is drawn, the banner (role=alert) says it.
-      if (docs) { render(); return; }
+      if (docs) { requestRender(false); return; }
       say("Could not load your asks. Reload the page.");
       showOpen(empty("Could not load your asks", "The live link to the board failed.", reloadBtn()));
     });
@@ -934,8 +1007,12 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
       if (docs || lost) return;
       showOpen(empty("Still loading your asks", "This is taking longer than usual.", reloadBtn()));
     }, LOAD_MS);
-    document.addEventListener("focusout", () => setTimeout(() => { if (held && !typing()) render(); }, 0));
-    setInterval(() => { if (!typing()) render(); }, 60000);
+    // A put-off redraw is drawn when the user leaves the note box, once any click is over.
+    document.addEventListener("input", () => { lastInput = Date.now(); }, true);
+    document.addEventListener("pointerdown", () => { pointerDown = true; }, true);
+    for (const t of ["pointerup", "pointercancel"]) document.addEventListener(t, () => { pointerDown = false; setTimeout(flush, 0); }, true);
+    document.addEventListener("focusout", () => setTimeout(flush, 0));
+    setInterval(() => requestRender(false), 60000);
   }
   start();
 })();

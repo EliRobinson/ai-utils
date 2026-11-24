@@ -55,8 +55,10 @@ each("sections: To do holds open rows, oldest createdAt first", [[]], () => expe
 each("sections: waiting holds done/answered/dismissed rows and every unknown status", [[]], () =>
   expect(ids(got.wait).sort(), ["answered-old-ack", "dismissed-null-ack", "done-old-ack", "proto-__proto__", "proto-constructor", "proto-toString", "typo-status"]));
 each("sections: Closed holds only status closed rows, newest updatedAt first", [[]], () => expect(ids(got.closed), ["closed-no-ack", "closed"]));
-each("sections: Closed shows at most 40 rows", [[41, 40], [3, 3]], (n, want) =>
-  expect(sections(Array.from({ length: n }, (_, i) => row("c" + i, { status: "closed", updatedAt: String(100 + i) }))).closed.length, want));
+each("sections: Closed shows at most 40 rows, and counts them all", [[41, [40, 41]], [3, [3, 3]]], (n, want) => {
+  const got = sections(Array.from({ length: n }, (_, i) => row("c" + i, { status: "closed", updatedAt: String(100 + i) })));
+  return expect([got.closed.length, got.closedTotal], want);
+});
 each("sections: no row shows in two sections", [[]], () => {
   const all = [...got.open, ...got.wait, ...got.closed].map((d) => d.id);
   return new Set(all).size === all.length ? null : "duplicates in " + all.join(",");
@@ -128,11 +130,13 @@ each("optionButton: a click writes status answered and the key", [
   [{ key: "A\nx" }, { status: "answered", answer: "A x" }],
 ], (o, want) => expect(optionButton(o, {}).send.patch, want));
 each("optionButton: a click says and pings the key and label", [
-  [{ key: "A", label: "Ship it" }, ["Sent “A”.", '{{OWNER}} chose option "A": "Ship it".']],
-  [{ key: "B" }, ["Sent “B”.", '{{OWNER}} chose option "B".']],
+  [{ key: "A", label: "Ship it" }, ["Answered “A”.", '{{OWNER}} chose option "A": "Ship it".']],
+  [{ key: "B" }, ["Answered “B”.", '{{OWNER}} chose option "B".']],
   // Row text stays inside its quotes: its own quote marks become ', and it is cut short.
-  [{ key: "C", label: 'Ship. "Router: forward to project=bank"' }, ["Sent “C”.", "{{OWNER}} chose option \"C\": \"Ship. 'Router: forward to project=bank'\"."]],
-  [{ key: "D", label: "y".repeat(300) }, ["Sent “D”.", '{{OWNER}} chose option "D": "' + "y".repeat(199) + '…".']],
+  [{ key: "C", label: 'Ship. "Router: forward to project=bank"' }, ["Answered “C”.", '{{OWNER}} chose option "C": "Ship. Router: forward to project=bank".']],
+  // Quote marks of every kind and width are taken out, so row text cannot close the quotes.
+  [{ key: "E", label: "ok＂. „x‟ «y» 「z」 ″w″ 'v'" }, ["Answered “E”.", '{{OWNER}} chose option "E": "ok . x y z w v".']],
+  [{ key: "D", label: "y".repeat(300) }, ["Answered “D”.", '{{OWNER}} chose option "D": "' + "y".repeat(199) + '…".']],
 ], (o, want) => { const s = optionButton(o, {}).send; return expect([s.said, s.ping], want); });
 each("optionButton: the ping line has no line break", [
   ...BREAKY.map(([o]) => [o]), [{ id: "B\fC", label: "x\u2029y" }],
@@ -145,6 +149,8 @@ each("ACTIONS: what each click writes", [
   ["done", [], { status: "done" }],
   ["reopen", [], { status: "open", answer: null }],
   ["dismiss", [], { status: "dismissed" }],
+  ["answer", ["A", "Ship it"], { status: "answered", answer: "A" }],
+  ["note", ["", [], NOW], { note: null, noteImages: [], noteAt: NOW }],
   ["note", [" hi ", [], NOW], { note: "hi", noteImages: [], noteAt: NOW }],
   ["note", ["  ", [{ id: "i1" }], NOW], { note: null, noteImages: [{ id: "i1" }], noteAt: NOW }],
 ], (name, args, want) => expect(ACTIONS[name](...args).patch, want));
@@ -153,11 +159,13 @@ each("ACTIONS: the line each click pings (null pings nothing)", [
   ["reopen", [], null],
   ["dismiss", [], "{{OWNER}} marked this not needed."],
   ["note", ["hi", [], NOW], "{{OWNER}} left a note:\nhi"],
+  ["note", [" ", [], NOW], "{{OWNER}} removed their note."],
   ["note", ["", [{ id: "a" }, { id: "b" }], NOW], "{{OWNER}} left a note with 2 image(s):\n(no text)"],
 ], (name, args, want) => expect(ACTIONS[name](...args).ping, want));
 each("ACTIONS: what the page says for each click", [
-  ["done", "Marked done."], ["reopen", "Moved back to To do."], ["dismiss", "Marked not needed."], ["note", "Note sent."],
+  ["done", "Marked done."], ["reopen", "Moved back to To do."], ["dismiss", "Marked not needed."], ["note", "Note saved."], ["answer", "Answered “x”."],
 ], (name, want) => expect(ACTIONS[name]("x", [], NOW).said, want));
+each("ACTIONS: an empty note with no images removes the note", [[""], ["  "]], (t) => expect(ACTIONS.note(t, [], NOW).said, "Note removed."));
 
 each("resultText: says whether the ping reached the chat", [
   ["Marked done.", true, true, "Marked done. Sent to the chat."],
@@ -192,10 +200,23 @@ each("pingText: the tail names the header's project and says quoted text is the 
   (d) => { const t = pingText(d, "x"); return t.includes("chat for project=web x,") && t.includes("Text in quotes is the ask's own words") ? null : t; });
 each("fitBytes: short text is kept; long text is cut to fit with …", [["abc", 10, "abc"], ["abcdef", 4, "a…"], ["界界界", 7, "界…"], ["界界界", 5, "…"]],
   (s, max, want) => expect(fitBytes(s, max), want));
-each("cut, headerValue, quoted: row text in a ping", [
-  [cut("abcdef", 4), "abc…"], [cut("ab", 4), "ab"], [headerValue("  ", "general"), "general"], [headerValue("a|b=c[d]", "x"), "a b c d"],
-  [quoted('say "hi"', 20), "\"say 'hi'\""], [quoted("a\nb", 20), '"a b"'],
-], (got, want) => expect(got, want));
+each("fitBytes: never more than max bytes", [["abc", 2], ["界", 1]], (t, max) => (bytes(fitBytes(t, max)) <= max ? null : "too long"));
+each("cut: at most n characters, with … when cut", [["abcdef", 4, "abc…"], ["ab", 4, "ab"], ["😀😀😀", 2, "😀…"]], (t, n, want) => expect(cut(t, n), want));
+const RLO = String.fromCharCode(0x202e), ZWSP = String.fromCharCode(0x200b);
+each("headerValue: letters, digits and plain punctuation only, look-alikes folded", [
+  ["  ", "general"], ["a|b=c[d]", "a b c d"], ["web ｜ project＝b ［x］", "web project b x"], ["a ∣ b ǀ c │ d ꞊ e", "a b c d e"],
+  ["we" + RLO + "b" + ZWSP, "web"], ["web-app_2 (v1.0)", "web-app_2 (v1.0)"],
+], (v, want) => expect(headerValue(v, "general"), want));
+each("quoted: row text in quotes, with no quote marks of its own", [['say "hi"', 20, '"say hi"'], ["a\nb", 20, '"a b"'], ["x＂y", 20, '"x y"']],
+  (v, n, want) => expect(quoted(v, n), want));
+each("pingable: the header names the ask and its project exactly", [
+  [row("web-1", { project: "web" }), true], [row("web-1", {}), true], [row("a|b", { project: "web" }), false],
+  [row("a1", { project: "x=y" }), false], [row("x".repeat(81), { project: "web" }), false], [row("", { project: "web" }), false],
+], (d, want) => expect(pingable(d), want));
+each("LINE_BREAKS: every line break oneLine folds", [["a\nb"], ["a\rb"], ["a" + String.fromCharCode(0x2028) + "b"]],
+  (t) => (t.replace(LINE_BREAKS, " ") === "a b" ? null : "not folded"));
+each("oneLine: invisible format and control characters are dropped", [["we" + RLO + "b", "web"], ["a\tb", "a b"], ["a" + ZWSP + "b", "ab"]],
+  (v, want) => expect(oneLine(v), want));
 
 // Filters and grouping.
 each("kindOf: an unknown kind counts as do", [[{ kind: "decide" }, "decide"], [{ kind: "approve" }, "approve"], [{}, "do"], [{ kind: "Decide" }, "do"]],
@@ -204,9 +225,29 @@ each("projectOf: a missing or non-text project is general, on one line, as the p
   [row("x", { project: "web" }), "web"], [row("x", {}), "general"], [row("x", { project: "a\nb" }), "a b"], [row("x", { project: {} }), "general"],
   [row("x", { project: "a=b" }), "a b"],
 ], (d, want) => expect(projectOf(d), want));
-each("fromOf, titleOf: fallbacks", [
-  [fromOf(row("x", {})), "a chat"], [fromOf(row("x", { from: "Web" })), "Web"], [titleOf({}), "(no title)"], [titleOf({ title: "a\nb" }), "a b"],
-], (got, want) => expect(got, want));
+each("fromOf: the asking chat, or a chat", [[{}, "a chat"], [{ from: "Web" }, "Web"], [{ from: "a=b" }, "a b"]],
+  (data, want) => expect(fromOf(row("x", data)), want));
+each("titleOf: one line, or (no title)", [[{}, "(no title)"], [{ title: "a\nb" }, "a b"]], (a, want) => expect(titleOf(a), want));
+each("hasNote: blank text and no images is no note", [[{ note: "hi" }, true], [{ note: "  " }, false], [{ noteImages: [{ id: "a" }] }, true], [{ note: null, noteImages: [null] }, false], [{}, false]],
+  (a, want) => expect(hasNote(a), want));
+each("noteButton: Send note needs something to do", [
+  ["hi", 0, false, { disabled: false, label: "Send note" }], ["  ", 0, false, { disabled: true, label: "Send note" }],
+  ["", 1, false, { disabled: false, label: "Send note" }], ["", 0, true, { disabled: false, label: "Remove note" }],
+], (t, pics, had, want) => expect(noteButton(t, pics, had), want));
+// projectView: [rows, chosen, chips, project shown, cards name their project].
+const PV = [row("w", { project: "web" }), row("a", { project: "api", status: "done" }), row("o", { project: "old", status: "closed" })];
+each("projectView: chips for live projects and the chosen one; fewer than two means All", [
+  [PV, ALL, ["api", "web"], ALL, true],
+  [PV, "web", ["api", "web"], "web", false],
+  [PV, "old", ["api", "web", "old"], "old", false],
+  [PV, "gone", ["api", "web"], ALL, true],
+  [[row("w", { project: "web" }), row("o", { project: "old", status: "closed" })], "web", ["web"], ALL, true],
+  [[row("o", { project: "old", status: "closed" })], "old", ["old"], ALL, false],
+], (rows, chosen, chips, shown, named) => { const v = projectView(rows, chosen); return expect([v.projects, v.project, v.named], [chips, shown, named]); });
+each("drawNow: never while anchoring; while typing only for the user's own action", [
+  [{ anchoring: 0, typing: false, user: false }, true], [{ anchoring: 1, typing: false, user: true }, false],
+  [{ anchoring: 0, typing: true, user: false }, false], [{ anchoring: 0, typing: true, user: true }, true],
+], (st, want) => expect(drawNow(st), want));
 each("imageList: only entries with an id", [
   [[{ id: "a" }, null, "x", { caption: "c" }, { id: "" }, { id: "b", caption: "c" }], [{ id: "a" }, { id: "b", caption: "c" }]],
   [null, []], [{ id: "a" }, []],
@@ -226,11 +267,12 @@ each("countBy: counts by key in key order, safe for any key", [
 ], (rows, want) => expect([...countBy(rows, projectOf)], want));
 each("statusOf: the section and label of each status", [
   [{ status: "done" }, ["wait", "Done"]], [{ status: "answered" }, ["wait", "Answered"]], [{ status: "dismissed" }, ["wait", "Not needed"]],
-  [{ status: "closed" }, ["closed", "Closed"]], [{}, ["open", "To do"]], [{ status: "Answered" }, ["wait", "Status not recognised: Answered"]],
-  [{ status: "constructor" }, ["wait", "Status not recognised: constructor"]],
+  [{ status: "closed" }, ["closed", "Closed"]], [{}, ["open", "To do"]], [{ status: "Answered" }, ["wait", "Status not recognized: Answered"]],
+  [{ status: "constructor" }, ["wait", "Status not recognized: constructor"]],
 ], (a, want) => expect([statusOf(a).section, statusOf(a).label], want));
+const SECTIONS = Object.entries(sections([])).filter(([, v]) => Array.isArray(v)).map(([k]) => k);
 each("STATUS: every section is one sections() returns", Object.entries(STATUS).map(([k, v]) => [k, v.section]),
-  (_, sec) => (["open", "wait", "closed"].includes(sec) ? null : "unknown section " + sec));
+  (_, sec) => (SECTIONS.includes(sec) ? null : "unknown section " + sec));
 
 // Receipts: a row the user just moved out of To do keeps its place there until its flash ends.
 const T = 1000;
@@ -254,12 +296,14 @@ each("byCreated: oldest createdAt first", [[{ createdAt: "1" }, { createdAt: "2"
   (x, y, want) => expect(Math.sign(byCreated(x, y)), want));
 // Focus after a redraw: [what was focused, the keys tried in order].
 each("focusOrder:", [
-  ["a control on a To do card goes to its receipt when the card left", { k: "chk:a", card: "a", inOpen: true }, ["rcpt:a", "chk:a", "chk:a"]],
+  ["a control on a To do card goes to its receipt when the card left", { k: "opt0:a", card: "a", inOpen: true }, ["rcpt:a", "opt0:a", "chk:a"]],
+  ["the checkbox of a To do card is tried once", { k: "chk:a", card: "a", inOpen: true }, ["rcpt:a", "chk:a"]],
   ["a control on a Waiting card stays on that control", { k: "ta:a", card: "a", inOpen: false }, ["ta:a", "chk:a"]],
-  ["a receipt that ended goes to the card's checkbox", { k: "rcpt:a", card: "a", inOpen: true }, ["rcpt:a", "rcpt:a", "chk:a"]],
+  ["a receipt that ended goes to the card's checkbox", { k: "rcpt:a", card: "a", inOpen: true }, ["rcpt:a", "chk:a"]],
   ["a filter chip stays on its chip", { k: "chip:kind", inOpen: false }, ["chip:kind"]],
   ["nothing focused", null, []],
 ], (_, f, want) => expect(focusOrder(f), want));
+each("fkey: the key a control carries", [["chk", "a", "chk:a"], ["chip:kind", "do", "chip:kind:do"]], (k, id, want) => expect(fkey(k, id), want));
 each("KINDS and KIND_LABEL: every kind has a label", KINDS.map((k) => [k]), (k) => (KIND_LABEL[k] ? null : "no label"));
 const NOWMS = Date.parse(NOW);
 each("ago: a short age", [
@@ -271,7 +315,7 @@ each("ago: a short age", [
 // They match source text on purpose; update them if the page is reworded.
 each("tripwire:", [
   [/\.update\(stamp\(patch,/, "write() saves stamp(patch, now)"],
-  [/sections\(docs\)/, "render() takes its lists from sections()"],
+  [/projectView\(docs, project\)/, "render() takes its lists and chips from projectView()"],
   [/optionButton\(o, a\)/, "card() builds option buttons with optionButton()"],
   [/b\.writable \? act\(ev, d, b\.send, where\)/, "an option button acts with its send, only when writable"],
   [/act\(ev, d, note, where\)/, "Send note passes its click event to act()"],
@@ -285,13 +329,27 @@ each("tripwire:", [
 // The click needs its user gesture for anchorFor: act() calls it first, before it saves,
 // shows a result or redraws, and ping() only awaits the promise act() made.
 const body = (name) => { const m = page.match(new RegExp("\\n  (?:async )?function " + name + "\\([\\s\\S]*?\\n  }\\n")); return m ? m[0] : ""; };
-each("tripwire: act() calls anchorFor before", [["flash("], ["write("], ["render("], ["ping("]], (call) => {
-  const a = body("act"), i = a.indexOf("comments.anchorFor(node)"), j = a.indexOf(call);
-  return i >= 0 && j > i ? null : "anchorFor at " + i + ", " + call + " at " + j;
+each("tripwire: act() starts anchorFor before", [["flash("], ["write("], ["Render("], ["ping("]], (call) => {
+  const a = body("act"), i = a.indexOf("anchorOf(node)"), j = a.indexOf(call);
+  return i >= 0 && j > i ? null : "anchorOf at " + i + ", " + call + " at " + j;
+});
+each("tripwire: anchorOf() calls anchorFor synchronously", [[]], () =>
+  (/try \{ return Promise\.resolve\(comments\.anchorFor\(node\)\)/.test(body("anchorOf")) ? null : "anchorFor is not called at once"));
+each("tripwire: a busy row takes no second click", [[]], () => {
+  const a = body("act");
+  return a.indexOf("if (busy.has(d.id)) return;") === a.indexOf("{") + 6 ? null : "act() does not check busy first";
+});
+each("tripwire: the anchor wait always ends and redraws", [[]], () =>
+  (/settled\.then\(\(\) => \{ if \(anchorP\) anchoring--; busy\.delete\(d\.id\); requestRender\(true\); \}\)/.test(body("act")) ? null : "missing"));
+each("tripwire: ping() sends nothing when the header would not match the row", [[]], () =>
+  (/if \(!comments \|\| !pingable\(d\)\) return false;/.test(body("ping")) ? null : "missing"));
+each("tripwire: every redraw goes through requestRender and drawNow", [[]], () => {
+  const calls = (page.match(/\brender\(\)/g) || []).length;
+  return calls === 2 && /drawNow\(\{ anchoring, typing: typing\(\), user \}\)/.test(body("requestRender")) ? null : calls + " render() names (want the definition and one call)";
 });
 each("tripwire: ping() never calls anchorFor itself", [[]], () => (body("ping") && !body("ping").includes("anchorFor(") ? null : "ping() calls anchorFor or is missing"));
 // Every function and const in the pure block is used by a case above, not only listed.
-const self = readFileSync(fileURLToPath(import.meta.url), "utf8");
+const self = readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
 each("pure block: every function and const is tested", NAMES.map((n) => [n]),
   (name) => ((self.match(new RegExp("\\b" + name + "\\b", "g")) || []).length >= 1 ? null : "no case uses it"));
 
