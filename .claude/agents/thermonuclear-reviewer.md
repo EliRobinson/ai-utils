@@ -1,0 +1,1 @@
+../../plugins/agent-roster/agents/thermonuclear-reviewer.md

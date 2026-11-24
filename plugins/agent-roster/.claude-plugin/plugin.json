@@ -1,0 +1,18 @@
+{
+  "name": "agent-roster",
+  "version": "1.8.0",
+  "optionalDependencies": [
+    { "name": "accessibility-agents", "marketplace": "community-access", "version": "=7.1.0" }
+  ],
+  "description": "One shared map from job kind to agent kind for coordinator chats. Native subagents (ticket writer, researcher, lookup, engine and UI implementers, mechanical editor, copy writer, read-only review-gate critics, PR finisher), each pinned to its model, plus a route-work skill with the routing table and coordinator rules, Cursor's thermo-nuclear-code-quality-review skill (vendored, MIT) for the thermonuclear reviewer, and a setup-agentic-workflow skill that installs the worktree, review-gate and merge rules, the ticketing tool setting, the reviewers and two guard hooks into a repo, plus a coordinator prompt template.",
+  "author": {
+    "name": "Eli Robinson"
+  },
+  "keywords": [
+    "agents",
+    "subagents",
+    "coordination",
+    "multi-agent",
+    "code-review"
+  ]
+}

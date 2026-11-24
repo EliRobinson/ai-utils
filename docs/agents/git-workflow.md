@@ -1,0 +1,1 @@
+../../plugins/agent-roster/skills/setup-agentic-workflow/templates/docs-agents/git-workflow.md

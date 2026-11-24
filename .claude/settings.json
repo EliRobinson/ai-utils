@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/guard-main-checkout-hook.mjs\""
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/review-gate-hook.mjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*__(merge_pull_request|enable_auto_merge|enable_pull_request_auto_merge|mark_pr_ready_for_review|mark_pull_request_ready_for_review|update_pull_request|create_pull_request)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/review-gate-hook.mjs\""
+          }
+        ]
+      }
+    ]
+  }
+}

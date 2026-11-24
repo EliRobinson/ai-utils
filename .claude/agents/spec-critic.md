@@ -1,0 +1,1 @@
+../../plugins/agent-roster/agents/spec-critic.md

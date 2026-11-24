@@ -1,0 +1,11 @@
+# Shared plugin files this skill installs. They live once in the plugin;
+# build-skill-bundles.py copies them into the standalone .skill bundle.
+../../agents/thermonuclear-reviewer.md => agents/thermonuclear-reviewer.md
+../../agents/correctness-critic.md => agents/correctness-critic.md
+../../agents/spec-critic.md => agents/spec-critic.md
+../../agents/security-critic.md => agents/security-critic.md
+../../agents/copy-critic.md => agents/copy-critic.md
+../../agents/dry-critic.md => agents/dry-critic.md
+../../agents/design-critic.md => agents/design-critic.md
+../../agents/accessibility-critic.md => agents/accessibility-critic.md
+../../coordinator/coordinator-prompt.md => coordinator/coordinator-prompt.md

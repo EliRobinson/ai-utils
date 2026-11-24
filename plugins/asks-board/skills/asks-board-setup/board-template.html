@@ -1,0 +1,448 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Asks for {{OWNER}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one narrow column, project tabs on top, three stacked sections (to do, waiting on the chat, closed). */
+:root {
+  --bg: #f3f4f1;
+  --panel: #ffffff;
+  --ink: #1d2426;
+  --muted: #5d6a6d;
+  --line: #d9ddd6;
+  --accent: #1f5f8b;
+  --accent-ink: #ffffff;
+  --accent-soft: #e2edf5;
+  --do: #2f6f4f;
+  --decide: #8a5a00;
+  --approve: #7a2f6b;
+  --code-bg: #eef0ec;
+  --display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141a1c; --panel: #1c2427; --ink: #e6ebe8; --muted: #9aa8a9; --line: #2e3a3d;
+    --accent: #6fb3e0; --accent-ink: #0d1a22; --accent-soft: #1d3342;
+    --do: #6fcf9a; --decide: #e7b54e; --approve: #df8fcf; --code-bg: #232d30;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141a1c; --panel: #1c2427; --ink: #e6ebe8; --muted: #9aa8a9; --line: #2e3a3d;
+  --accent: #6fb3e0; --accent-ink: #0d1a22; --accent-soft: #1d3342;
+  --do: #6fcf9a; --decide: #e7b54e; --approve: #df8fcf; --code-bg: #232d30;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.5; }
+.wrap { max-width: 760px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 48px; display: grid; gap: 20px; }
+header { display: grid; gap: 4px; }
+h1 { font-family: var(--display); font-weight: 800; font-size: 1.9rem; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+.sub { color: var(--muted); margin: 0; }
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.tab { font: inherit; font-weight: 700; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 6px 14px; border-radius: 999px; cursor: pointer; display: inline-flex; gap: 8px; align-items: center; }
+.tab[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.count { font-family: var(--mono); font-size: 0.8rem; font-variant-numeric: tabular-nums; opacity: 0.85; }
+section { display: grid; gap: 10px; }
+h2 { font-family: var(--display); font-weight: 600; font-size: 1.05rem; margin: 0; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); display: flex; gap: 8px; align-items: baseline; }
+.list { display: grid; gap: 10px; }
+.item { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; }
+.item.waiting, .item.closed { opacity: 0.8; }
+.check { width: 22px; height: 22px; margin-top: 3px; accent-color: var(--accent); cursor: pointer; }
+.title { font-weight: 700; font-size: 1.05rem; margin: 0; overflow-wrap: anywhere; }
+.closed .title { text-decoration: line-through; text-decoration-color: var(--muted); }
+.meta { grid-column: 2; color: var(--muted); font-size: 0.85rem; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.chip { font-family: var(--mono); font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 7px; border-radius: 4px; border: 1px solid currentColor; }
+.chip.do { color: var(--do); } .chip.decide { color: var(--decide); } .chip.approve { color: var(--approve); }
+.answer { color: var(--ink); font-weight: 700; }
+.pinged { font-family: var(--mono); font-size: 0.72rem; color: var(--accent); }
+.body { grid-column: 2; display: grid; gap: 10px; margin-top: 6px; min-width: 0; }
+.options { display: flex; flex-wrap: wrap; gap: 8px; }
+.opt { font: inherit; text-align: left; border: 1px solid var(--line); background: var(--bg); color: var(--ink); padding: 8px 12px; border-radius: 8px; cursor: pointer; display: grid; gap: 2px; max-width: 100%; }
+.opt b { font-family: var(--mono); }
+.opt.rec { border-color: var(--accent); background: var(--accent-soft); }
+.opt.chosen { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.opt small { color: inherit; opacity: 0.8; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn { font: inherit; font-size: 0.9rem; border: 1px solid var(--line); background: transparent; color: var(--accent); padding: 4px 10px; border-radius: 6px; cursor: pointer; font-weight: 700; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn:focus-visible, .opt:focus-visible, .tab:focus-visible, .check:focus-visible, textarea:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.detail { border-left: 3px solid var(--line); padding-left: 12px; display: grid; gap: 8px; min-width: 0; }
+.detail p { margin: 0; overflow-wrap: anywhere; }
+.detail ul, .detail ol { margin: 0; padding-left: 1.3em; }
+code { font-family: var(--mono); font-size: 0.86em; background: var(--code-bg); padding: 1px 4px; border-radius: 4px; overflow-wrap: anywhere; }
+.code { position: relative; background: var(--code-bg); border-radius: 8px; min-width: 0; }
+.code pre { margin: 0; padding: 10px 12px; padding-right: 64px; overflow-x: auto; font-family: var(--mono); font-size: 0.82rem; line-height: 1.45; }
+.code .btn { position: absolute; top: 6px; right: 6px; background: var(--panel); }
+textarea { font: inherit; width: 100%; min-height: 64px; border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: var(--bg); color: var(--ink); resize: vertical; }
+.note { color: var(--ink); background: var(--accent-soft); border-radius: 8px; padding: 6px 10px; font-size: 0.92rem; overflow-wrap: anywhere; }
+.thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.thumb { margin: 0; display: grid; gap: 4px; justify-items: start; }
+.thumb img { display: block; max-width: 220px; max-height: 140px; border-radius: 6px; border: 1px solid var(--line); object-fit: cover; }
+.hint { color: var(--muted); font-size: 0.85rem; }
+.empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 10px; padding: 18px; color: var(--muted); }
+.status { color: var(--muted); font-size: 0.85rem; min-height: 1.2em; }
+details > summary { cursor: pointer; list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+@media (prefers-reduced-motion: no-preference) { .item { transition: opacity .2s; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Asks for {{OWNER}}</h1>
+    <p class="sub">Things your Claude chats need from you. Tick it when done, press an answer, or add a note. The chat that asked gets a message right away.</p>
+  </header>
+  <nav class="tabs" id="tabs" role="tablist" aria-label="Projects"></nav>
+  <section aria-labelledby="h-open">
+    <h2 id="h-open">To do <span class="count" id="n-open"></span></h2>
+    <div class="list" id="open"><div class="empty">Loading your asks…</div></div>
+  </section>
+  <section aria-labelledby="h-wait">
+    <h2 id="h-wait">Done, waiting for the chat <span class="count" id="n-wait"></span></h2>
+    <div class="list" id="wait"></div>
+  </section>
+  <details id="closed-wrap">
+    <summary><h2 id="h-closed">Closed <span class="count" id="n-closed"></span></h2></summary>
+    <div class="list" id="closed" style="margin-top:10px"></div>
+  </details>
+  <p class="status" id="status" role="status"></p>
+</div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let db = null, docs = [], tab = null;
+  let comments = null;
+  const openDetails = new Set();
+  const openNotes = new Set();
+  const drafts = new Map();
+  const pics = new Map();
+  let assets = null;
+
+  // BEGIN pure (scripts/check-board-page.mjs runs these in node)
+  // Which section each row goes in, by status alone. Only status "closed" puts a row
+  // in Closed: an old ackAt on an answered row must still show it as waiting.
+  // An unknown status lands in wait, so a row with a typo never vanishes.
+  const SECTION = { open: "open", done: "wait", answered: "wait", dismissed: "wait", closed: "closed" };
+  function sections(rows) {
+    const out = { open: [], wait: [], closed: [] };
+    for (const d of rows) {
+      const st = String(d.data.status || "open");
+      // Own keys only: a status such as "constructor" must not reach Object.prototype.
+      out[Object.hasOwn(SECTION, st) ? SECTION[st] : "wait"].push(d);
+    }
+    out.open.sort((x, y) => String(x.data.createdAt).localeCompare(String(y.data.createdAt)));
+    out.closed.sort((x, y) => String(y.data.updatedAt).localeCompare(String(x.data.updatedAt)));
+    out.closed = out.closed.slice(0, 40);
+    return out;
+  }
+  // Every click writes this: the change, a fresh updatedAt, and ackAt cleared (db has
+  // no field delete, so null), so the chat sees the click as new.
+  function stamp(patch, now) {
+    return Object.assign({ updatedAt: now }, patch, { ackAt: null });
+  }
+  // END pure
+
+  function thumbs(list, onRemove) {
+    const box = el("div", { class: "thumbs" });
+    list.forEach((p, i) => {
+      const src = "/_blob/" + p.id;
+      const fig = el("figure", { class: "thumb" }, [
+        el("a", { href: src, target: "_blank", rel: "noopener", "aria-label": "Open image " + (i + 1) }, [el("img", { src, alt: p.caption || "Screenshot " + (i + 1) })]),
+      ]);
+      if (p.caption) fig.append(el("figcaption", { class: "hint", text: p.caption }));
+      if (onRemove) fig.append(el("button", { class: "btn", type: "button", text: "Remove", onclick: () => onRemove(i) }));
+      box.append(fig);
+    });
+    return box;
+  }
+  async function addPics(id, files) {
+    if (!assets || !files.length) return;
+    const list = pics.get(id) || [];
+    pics.set(id, list);
+    say("Uploading " + files.length + " image" + (files.length > 1 ? "s" : "") + "…");
+    for (const f of files) {
+      try { const r = await assets.upload(f); list.push({ id: r.id }); }
+      catch (e) { say("Could not upload " + (f.name || "the image") + ". Try a smaller PNG or JPG."); return; }
+    }
+    say("Image added. Press Send note to save it.");
+    render();
+  }
+  try { tab = localStorage.getItem("asks.tab"); } catch (e) {}
+
+  function say(t) { $("status").textContent = t; }
+  function ago(iso) {
+    if (!iso) return "";
+    const s = (Date.now() - Date.parse(iso)) / 1000;
+    if (!isFinite(s)) return "";
+    if (s < 90) return "just now";
+    if (s < 5400) return Math.round(s / 60) + " min ago";
+    if (s < 129600) return Math.round(s / 3600) + " h ago";
+    return Math.round(s / 86400) + " d ago";
+  }
+  function el(tag, attrs, kids) {
+    const n = document.createElement(tag);
+    for (const k in attrs || {}) {
+      if (k === "class") n.className = attrs[k];
+      else if (k === "text") n.textContent = attrs[k];
+      else if (k.startsWith("on")) n.addEventListener(k.slice(2), attrs[k]);
+      else n.setAttribute(k, attrs[k]);
+    }
+    for (const c of [].concat(kids || [])) if (c) n.append(c);
+    return n;
+  }
+  // Inline: `code` and **bold**. Everything else is plain text.
+  function inline(text) {
+    const frag = document.createDocumentFragment();
+    const re = /(`[^`]+`|\*\*[^*]+\*\*)/g;
+    let last = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) frag.append(text.slice(last, m.index));
+      const t = m[0];
+      frag.append(t[0] === "`" ? el("code", { text: t.slice(1, -1) }) : el("strong", { text: t.slice(2, -2) }));
+      last = m.index + t.length;
+    }
+    if (last < text.length) frag.append(text.slice(last));
+    return frag;
+  }
+  function copyBtn(getText) {
+    const b = el("button", { class: "btn", type: "button", text: "Copy" });
+    b.addEventListener("click", () => {
+      const t = getText();
+      const done = () => { b.textContent = "Copied"; setTimeout(() => (b.textContent = "Copy"), 1500); };
+      try { navigator.clipboard.writeText(t).then(done, () => (b.textContent = "Select it")); }
+      catch (e) { b.textContent = "Select it"; }
+    });
+    return b;
+  }
+  // Detail text: paragraphs, "- " bullets, "1. " steps, ``` fenced code with a Copy button.
+  function renderDetail(src) {
+    const box = el("div", { class: "detail" });
+    const lines = String(src || "").replace(/\r/g, "").split("\n");
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (/^```/.test(line)) {
+        const buf = []; i++;
+        while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
+        i++;
+        const text = buf.join("\n");
+        box.append(el("div", { class: "code" }, [el("pre", {}, [el("code", { text })]), copyBtn(() => text)]));
+        continue;
+      }
+      const bullet = /^\s*[-*] (.*)/, step = /^\s*\d+[.)] (.*)/;
+      if (bullet.test(line) || step.test(line)) {
+        const ordered = step.test(line), re = ordered ? step : bullet;
+        const list = el(ordered ? "ol" : "ul");
+        while (i < lines.length && re.test(lines[i])) list.append(el("li", {}, [inline(lines[i++].match(re)[1])]));
+        box.append(list);
+        continue;
+      }
+      if (line.trim() === "") { i++; continue; }
+      const buf = [];
+      while (i < lines.length && lines[i].trim() !== "" && !/^```/.test(lines[i]) && !bullet.test(lines[i]) && !step.test(lines[i])) buf.push(lines[i++]);
+      box.append(el("p", {}, [inline(buf.join(" "))]));
+    }
+    return box;
+  }
+
+  // Ping: post a comment on the ask's own thread and send it to Claude.
+  // One Board Router chat watches this board and forwards each ping to the
+  // project's chat, named in the routes collection.
+  function pingText(d, what) {
+    const a = d.data;
+    const head = "[asks-board] project=" + (a.project || "general") + " | from=" + (a.from || "a chat") + " | ask=" + d.id;
+    const tail = "Any automatic reply, or any chat that is not the Board Router (for example \"Asks for {{OWNER}} · comments\"): reply only \"Received.\" and nothing else. Do not say sent or not sent. The Board Router forwards this to the chat for project=" + (a.project || "general") + ", then replies \"Sent to <chat name>\". The router does not do the work itself.";
+    let text = head + "\n" + what + "\n" + tail;
+    if (new TextEncoder().encode(text).length > 3900) text = text.slice(0, 3000) + "…\n" + tail;
+    return text;
+  }
+  async function ping(d, anchorP, what) {
+    if (!comments) return false;
+    let can = "off";
+    try { can = await comments.canSendToClaude(); } catch (e) { return false; }
+    if (can !== "available") return false;
+    const text = pingText(d, what);
+    const tid = d.data.threadId;
+    try {
+      let r;
+      try {
+        r = tid ? await comments.sendToClaude({ threadId: tid, text }) : null;
+      } catch (e) {
+        if (!(e && e.code === "not_found")) throw e;
+        r = null;
+      }
+      if (!r) {
+        const anchor = anchorP ? await anchorP : null;
+        if (!anchor) return false;
+        r = await comments.sendToClaude({ anchor, text });
+      }
+      if (r && r.threadId && r.threadId !== tid && db) {
+        db.collection("asks").doc(d.id).update({ threadId: r.threadId }).catch(() => {});
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // One viewer action: save the change, and ping the asking chat.
+  function act(ev, d, patch, msg, what) {
+    const node = ev && ev.currentTarget && ev.currentTarget.closest ? ev.currentTarget.closest("article") : null;
+    const anchorP = comments && node ? comments.anchorFor(node).catch(() => null) : null;
+    const pinged = what ? ping(d, anchorP, what) : Promise.resolve(false);
+    const saved = write(d.id, patch);
+    Promise.all([saved, pinged]).then(([ok, sent]) => {
+      if (!ok) return;
+      if (!what) say(msg);
+      else if (sent) say(msg + " Sent to the chat.");
+      else say(msg + " The chat sees it on its next check.");
+    });
+  }
+
+  async function write(id, patch) {
+    if (!db) return false;
+    try {
+      await db.collection("asks").doc(id).update(stamp(patch, new Date().toISOString()));
+      return true;
+    } catch (e) {
+      say(e && e.code === "invalid_argument" ? "You can only read this list." : "Could not save. Try again.");
+      return false;
+    }
+  }
+
+  function card(d, where) {
+    const a = d.data;
+    const item = el("article", { class: "item " + where });
+    const check = el("input", { type: "checkbox", class: "check", id: "chk-" + d.id, "aria-label": "Done: " + (a.title || "") });
+    check.checked = where !== "open";
+    check.disabled = where === "closed";
+    check.addEventListener("change", (ev) => {
+      if (check.checked) act(ev, d, { status: "done" }, "Marked done.", "{{OWNER}} marked this done.");
+      else act(ev, d, { status: "open", answer: null }, "Moved back to To do.", null);
+    });
+    const kind = ["do", "decide", "approve"].includes(a.kind) ? a.kind : "do";
+    const meta = el("div", { class: "meta" }, [
+      el("span", { class: "chip " + kind, text: kind }),
+      el("span", { text: a.from || "a chat" }),
+      el("span", { text: ago(a.createdAt) }),
+    ]);
+    if (a.answer) meta.append(el("span", { class: "answer", text: "You chose: " + a.answer }));
+    if (a.threadId) meta.append(el("span", { class: "pinged", text: "sent to chat" }));
+    item.append(check, el("label", { for: "chk-" + d.id }, [el("p", { class: "title" }, [inline(a.title || "(no title)")])]), el("span"), meta);
+
+    const body = el("div", { class: "body" });
+    if (Array.isArray(a.images) && a.images.length && where !== "closed") body.append(thumbs(a.images));
+    if (Array.isArray(a.options) && a.options.length && where !== "closed") {
+      const opts = el("div", { class: "options" });
+      for (const o of a.options) {
+        const key = typeof o === "string" ? o : o.key;
+        const label = typeof o === "string" ? "" : o.label || "";
+        const cls = "opt" + (a.answer === key ? " chosen" : key === a.recommended ? " rec" : "");
+        opts.append(el("button", {
+          class: cls, type: "button",
+          onclick: (ev) => act(ev, d, { status: "answered", answer: key }, "Sent “" + key + "”.",
+            "{{OWNER}} chose option " + key + (label ? ": " + label : "") + "."),
+        }, [el("b", { text: key + (key === a.recommended ? "  (recommended)" : "") }), label ? el("small", { text: label }) : null]));
+      }
+      body.append(opts);
+    }
+    if (a.note || (Array.isArray(a.noteImages) && a.noteImages.length)) {
+      const n = el("div", { class: "note" }, [el("strong", { text: "Your note: " }), a.note || ""]);
+      if (Array.isArray(a.noteImages) && a.noteImages.length) n.append(thumbs(a.noteImages));
+      body.append(n);
+    }
+
+    const row = el("div", { class: "row" });
+    if (a.detail) {
+      const showing = openDetails.has(d.id);
+      row.append(el("button", { class: "btn", type: "button", "aria-expanded": String(showing), text: showing ? "Hide details" : "Show details",
+        onclick: () => { showing ? openDetails.delete(d.id) : openDetails.add(d.id); render(); } }));
+    }
+    if (where !== "closed") {
+      row.append(el("button", { class: "btn", type: "button", text: a.note ? "Edit note" : "Add a note",
+        onclick: () => { openNotes.has(d.id) ? openNotes.delete(d.id) : openNotes.add(d.id); render(); } }));
+    }
+    if (where === "open") {
+      row.append(el("button", { class: "btn", type: "button", text: "Not needed",
+        onclick: (ev) => act(ev, d, { status: "dismissed" }, "Marked not needed.", "{{OWNER}} marked this not needed.") }));
+    }
+    if (row.childNodes.length) body.append(row);
+    if (a.detail && openDetails.has(d.id)) body.append(renderDetail(a.detail));
+    if (openNotes.has(d.id)) {
+      const ta = el("textarea", { id: "note-" + d.id, "aria-label": "Note for the chat" });
+      ta.value = drafts.has(d.id) ? drafts.get(d.id) : a.note || "";
+      ta.addEventListener("input", () => drafts.set(d.id, ta.value));
+      if (!pics.has(d.id)) pics.set(d.id, Array.isArray(a.noteImages) ? a.noteImages.slice() : []);
+      const mine = pics.get(d.id);
+      ta.addEventListener("paste", (ev) => {
+        const files = [...(ev.clipboardData ? ev.clipboardData.files : [])].filter((f) => f.type.startsWith("image/"));
+        if (files.length) { ev.preventDefault(); addPics(d.id, files); }
+      });
+      const row2 = el("div", { class: "row" }, [
+        el("button", { class: "btn primary", type: "button", text: "Send note",
+          onclick: (ev) => {
+            const text = ta.value.trim();
+            const imgs = mine.slice();
+            act(ev, d, { note: text || null, noteImages: imgs, noteAt: new Date().toISOString() }, "Note sent.",
+              "{{OWNER}} left a note" + (imgs.length ? " with " + imgs.length + " image(s)" : "") + ":\n" + (text || "(no text)"));
+            openNotes.delete(d.id); drafts.delete(d.id); pics.delete(d.id);
+          } }),
+      ]);
+      if (assets) {
+        const fi = el("input", { type: "file", accept: "image/*", multiple: "", id: "pic-" + d.id, hidden: "" });
+        fi.addEventListener("change", () => { addPics(d.id, [...fi.files]); fi.value = ""; });
+        row2.append(fi, el("button", { class: "btn", type: "button", text: "Add image", onclick: () => fi.click() }),
+          el("span", { class: "hint", text: "or paste a screenshot into the box" }));
+      }
+      body.append(ta);
+      if (mine.length) body.append(thumbs(mine, (i) => { mine.splice(i, 1); render(); }));
+      body.append(row2);
+    }
+    if (body.childNodes.length) item.append(el("span"), body);
+    return item;
+  }
+
+  function render() {
+    const projectOf = (d) => d.data.project || "general";
+    const projects = [...new Set(docs.map(projectOf))].sort();
+    const byProject = new Map(projects.map((p) => [p, sections(docs.filter((d) => projectOf(d) === p))]));
+    const openCount = (p) => byProject.get(p).open.length;
+    if (!tab || !projects.includes(tab)) tab = [...projects].sort((x, y) => openCount(y) - openCount(x))[0] || null;
+    const tabs = $("tabs"); tabs.replaceChildren();
+    for (const p of [...projects].sort()) {
+      tabs.append(el("button", { class: "tab", role: "tab", type: "button", "aria-selected": String(p === tab),
+        onclick: () => { tab = p; try { localStorage.setItem("asks.tab", p); } catch (e) {} render(); } },
+        [p, el("span", { class: "count", text: String(openCount(p)) })]));
+    }
+    const { open, wait, closed } = byProject.get(tab) || sections([]);
+    const fill = (id, list, where, emptyText) => {
+      const box = $(id); box.replaceChildren();
+      if (!list.length && emptyText) box.append(el("div", { class: "empty", text: emptyText }));
+      for (const d of list) box.append(card(d, where));
+      $("n-" + id).textContent = list.length ? String(list.length) : "";
+    };
+    fill("open", open, "open", projects.length ? "Nothing to do here. Nice." : "No asks yet. When a chat needs something from you, it shows up here.");
+    fill("wait", wait, "waiting", "");
+    fill("closed", closed, "closed", "");
+  }
+
+  async function start() {
+    const c = window.claude;
+    db = c && c.use ? await c.use("db") : null;
+    c && c.use && c.use("assets").then((a) => { assets = a; render(); }, () => {});
+    c && c.use && c.use("comments").then((x) => { comments = x; }, () => {});
+    if (!db) { $("open").replaceChildren(el("div", { class: "empty", text: "Sign in to claude.ai to see your asks." })); return; }
+    db.collection("asks").onSnapshot((snap) => {
+      docs = snap.docs.filter((s) => s.exists).map((s) => ({ id: s.id, data: s.data() }));
+      render();
+    }, () => say("Lost the live link. Reload the page."));
+    setInterval(() => { if (!(document.activeElement && document.activeElement.tagName === "TEXTAREA")) render(); }, 60000);
+  }
+  start();
+})();
+</script>
+
+</body></html>

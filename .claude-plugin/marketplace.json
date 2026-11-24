@@ -1,0 +1,41 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "ai-utils",
+  "description": "Claude Code plugins and agent skills by Eli Robinson",
+  "owner": {
+    "name": "Eli Robinson",
+    "url": "https://github.com/EliRobinson/ai-utils"
+  },
+  "allowCrossMarketplaceDependenciesOn": [
+    "community-access"
+  ],
+  "plugins": [
+    {
+      "name": "agent-roster",
+      "description": "One shared map from job kind to agent kind for coordinator chats. Native subagents (ticket writer, researcher, lookup, engine and UI implementers, mechanical editor, copy writer, read-only review-gate critics, PR finisher), each pinned to its model, plus a route-work skill with the routing table and coordinator rules, Cursor's thermo-nuclear-code-quality-review skill (vendored, MIT) for the thermonuclear reviewer, and a setup-agentic-workflow skill that installs the worktree, review-gate and merge rules, the ticketing tool setting, the reviewers and two guard hooks into a repo, plus a coordinator prompt template.",
+      "source": "./plugins/agent-roster",
+      "version": "1.8.0",
+      "category": "productivity",
+      "tags": [
+        "agents",
+        "subagents",
+        "coordination",
+        "multi-agent",
+        "code-review"
+      ]
+    },
+    {
+      "name": "asks-board",
+      "description": "One claude.ai artifact board for everything your Claude chats need from you. Chats add asks; your clicks ping the asking chat through one Board Router chat. Includes the daily-use skill and a setup skill with the board page template.",
+      "source": "./plugins/asks-board",
+      "version": "1.0.7",
+      "category": "productivity",
+      "tags": [
+        "artifact",
+        "coordination",
+        "multi-agent",
+        "productivity"
+      ]
+    }
+  ]
+}

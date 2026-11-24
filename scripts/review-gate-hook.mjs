@@ -1,0 +1,1 @@
+../plugins/agent-roster/skills/setup-agentic-workflow/scripts/review-gate-hook.mjs

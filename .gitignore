@@ -1,0 +1,16 @@
+# OS and editor files
+.DS_Store
+.idea/
+
+# Secrets and local settings
+.env*
+.claude/settings.local.json
+.claude/worktrees/
+
+# Dependencies, caches and logs
+node_modules/
+__pycache__/
+*.log
+
+# Built .skill bundles (regenerate with scripts/build-skill-bundles.py)
+dist/
