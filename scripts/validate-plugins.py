@@ -4,7 +4,9 @@
 Checks the things that silently stop a plugin or skill from loading — a
 mangled frontmatter block, a manifest name that drifted from its marketplace
 entry, a ${CLAUDE_PLUGIN_ROOT} path left behind by a move. It also runs each skill's
-scripts/check-*.mjs self-check when node is installed.
+scripts/check-*.mjs self-check when node is installed, runs the unit tests in
+scripts/test_*.py, and checks the GitHub Actions workflows (rules in
+docs/agents/ci.md). It is the whole test gate, locally and in CI.
 
 Run from the repo root:
 
@@ -17,14 +19,18 @@ problem it found.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import unittest
 from pathlib import Path
 from typing import NamedTuple
+
+import workflow_rules  # scripts/workflow_rules.py, next to this file
 
 ROOT = Path(__file__).resolve().parent.parent
 MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
@@ -427,6 +433,65 @@ def check_vendored_thermonuclear() -> None:
         )
 
 
+WORKFLOWS = ROOT / ".github" / "workflows"
+CI_WORKFLOW = WORKFLOWS / "ci.yml"
+TESTS_DIR = ROOT / "scripts"
+TEST_PATTERN = "test_*.py"
+
+
+def check_workflows() -> None:
+    """The CI workflow exists, and every workflow keeps the hardening rules."""
+    if not CI_WORKFLOW.is_file():
+        fail(f"{rel(CI_WORKFLOW)}: missing; it runs these checks on every PR")
+    for path in sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")]):
+        text = path.read_text(encoding="utf-8")
+        found = workflow_rules.workflow_problems(text)
+        if path == CI_WORKFLOW:
+            found += workflow_rules.ci_job_problems(text)
+        for number, msg in found:
+            fail(f"{rel(path)}:{number}: {msg}" if number else f"{rel(path)}: {msg}")
+
+
+def run_unit_tests() -> None:
+    """Run scripts/test_*.py, so this one command is the whole gate."""
+    where = f"{rel(TESTS_DIR)}/{TEST_PATTERN}"
+    suite = unittest.defaultTestLoader.discover(str(TESTS_DIR), pattern=TEST_PATTERN)
+    result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
+    if result.testsRun == 0:
+        fail(f"{where}: found no unit tests; the gate must run them")
+    elif not result.wasSuccessful():
+        failed = [test.id() for test, _ in (*result.failures, *result.errors)]
+        fail(f"{where}: {len(failed)} unit test(s) failed: {', '.join(failed)}; see the output with "
+             f"`python3 -m unittest discover -s {rel(TESTS_DIR)} -p '{TEST_PATTERN}'`")
+
+
+def run_self_checks() -> None:
+    """Run every skill's scripts/check-*.mjs, so a hook regression fails here.
+
+    Skipped, with a note, when node is not installed; in CI (`CI` set) a
+    missing node fails instead, so CI never skips them.
+    """
+    checks = sorted(ROOT.glob("plugins/*/skills/*/scripts/check-*.mjs"))
+    if not checks:
+        return
+    if shutil.which("node") is None:
+        if os.environ.get("CI"):
+            fail(f"node not found; CI must run the {len(checks)} self-check(s), "
+                 "so add an `actions/setup-node` step to ci.yml")
+            return
+        print(f"note: node not found, skipped {len(checks)} self-check(s)", file=sys.stderr)
+        return
+    for check in checks:
+        try:
+            run = subprocess.run(["node", str(check)], capture_output=True, text=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            fail(f"{check.relative_to(ROOT)}: self-check did not finish in 300 seconds")
+            continue
+        if run.returncode != 0:
+            tail = "\n".join((run.stdout + run.stderr).strip().splitlines()[-15:])
+            fail(f"{check.relative_to(ROOT)}: self-check failed\n{tail}")
+
+
 def main() -> int:
     marketplace = load_json(MARKETPLACE)
     if marketplace is None:
@@ -494,31 +559,11 @@ def main() -> int:
     check_agent_roster_templates()
     check_vendored_thermonuclear()
     check_accessibility_agents()
+    check_workflows()
+    run_unit_tests()
     run_self_checks()
     report(skill_count, len(entries))
     return 1 if problems else 0
-
-
-def run_self_checks() -> None:
-    """Run every skill's scripts/check-*.mjs, so a hook regression fails here.
-
-    Skipped, with a note, when node is not installed.
-    """
-    checks = sorted(ROOT.glob("plugins/*/skills/*/scripts/check-*.mjs"))
-    if not checks:
-        return
-    if shutil.which("node") is None:
-        print(f"note: node not found, skipped {len(checks)} self-check(s)", file=sys.stderr)
-        return
-    for check in checks:
-        try:
-            run = subprocess.run(["node", str(check)], capture_output=True, text=True, timeout=300)
-        except subprocess.TimeoutExpired:
-            fail(f"{check.relative_to(ROOT)}: self-check did not finish in 300 seconds")
-            continue
-        if run.returncode != 0:
-            tail = "\n".join((run.stdout + run.stderr).strip().splitlines()[-15:])
-            fail(f"{check.relative_to(ROOT)}: self-check failed\n{tail}")
 
 
 def report(skill_count: int = 0, plugin_count: int = 0) -> None:
