@@ -215,9 +215,69 @@ function refusal(what, problems, next = "Run them on the branch before you open 
 
 const PR_ACTIONS = ["merge", "ready", "create", "new"];
 const NAMES_PR_OP = new RegExp(`\\bpr\\s+(?:${PR_ACTIONS.join("|")})\\b`);
-const MAY_CONCERN = /\bgh\b|pulls\/|graphql|\bpr\b/;
-// A command line that may hold a PR write somewhere the gate cannot read.
-const mayWritePr = (command) => NAMES_PR_OP.test(command) || /pulls\/|graphql/.test(command);
+const MERGE_MUTATIONS =
+  /\b(mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|markPullRequestReadyForReview|createPullRequest|mergeBranch)\b/;
+const ACTIONS = PR_ACTIONS.join("|");
+// Text that may name a PR write: `gh <word> merge|ready|create|new` (the word
+// may be a variable), `pr merge|...`, a GitHub API path that merges or opens a
+// PR or runs GraphQL, or a GraphQL mutation.
+const PR_HINT = new RegExp(
+  [
+    `\\bgh\\s+\\S+\\s+(?:${ACTIONS})\\b`,
+    NAMES_PR_OP.source,
+    "/(?:pulls|merges|graphql)(?=$|[\\s/?#])",
+    "\\bapi\\s+graphql\\b",
+    "\\bmutation\\b",
+    MERGE_MUTATIONS.source,
+  ].join("|"),
+  "g",
+);
+// A line worth walking at all. Tested on plain(line), like PR_HINT.
+const MAY_CONCERN = /\bgh\b|\bpr\b|pulls|merges|graphql|mutation|github/i;
+// Longer lines that may concern a PR are refused unread, so no pattern runs long on them.
+const MAX_LINE = 20000;
+// Text with quotes, backslashes and $'...' openers taken out, so `gh pr "merge"`
+// and `gh pr $'merge'` read as what the shell runs.
+const plain = (text) => text.replace(/\$'|['"\\]/g, "");
+const hintCount = (text) => plain(text).match(PR_HINT)?.length ?? 0;
+// The words of a call as the program sees them, program name first.
+const wordsText = (call) => [call.program, ...call.args].map((w) => w.text).join(" ");
+// A word the shell expands into other text: built at run time, or a brace
+// expansion such as {merge,} (but not gh api's {owner} placeholders).
+function expands(word) {
+  if (word.dynamic) return true;
+  for (const part of word.text.split("{").slice(1)) {
+    const close = part.indexOf("}");
+    const inner = close === -1 ? "" : part.slice(0, close);
+    if (inner.includes(",") || inner.includes("..")) return true;
+  }
+  return false;
+}
+
+// GitHub REST and GraphQL paths, matched against apiPath().
+const API = {
+  graphql: /\/graphql$/,
+  createPr: /\/pulls$/,
+  mergePr: /\/pulls\/[^/]+\/merge$/,
+  mergeBranch: /\/merges$/,
+};
+const PR_WRITE_PATHS = [API.createPr, API.mergePr, API.mergeBranch];
+
+// The path a gh api endpoint or an HTTP URL reaches, as the server sees it:
+// no scheme, host, query or fragment, percent-decoded, dot segments resolved,
+// no trailing slash. "repos/o/r/pulls/5/x/../merge?a=1" -> "/repos/o/r/pulls/5/merge".
+export function apiPath(text) {
+  let p = text.split(/[?#]/)[0];
+  try {
+    p = decodeURIComponent(p);
+  } catch {
+    // keep it as written
+  }
+  p = path.posix.normalize(`/${p.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, "")}`);
+  while (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+  return p;
+}
+
 // Flags that take a value, per subcommand. On `merge`, -r and -m are the
 // booleans --rebase and --merge; on `create` they take a value.
 const REPO_FLAGS = ["-R", "--repo"];
@@ -233,8 +293,6 @@ const VALUE_FLAGS = {
 VALUE_FLAGS.new = VALUE_FLAGS.create;
 // Programs that only print or record their words, so `pr merge` in them runs nothing.
 const READERS = new Set(["echo", "printf", "cat", "grep", "rg", "man", "less", "head", "tail", "git"]);
-const MERGE_MUTATIONS =
-  /\b(mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|markPullRequestReadyForReview|createPullRequest|mergeBranch)\b/;
 
 // The MCP tools the gate handles, by the last part of the tool name. The
 // settings matcher is built from the same list (merge-settings.mjs).
@@ -249,8 +307,9 @@ export const MCP_TOOLS = {
 };
 export const MCP_MATCHER = `mcp__.*__(${Object.keys(MCP_TOOLS).join("|")})`;
 
-// The words after `gh pr`: the action, its flags { get, boolean } and the
-// PR selector. Flags may come before the action (`gh pr -R o/r merge 5`).
+// The words after `gh pr`: the action word, its flags { get, boolean } and
+// the PR selector. Flags may come before the action (`gh pr -R o/r merge 5`).
+// -R and --repo are one flag; like gh, the last one wins.
 function parsePrArgs(words) {
   const flags = new Map();
   let selector = null;
@@ -259,156 +318,294 @@ function parsePrArgs(words) {
     const { text, dynamic } = words[i];
     const eq = text.startsWith("--") ? text.indexOf("=") : -1;
     const name = eq === -1 ? text : text.slice(0, eq);
-    if ((VALUE_FLAGS[action ?? "pr"] ?? VALUE_FLAGS.pr).has(name)) {
-      flags.set(name, eq === -1 ? words[++i] ?? { text: "", dynamic: true } : { text: text.slice(eq + 1), dynamic });
+    const stored = REPO_FLAGS.includes(name) ? "--repo" : name;
+    if ((VALUE_FLAGS[action?.text ?? "pr"] ?? VALUE_FLAGS.pr).has(name)) {
+      flags.set(stored, eq === -1 ? words[++i] ?? { text: "", dynamic: true } : { text: text.slice(eq + 1), dynamic });
     } else if (text.startsWith("-")) {
-      flags.set(name, eq === -1 ? "true" : text.slice(eq + 1).toLowerCase());
+      flags.set(stored, eq === -1 ? "true" : text.slice(eq + 1).toLowerCase());
     } else if (action === null) {
-      action = text;
+      action = words[i];
     } else if (selector === null) {
       selector = words[i];
     }
   }
   return {
     action,
-    get: (...names) => names.map((n) => flags.get(n)).find((v) => v !== undefined),
+    get: (...names) => names.map((n) => flags.get(REPO_FLAGS.includes(n) ? "--repo" : n)).find((v) => v !== undefined),
     boolean: (...names) => names.some((n) => flags.get(n) === "true"),
     selector,
   };
 }
 
-// The HTTP method of a `gh api` call. gh sends GET unless fields are given.
-function apiMethod(text) {
-  const at = text.findIndex((t) => t === "-X" || t === "--method");
-  if (at !== -1 && text[at + 1]) return text[at + 1].toUpperCase();
-  const joined = text.map((t) => /^(?:-X|--method=)(\w+)$/.exec(t)?.[1]).find(Boolean);
-  if (joined) return joined.toUpperCase();
-  return text.some((t) => /^(-f|-F|--field|--raw-field|--input)(=|$)/.test(t)) ? "POST" : "GET";
+// The words after `gh api`: { method, endpoint, fields, input }. gh sends
+// GET unless it is given fields or --input; the last -X wins.
+const API_VALUE_FLAGS = new Set(["-X", "--method", "-f", "--raw-field", "-F", "--field", "-H", "--header", "--input",
+  "-q", "--jq", "-t", "--template", "--hostname", "-p", "--preview", "--cache"]);
+function parseApiArgs(words) {
+  let method = null;
+  let endpoint = null;
+  let input = false;
+  const fields = [];
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const { text } = word;
+    let name = text;
+    let value;
+    const eq = text.startsWith("--") ? text.indexOf("=") : -1;
+    if (eq !== -1 && API_VALUE_FLAGS.has(text.slice(0, eq))) {
+      name = text.slice(0, eq);
+      value = { text: text.slice(eq + 1), dynamic: word.dynamic };
+    } else if (API_VALUE_FLAGS.has(text)) {
+      value = words[++i] ?? { text: "", dynamic: true };
+    } else if (/^-[a-zA-Z]./.test(text) && API_VALUE_FLAGS.has(text.slice(0, 2))) {
+      name = text.slice(0, 2); // glued: -XPUT, -Fquery=@q.graphql
+      value = { text: text.slice(2), dynamic: word.dynamic };
+    } else {
+      if (!text.startsWith("-") && endpoint === null) endpoint = word;
+      continue;
+    }
+    if (name === "-X" || name === "--method") method = value.dynamic ? "?" : value.text.toUpperCase();
+    else if (name === "--input") input = true;
+    else if (["-f", "--raw-field", "-F", "--field"].includes(name)) {
+      fields.push({ ...value, fromFile: name === "-F" || name === "--field" });
+    }
+  }
+  return { method: method ?? (fields.length || input ? "POST" : "GET"), endpoint, fields, input };
 }
 
 // True when the gate can read the query of a `gh api graphql` call: no
 // --input body, and a query field given inline, not from a file (`-F
 // query=@file`), stdin or a variable.
-function graphqlQueryReadable(words) {
-  for (let i = 0; i < words.length; i++) {
-    const { text, dynamic } = words[i];
-    if (/^--input(?:=|$)/.test(text)) return false;
-    const m = /^(-F|-f|--field=|--raw-field=|--field|--raw-field)(.*)$/.exec(text);
-    if (!m) continue;
-    const field = m[2] !== "" ? { text: m[2], dynamic } : words[++i];
-    if (!field) return false;
-    const name = /^([\w-]+)=/.exec(field.text)?.[1];
+function graphqlQueryReadable(api) {
+  if (api.input) return false;
+  return api.fields.every((field) => {
+    const name = /^([\w-]+)(?:\[[^\]]*\])*=/.exec(field.text)?.[1];
     if (name === undefined) return false;
-    if (name !== "query") continue;
-    // -F and --field read `@file`; -f and --raw-field send it as text.
-    const fromFile = /^(?:-F|--field)/.test(m[1]) && field.text.startsWith("query=@");
-    if (field.dynamic || fromFile) return false;
-  }
-  return true;
+    return name !== "query" || !(field.dynamic || (field.fromFile && field.text.startsWith("query=@")));
+  });
 }
 
-// curl to the GitHub API: a write to a PR's merge, or to `pulls` (opening a
-// PR), and any GitHub GraphQL call are refused. The gate cannot read a curl
-// body, and gh does all three in a form it can check.
-function classifyCurl(call) {
-  const text = call.args.map((w) => w.text);
-  const urls = call.args.map((w) => ({ ...w, path: w.text.replace(/[?#].*$/, "").replace(/\/+$/, "") }));
-  if (urls.some((u) => /\/graphql$/.test(u.path) && (u.dynamic || /github/i.test(u.path)))) {
-    return { kind: "refuse", reason: "GitHub GraphQL through curl is refused; use gh api graphql with the query inline" };
+// One HTTP request an HTTP client makes: { writes, urls, headers, unread }.
+// writes: a method other than GET or HEAD. unread: options that hide the
+// request from the command line (curl -K, --next).
+const CURL_LONG_VALUES = new Set(["--header", "--data", "--data-raw", "--data-binary", "--data-urlencode",
+  "--data-ascii", "--json", "--form", "--form-string", "--upload-file", "--user", "--output", "--user-agent",
+  "--referer", "--cookie", "--cookie-jar", "--proxy", "--write-out", "--max-time", "--connect-timeout", "--retry",
+  "--config", "--request", "--url", "--expand-data", "--expand-json", "--expand-url", "--variable", "--range",
+  "--cert", "--cacert", "--key", "--resolve", "--connect-to", "--oauth2-bearer", "--unix-socket", "--dump-header"]);
+const CURL_SHORT_VALUES = "XHdFTuoAebcxwmKrEzDQCYy";
+function curlRequest(call) {
+  const methods = [];
+  const urls = [];
+  const headers = [];
+  let body = false;
+  let get = false;
+  let head = false;
+  let unread = false;
+  const words = call.args;
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const { text } = word;
+    let name = null;
+    let value;
+    if (text === "--next" || text === "-:") {
+      unread = true;
+    } else if (text === "--get") {
+      get = true;
+    } else if (text === "--head") {
+      head = true;
+    } else if (text.startsWith("--")) {
+      if (CURL_LONG_VALUES.has(text)) [name, value] = [text, words[++i]];
+    } else if (text.startsWith("-") && text.length > 1) {
+      for (let k = 1; k < text.length && name === null; k++) {
+        const ch = text[k];
+        if (CURL_SHORT_VALUES.includes(ch)) {
+          name = `-${ch}`;
+          value = k + 1 < text.length ? { text: text.slice(k + 1), dynamic: word.dynamic } : words[++i];
+        } else if (ch === "G") get = true;
+        else if (ch === "I") head = true;
+        else if (ch === ":") unread = true;
+      }
+    } else {
+      urls.push(word);
+    }
+    if (name === null) continue;
+    value ??= { text: "", dynamic: true };
+    if (name === "-X" || name === "--request") methods.push(value);
+    else if (name === "-H" || name === "--header") headers.push(value);
+    else if (name === "--url") urls.push(value);
+    else if (name === "-K" || name === "--config") unread = true;
+    else if (/^-[dFT]$|^--(?:data|json|form|upload-file|expand-data|expand-json)/.test(name)) body = true;
   }
-  if (!urls.some((u) => /\/pulls(?:\/[^/]+\/merge)?$/.test(u.path))) return null;
-  // curl sends GET (or HEAD with -I) unless it is given a method, a body or an upload.
-  const at = text.findIndex((t) => t === "-X" || t === "--request");
-  const method = at !== -1 ? text[at + 1] ?? "" : null;
-  const writes = method !== null
-    ? !/^(?:GET|HEAD)$/i.test(method)
-    : text.some((t) => /^--(?:data|json|form|upload-file)/.test(t) || /^-[a-zA-Z]*[dFTX]/.test(t));
-  return writes
-    ? { kind: "refuse", reason: "merging or opening a PR through curl is refused; use gh pr merge or gh pr create, which the gate can check" }
+  const method = methods.at(-1);
+  const writes = method
+    ? method.dynamic || !/^(?:GET|HEAD)$/i.test(method.text)
+    : body && !get && !head;
+  return { writes, urls, headers, unread };
+}
+
+// wget: --method, or a POST body option.
+function wgetRequest(call) {
+  const urls = [];
+  let method = null;
+  let body = false;
+  const words = call.args;
+  for (let i = 0; i < words.length; i++) {
+    const { text, dynamic } = words[i];
+    if (text === "--method") method = words[++i] ?? { text: "", dynamic: true };
+    else if (text.startsWith("--method=")) method = { text: text.slice(9), dynamic };
+    else if (/^--(?:post|body)-(?:data|file)\b/.test(text)) body = true;
+    else if (!text.startsWith("-")) urls.push(words[i]);
+  }
+  const writes = method ? method.dynamic || !/^(?:GET|HEAD)$/i.test(method.text) : body;
+  return { writes, urls, headers: [], unread: false };
+}
+
+// HTTPie and xh: `http [flags] [METHOD] URL [items]`. Data items make a POST.
+const HTTP_METHODS = /^(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$/i;
+function httpieRequest(call) {
+  const words = call.args.filter((w) => !w.text.startsWith("-"));
+  const method = words[0] && HTTP_METHODS.test(words[0].text) ? words.shift() : null;
+  const url = words.shift();
+  const items = words.some((w) => /^[^=:]*(?::=|=|@)/.test(w.text));
+  const writes = method ? !/^(?:GET|HEAD)$/i.test(method.text) : items;
+  return { writes, urls: url ? [url] : [], headers: [], unread: false };
+}
+
+// An HTTP client call against the GitHub API: a write that merges or opens a
+// PR, and any GitHub GraphQL call, are refused. The gate cannot read an HTTP
+// body, and gh does all three in a form it can check. line is the whole Bash
+// line, for a URL the gate cannot read.
+function classifyHttp(request, call, line) {
+  const github = (u) => /github/i.test(u.text) || request.headers.some((h) => /github/i.test(h.text));
+  if (request.urls.some((u) => API.graphql.test(apiPath(u.text)) && (u.dynamic || github(u)))) {
+    return refuse("it cannot read a GitHub GraphQL call made with an HTTP client. Use gh api graphql with the query inline: -f query='...'.");
+  }
+  if (!request.writes) return null;
+  if (request.urls.some((u) => PR_WRITE_PATHS.some((re) => re.test(apiPath(u.text))))) {
+    return refuse("it cannot read an HTTP call that merges or opens a PR. Use gh pr merge or gh pr create.");
+  }
+  const unreadUrl = request.urls.some((u) => expands(u) || /[{[]/.test(u.text));
+  if ((request.unread || unreadUrl || call.wrappers.includes("xargs")) && MAY_CONCERN.test(plain(line))) {
+    return refuse("it cannot read which URL this HTTP write goes to, and the command names a PR or GraphQL path. Write the URL out in full, or use gh.");
+  }
+  return null;
+}
+
+// A refusal about how the command is written, not about the record.
+const refuse = (reason) => ({ kind: "refuse", reason });
+// A call the gate cannot read. bashProblems refuses it only when the line
+// names a PR write the gate did not read elsewhere.
+const UNREAD = { kind: "unread" };
+
+// gh: `gh pr merge|ready|create|new`, and `gh api` merges, PR opens and GraphQL.
+function classifyGh(call) {
+  const text = call.args.map((w) => w.text);
+  if (text.includes("--help") || text.includes("-h")) return null;
+  if (call.args[0] && expands(call.args[0])) return refuse("it cannot read which gh command this is. Write the gh subcommand out in full.");
+  if (call.wrappers.includes("xargs") && !(text[0] === "pr" || text[0] === "api")) return UNREAD;
+  if (text[0] === "pr") return classifyGhPr(call);
+  if (text[0] === "api") return classifyGhApi(call);
+  return null;
+}
+
+function classifyGhPr(call) {
+  const pr = parsePrArgs(call.args.slice(1));
+  if (pr.action && expands(pr.action)) {
+    return refuse("it cannot read which gh pr action this is. Write the action (merge, view, ...) out in full.");
+  }
+  if (!PR_ACTIONS.includes(pr.action?.text)) return null;
+  if (call.wrappers.includes("xargs")) {
+    return refuse("it cannot read a PR command whose arguments come from xargs. Run gh with the PR number written out.");
+  }
+  const action = pr.action.text;
+  // A PR URL names its repo, whatever -R says.
+  const fromUrl = pr.selector && !pr.selector.dynamic
+    ? /github\.com\/([\w.-]+\/[\w.-]+)\/pull\/\d+/i.exec(pr.selector.text)?.[1]
+    : undefined;
+  const ghRepo = call.env.GH_REPO;
+  const repo = fromUrl
+    ? { text: fromUrl, dynamic: false }
+    : pr.get(...REPO_FLAGS) ?? (ghRepo !== undefined ? { text: ghRepo ?? "", dynamic: ghRepo === null } : null);
+  if (action === "create" || action === "new") return { kind: "create", pr, repo };
+  if (action === "ready" && pr.boolean("--undo")) return null;
+  return { kind: "remote", what: `\`gh pr ${action}\``, selector: pr.selector, repo, host: call.env.GH_HOST };
+}
+
+function classifyGhApi(call) {
+  if (MERGE_MUTATIONS.test(plain(wordsText(call)))) {
+    return refuse("GraphQL mutations that merge, open or take a PR out of draft are refused. Use gh pr merge, ready or create.");
+  }
+  const api = parseApiArgs(call.args.slice(1));
+  if (!api.endpoint) return null;
+  if (expands(api.endpoint)) {
+    return api.method === "GET" ? null : refuse("it cannot tell which endpoint this gh api write goes to. Write the endpoint out in full.");
+  }
+  const where = apiPath(api.endpoint.text);
+  if (API.graphql.test(where)) {
+    return graphqlQueryReadable(api) ? null
+      : refuse("it cannot read a GraphQL query from a file, stdin or a variable. Pass it inline with -f query='...'.");
+  }
+  if (api.method === "GET") return null;
+  if (API.createPr.test(where)) return refuse("it cannot check a PR opened through gh api. Use gh pr create.");
+  if (API.mergeBranch.test(where)) return refuse("it cannot check a branch merge through gh api. Use gh pr merge.");
+  if (!API.mergePr.test(where)) return null;
+  const merge = /(?:\/repos\/([\w.-]+\/[\w.-]+))?\/pulls\/(\d+)\/merge$/.exec(where);
+  if (!merge) return refuse("it cannot tell which PR this gh api merge names. Use gh pr merge <number>.");
+  return {
+    kind: "remote",
+    what: "A merge through gh api",
+    selector: { text: merge[2], dynamic: false },
+    repo: merge[1] ? { text: merge[1], dynamic: false } : null,
+    host: call.env.GH_HOST,
+  };
+}
+
+// Any other program: one that is handed a PR command as text (python -c,
+// node -e, alias, a wrapper the walk does not know) is refused.
+function classifyOther(call, prog) {
+  if (prog === null) return UNREAD;
+  if (READERS.has(prog)) return null;
+  const said = plain(wordsText(call));
+  return NAMES_PR_OP.test(said) || MERGE_MUTATIONS.test(said)
+    ? refuse("it cannot read a PR command run through another program. Run gh directly.")
     : null;
 }
 
-// True when call runs a script the walk could not read: an `eval` or
-// `sh -c` built at run time, or a shell reading its script from stdin
-// (`... | bash`, `bash <<< ...`). The walk reads literal ones itself.
-function runsUnreadScript(call, prog, shell) {
-  if (prog === "eval") return true;
-  if (!shell.SHELLS.has(prog ?? "")) return false;
-  return call.args.every((w) => w.text.startsWith("-")) || call.args.some((w) => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(w.text));
-}
+const CLASSIFIERS = {
+  gh: classifyGh,
+  curl: (call, line) => classifyHttp(curlRequest(call), call, line),
+  wget: (call, line) => classifyHttp(wgetRequest(call), call, line),
+  http: (call, line) => classifyHttp(httpieRequest(call), call, line),
+  https: (call, line) => classifyHttp(httpieRequest(call), call, line),
+  xh: (call, line) => classifyHttp(httpieRequest(call), call, line),
+  xhs: (call, line) => classifyHttp(httpieRequest(call), call, line),
+};
 
 // Classify one simple command into the PR operation it makes, or null:
 //   { kind: "create", pr, repo }               gh pr create / new, draft or not
 //   { kind: "remote", what, selector, repo }   a merge or ready of an existing PR
 //   { kind: "refuse", reason }                 a form the gate cannot read
-// command is the whole Bash line the call came from.
-function classify(call, shell, command) {
+//   { kind: "unread" }                         a command the gate cannot read
+// line is the whole Bash line, for HTTP calls whose URL it cannot read.
+function classify(call, shell, line) {
   const prog = shell.nameOf(call);
-  const text = call.args.map((w) => w.text);
-  const namesOp = text.some((t, i) => t === "pr" && PR_ACTIONS.includes(text[i + 1]));
-  const viaCurl = prog === "curl" ? classifyCurl(call) : null;
-  if (viaCurl) return viaCurl;
-  if (runsUnreadScript(call, prog, shell) && mayWritePr(command)) {
-    return { kind: "refuse", reason: `the gate cannot read the script \`${prog}\` runs here, and this command names a PR write; run gh directly, with the PR command in plain text` };
-  }
-  if (prog !== "gh") {
-    return namesOp && !READERS.has(prog)
-      ? { kind: "refuse", reason: "the gate cannot read a PR command run through another program or a variable; run gh directly" }
-      : null;
-  }
-  if (text.includes("--help") || text.includes("-h")) return null;
-  if (text[0] === "pr") {
-    const pr = parsePrArgs(call.args.slice(1));
-    if (!PR_ACTIONS.includes(pr.action)) return null;
-    if (call.wrappers.includes("xargs")) {
-      return { kind: "refuse", reason: "the gate cannot read a PR command whose arguments come from xargs" };
-    }
-    const repo = pr.get(...REPO_FLAGS) ?? null;
-    if (pr.action === "create" || pr.action === "new") return { kind: "create", pr, repo };
-    if (pr.action === "ready" && pr.boolean("--undo")) return null;
-    return { kind: "remote", what: `\`gh pr ${pr.action}\``, selector: pr.selector, repo };
-  }
-  if (text[0] === "api") {
-    if (MERGE_MUTATIONS.test(text.join(" "))) {
-      return { kind: "refuse", reason: "GraphQL PR merge, ready and create mutations are refused; use gh pr merge, ready or create" };
-    }
-    const graphql = call.args.slice(1).some((w) => /(?:^|\/)graphql$/.test(w.text));
-    if (graphql && !graphqlQueryReadable(call.args.slice(1))) {
-      return { kind: "refuse", reason: "the gate cannot read a GraphQL query from a file, stdin or a variable; pass it inline with -f query='...'" };
-    }
-    const createPath = call.args.some((w) => /(?:^|\/)pulls\/?$/.test(w.text));
-    if (createPath && apiMethod(text) !== "GET") {
-      return { kind: "refuse", reason: "opening a PR through gh api is refused; use gh pr create, which the gate can check" };
-    }
-    const apiPath = call.args.find((w) => /(?:^|\/)pulls\/[^/]+\/merge$/.test(w.text));
-    if (!apiPath || apiMethod(text) === "GET") return null;
-    const merge = /(?:repos\/([\w.-]+\/[\w.-]+)\/)?pulls\/(\d+)\/merge$/.exec(apiPath.text);
-    if (!merge || apiPath.dynamic) {
-      return { kind: "refuse", reason: "the gate cannot tell which PR this gh api merge names; use gh pr merge <number>" };
-    }
-    return {
-      kind: "remote",
-      what: "A merge through gh api",
-      selector: { text: merge[2], dynamic: false },
-      repo: merge[1] ? { text: merge[1], dynamic: false } : null,
-    };
-  }
-  return null;
+  const byProgram = CLASSIFIERS[prog];
+  return byProgram ? byProgram(call, line) : classifyOther(call, prog);
 }
 
 // "owner/name", lower case, for any spelling of a github.com repo: owner/name,
 // with a trailing .git or /, github.com/owner/name, an https or ssh URL, or
 // git@github.com:owner/name.git. GitHub names ignore case. null for anything
-// else, another host included.
-function repoKey(text) {
-  const bare = text
-    .trim()
-    .toLowerCase()
-    .replace(/^[a-z][a-z0-9+.-]*:\/\//, "")
-    .replace(/^[^@/]*@/, "")
-    .replace(/^(?:www\.)?github\.com(?::\d+)?[/:]/, "")
-    .replace(/\/+$/, "")
-    .replace(/\.git$/, "");
+// else, another host included. With requireHost, a bare owner/name (which a
+// git remote would read as a local path) is null too.
+function repoKey(text, { requireHost = false } = {}) {
+  let bare = text.trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").replace(/^[^@/]*@/, "");
+  const hosted = /^(?:www\.)?github\.com(?::\d+)?[/:]/.exec(bare);
+  if (requireHost && !hosted) return null;
+  if (hosted) bare = bare.slice(hosted[0].length);
+  while (bare.endsWith("/")) bare = bare.slice(0, -1);
+  if (bare.endsWith(".git")) bare = bare.slice(0, -4);
   return /^[\w.-]+\/[\w.-]+$/.test(bare) ? bare : null;
 }
 
@@ -418,8 +615,8 @@ function thisRepo(cwd) {
       encoding: "utf8",
       timeout: 5000,
       stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    return /github\.com[/:]/i.test(url) ? repoKey(url) : null;
+    });
+    return repoKey(url, { requireHost: true });
   } catch {
     return null;
   }
@@ -434,12 +631,15 @@ function isAnotherRepo(repo, cwd) {
   return own !== null && named !== null && named !== own;
 }
 
-function fetchBody(selector, repo, cwd) {
+function fetchBody(selector, repo, cwd, host) {
   if (selector?.dynamic) throw new Error("the PR is chosen at run time, so the gate cannot read it");
+  if (repo?.dynamic) throw new Error("the repo is chosen at run time, so the gate cannot read the PR");
+  if (host === null) throw new Error("GH_HOST is set at run time, so the gate cannot read the PR");
   const args = ["pr", "view", ...(selector ? [selector.text] : []), "--json", "body", "-q", ".body"];
   if (repo) args.push("-R", repo.text);
+  const env = host === undefined ? process.env : { ...process.env, GH_HOST: host };
   try {
-    return execFileSync("gh", args, { cwd, encoding: "utf8", timeout: 15000, stdio: ["ignore", "pipe", "pipe"] });
+    return execFileSync("gh", args, { cwd, env, encoding: "utf8", timeout: 15000, stdio: ["ignore", "pipe", "pipe"] });
   } catch (error) {
     throw new Error(`\`gh ${args.join(" ")}\` failed: ${String(error.stderr ?? error.message).trim()}`);
   }
@@ -468,7 +668,7 @@ function createBody(pr, dir) {
 // The refusal for one operation, or null. dir is where it runs; when a cd
 // could not be followed it is null and the session's cwd stands in.
 function problemFor(op, dir, cwd) {
-  if (op.kind === "refuse") return op.reason;
+  if (op.kind === "refuse") return formRefusal(op.reason);
   const where = dir ?? cwd;
   if (isAnotherRepo(op.repo, where)) return null;
   if (op.kind === "create") {
@@ -477,27 +677,50 @@ function problemFor(op, dir, cwd) {
     return found.length ? refusal(OPENING_PR, found) : null;
   }
   try {
-    const found = recordProblems(fetchBody(op.selector, op.repo, where));
+    const found = recordProblems(fetchBody(op.selector, op.repo, where, op.host));
     return found.length ? refusal(op.what, found, FINISH_OPEN_PR) : null;
   } catch (error) {
     return refusal(op.what, [error.message], FINISH_OPEN_PR);
   }
 }
 
+// A refusal about how a command is written. A Review record does not clear it.
+const formRefusal = (reason) =>
+  `Refused by the review gate: ${reason}\nThis is about how the command is written; a complete Review record does not change it.`;
+
 // Every reason to refuse a Bash command. An empty list allows it.
 // shell is agent-hook-shell.mjs, passed in so it loads inside main's try.
+//
+// A call the gate cannot read (an eval or sh -c script built at run time, a
+// script piped into a shell, a program built at run time) is refused only
+// when the line names more PR writes than the gh and HTTP calls the gate did
+// read. So `eval "$(ssh-agent -s)" && gh pr merge 5` is checked like the
+// merge alone, and `X='gh pr merge 5'; eval "$X"` is refused.
 export function bashProblems(command, cwd, shell) {
-  if (!MAY_CONCERN.test(command)) return [];
+  if (!MAY_CONCERN.test(plain(command))) return [];
+  if (command.length > MAX_LINE) {
+    return [formRefusal("this command is too long for it to check, and it may write to a PR. Split it into shorter Bash calls.")];
+  }
+  const hinted = hintCount(command) > 0;
   let steps;
   try {
     steps = [...shell.walk(command, cwd)];
   } catch {
-    return mayWritePr(command) ? ["the gate cannot parse this command"] : [];
+    return hinted ? [formRefusal("it cannot parse this command, and the command may write to a PR. Split it into simpler Bash calls, and run the gh PR command on its own.")] : [];
   }
-  return steps
-    .map(({ call, dir }) => {
-      const op = classify(call, shell, command);
-      return op && problemFor(op, dir, cwd);
+  const ops = steps.map((step) => ({ step, op: step.opaque ? UNREAD : classify(step.call, shell, command) }));
+  const read = ops
+    .filter(({ step, op }) => op?.kind !== "unread" && CLASSIFIERS[shell.nameOf(step.call)])
+    .reduce((n, { step }) => n + hintCount(wordsText(step.call)), 0);
+  const hidden = hintCount(command) > read;
+  return ops
+    .map(({ step, op }) => {
+      if (op?.kind === "unread") {
+        if (!hidden) return null;
+        const what = shell.nameOf(step.call) ? `the script that \`${shell.nameOf(step.call)}\` runs` : "a command whose program is built at run time";
+        return formRefusal(`it cannot read ${what}, and this command names a PR write it did not read elsewhere. Run that part in its own Bash call, then run the gh PR command on its own, written out in full.`);
+      }
+      return op && problemFor(op, step.dir, cwd);
     })
     .filter(Boolean);
 }
@@ -529,7 +752,7 @@ async function main() {
   }
   const tool = typeof payload?.tool_name === "string" ? payload.tool_name : "";
   const command = payload?.tool_input?.command;
-  const concerns = tool === "Bash" ? typeof command === "string" && MAY_CONCERN.test(command) : tool.startsWith("mcp__");
+  const concerns = tool === "Bash" ? typeof command === "string" && MAY_CONCERN.test(plain(command)) : tool.startsWith("mcp__");
   if (!concerns) return;
   let problems;
   try {

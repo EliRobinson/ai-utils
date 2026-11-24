@@ -24,7 +24,7 @@ cd ../<repo>-<task>
 
 - Reads still work: `status`, `log`, `diff`, `show`, `fetch`, `stash list`, `worktree add`.
 - To run one command in the main checkout anyway, prefix it: `ALLOW_MAIN_CHECKOUT_WRITE=1 git worktree remove ../<repo>-<task>`. Say in your next message that you used it, and why. An exported variable does not count.
-- It is a guard against accidents, not a security boundary. It allows what it cannot read: a directory built at run time, a `cd` it cannot follow, a command it cannot parse, and its own crash.
+- It is a guard against accidents, not a security boundary. It reads `eval '...'` and `sh -c '...'` scripts, and follows a `cd` inside a literal `eval`. It allows what it cannot read: a directory built at run time, a `cd` it cannot follow, a command it cannot parse, and its own crash.
 - Check it with `node scripts/check-agent-hooks.mjs`.
 
 ## Branches and PRs

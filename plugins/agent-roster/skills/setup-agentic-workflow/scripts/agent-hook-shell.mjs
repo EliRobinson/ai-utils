@@ -5,7 +5,8 @@
 // It is not a full shell parser. It handles quotes, escapes, heredocs,
 // here-strings, redirections, $(...), backticks, ( ) subshells, cd, pushd,
 // popd, common wrappers (env, sudo, timeout, xargs, ...), `sh -c` and `eval`.
-// Each hook decides what to do with a command it cannot read.
+// It flags a script it cannot read (built at run time, or read from stdin)
+// as opaque. Each hook decides what to do with a command it cannot read.
 //
 // The plumbing at the end (readPayload, isEntry, refuse) is used by the
 // guard. The review gate keeps its own copy on purpose: it must still work,
@@ -310,14 +311,51 @@ export function programOf(words) {
 
 export const nameOf = (call) => (call.program.dynamic ? null : path.basename(call.program.text));
 
-export const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "mksh", "fish"]);
+// Shell options that take a separate value: bash -o pipefail, -O extglob, +o.
+const SHELL_VALUE_FLAGS = new Set(["-o", "+o", "-O", "+O", "--rcfile", "--init-file"]);
+// A script file that is really stdin or a pipe.
+const STDIN_FILE = /^(?:-|\/dev\/stdin|\/dev\/fd\/\d+|\/proc\/self\/fd\/\d+)$/;
+const OPAQUE = { script: null };
 
-// The literal script of `bash -c '...'` (or -lc, -ec ...), or null.
-function shellScript(call) {
-  if (!SHELLS.has(nameOf(call) ?? "")) return null;
-  const at = call.args.findIndex((w) => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(w.text));
-  const script = at === -1 ? undefined : call.args[at + 1];
-  return script && !script.dynamic ? script.text : null;
+// What a command runs as a nested script, or null when it runs none (or
+// runs a script file, which no hook reads):
+//   { script, sameShell }  the literal script; sameShell for eval, whose cd
+//                          moves the rest of the line
+//   { script: null }       a script the walk cannot read: built at run time,
+//                          or read from stdin, a pipe or <(...)
+// eval, source and ., sh -c, bash reading stdin, busybox sh. Anything run
+// under xargs gets its words from stdin, so it cannot be read either.
+export function nestedScript(call) {
+  const name = nameOf(call);
+  let args = call.args;
+  let shellName = name;
+  if (name === "busybox" && args[0] && !args[0].dynamic) {
+    shellName = path.basename(args[0].text);
+    args = args.slice(1);
+  }
+  const runsScript = name === "eval" || name === "source" || name === "." || SHELLS.has(shellName ?? "");
+  if (!runsScript) return null;
+  if (call.wrappers.includes("xargs")) return OPAQUE;
+  if (name === "eval") {
+    return args.some((w) => w.dynamic) ? OPAQUE : { script: args.map((w) => w.text).join(" "), sameShell: true };
+  }
+  if (name === "source" || name === ".") {
+    return !args[0] || args[0].dynamic || STDIN_FILE.test(args[0].text) ? OPAQUE : null;
+  }
+  for (let i = 0; i < args.length; i++) {
+    const { text, dynamic } = args[i];
+    if (dynamic) return OPAQUE;
+    if (text === "--command" || (/^-[a-zA-Z]+$/.test(text) && text.includes("c"))) {
+      const script = args[i + 1];
+      return script && !script.dynamic ? { script: script.text, sameShell: false } : OPAQUE;
+    }
+    if (SHELL_VALUE_FLAGS.has(text)) i++;
+    else if (/^-[a-zA-Z]+$/.test(text) && text.includes("s")) return OPAQUE;
+    else if (text === "--") return !args[i + 1] || args[i + 1].dynamic || STDIN_FILE.test(args[i + 1].text) ? OPAQUE : null;
+    else if (!/^[-+]/.test(text)) return STDIN_FILE.test(text) ? OPAQUE : null;
+  }
+  return OPAQUE; // no script and no file: the shell reads stdin
 }
 
 // Resolve a directory word against base, or null when that cannot be known.
@@ -329,17 +367,11 @@ export function resolveDir(base, word) {
   return path.resolve(base, text);
 }
 
-// The script `eval` runs: its words joined by spaces, or null when any word
-// is built at run time.
-function evalScript(call) {
-  if (nameOf(call) !== "eval" || call.args.some((w) => w.dynamic)) return null;
-  return call.args.map((w) => w.text).join(" ");
-}
-
 // Walk every simple command in a Bash command line, following cd, pushd,
 // popd, subshells and $(...) scopes, and reading into `sh -c '...'` and
-// `eval '...'`. Yields { call, dir }: dir is where the command runs, or null
-// when a cd could not be followed. A `sh -c` or `eval` script inherits its
+// `eval '...'`. Yields { call, dir, opaque }: dir is where the command runs,
+// or null when a cd could not be followed; opaque is true when call runs a
+// script the walk cannot read (see nestedScript). A `sh -c` or `eval` script inherits its
 // caller's NAME= prefixes. Returns the directory the line ends in. Throws
 // when the line cannot be lexed.
 export function* walk(command, cwd, depth = 0, inherited = {}) {
@@ -374,18 +406,13 @@ export function* walk(command, cwd, depth = 0, inherited = {}) {
       dir = pushd.length > 0 ? pushd.pop() : null;
       continue;
     }
-    const script = shellScript(call);
-    if (script !== null) {
-      yield* walk(script, dir, depth + 1, call.env);
+    const nested = nestedScript(call);
+    if (nested?.script != null) {
+      const end = yield* walk(nested.script, dir, depth + 1, call.env);
+      if (nested.sameShell) dir = end;
       continue;
     }
-    // eval runs in this shell, so a cd inside it moves the rest of the line.
-    const evaluated = evalScript(call);
-    if (evaluated !== null) {
-      dir = yield* walk(evaluated, dir, depth + 1, call.env);
-      continue;
-    }
-    yield { call, dir };
+    yield nested ? { call, dir, opaque: true } : { call, dir };
   }
   return dir;
 }

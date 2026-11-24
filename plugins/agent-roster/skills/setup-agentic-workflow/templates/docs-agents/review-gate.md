@@ -88,14 +88,31 @@ Rounds: 1
 - `gh pr create`, draft or not (it reads `--body`, `--body-file`, or a quoted `"$(cat <<'EOF' ... EOF)"` body);
 - MCP tools that create a PR, draft or not;
 - MCP tools that merge or take a PR out of draft, always. Use `gh` instead.
-- A PR command it cannot read, such as one run through `xargs`, `eval` or a variable, always.
+- A PR command it cannot read, always: one whose arguments come from `xargs`, one whose `gh` subcommand or action is a variable or a brace expansion (`gh pr $A 5`, `gh pr {merge,} 5`), or one handed to another program as text (`python3 -c "...gh pr merge..."`, `alias`).
 
-It also refuses, always, what would skip the record check: `gh api graphql` with the query from a file, stdin or a variable (`-F query=@file`, `--input`, `-f query="$Q"`); `curl` writes to a PR's `pulls/N/merge` or to `pulls` (opening a PR); and `curl` to GitHub's GraphQL API. Pass a GraphQL query inline with `-f query='...'`, and use `gh` for PR writes. `curl` reads of `pulls` still pass.
+It also refuses, always, three forms that would skip the record check:
 
-It reads the script of `eval '...'` and `bash -c '...'` (or `sh`, `zsh`) like any command. When that script is built at run time, or a shell reads it from stdin (`... | bash`, `bash <<< '...'`), it refuses if the command names a PR write.
+- `gh api graphql` with the query from a file, stdin or a variable (`-F query=@file`, `--input`, `-f query="$Q"`). Pass the query inline with `-f query='...'`.
+- An HTTP client (`curl`, `wget`, `http`, `xh`) that writes to a PR's `pulls/N/merge`, to `pulls` (opening a PR) or to `merges`. Use `gh pr merge` or `gh pr create`. Reads still pass. It reads the last `-X`, resolves `../` and `%`-encoding, and refuses a write whose URL is a variable or a curl glob (`{...}`, `[...]`) when the line names a PR or GitHub path. `gh api` writes to `merges` are refused too.
+- An HTTP client call to GitHub's GraphQL API (a host with `github` in its name). Use `gh api graphql`.
 
-A command that names another repository with `-R owner/name` is not held. Any spelling of this repo counts as this repo and is checked: a trailing `.git` or `/`, other letter case, `github.com/owner/name`, an `https://` URL or `git@github.com:owner/name.git`. There is no escape. If the hook itself fails while checking a PR command, it refuses.
+It reads the script of `eval '...'`, `bash -c '...'` (also `sh`, `zsh`, `fish`, `busybox sh`) like any command. Some scripts it cannot read: one built at run time (`eval "$X"`), one a shell reads from stdin, a pipe or `<(...)` (`... | bash`, `bash <<< '...'`, `bash -s`, `source /dev/stdin`), and a command whose program is a variable. It refuses such a command when the line names a PR write (`gh pr merge|ready|create`, a `pulls`, `merges` or `graphql` path, or a GraphQL mutation) that it did not read in a plain `gh` or HTTP call. So `eval "$(ssh-agent -s)" && gh pr merge 5` is checked like the merge alone. If it refuses, run the `eval` or `| bash` in its own Bash call, then run the gh command on its own.
 
-It cannot stop a merge in the GitHub web UI, a record that lies, a script that calls `gh` from a file, or a `gh` alias that hides `pr merge`. It does not check which model each reviewer ran on, only that none ran on Fable. The owner's "merge N" is the last check.
+A line over 20,000 characters that mentions `gh`, a PR or GitHub is refused unread. Split it into shorter Bash calls.
+
+A command that names another repository is not held. It reads the repo from `-R` or `--repo` (the last one wins), from a PR URL, or from `GH_REPO=`. Every spelling of this repo is checked as this repo: a trailing `.git` or `/`, other letter case, `github.com/owner/name`, an `https://` URL, or `git@github.com:owner/name.git`. A repo on another host is checked too.
+
+There is no escape hatch: no variable or flag turns it off. If the hook itself fails while checking a PR command, it refuses.
+
+It cannot stop:
+
+- a merge in the GitHub web UI;
+- a record that lies;
+- a script or curl config file (`-K`) that calls `gh` or GitHub from a file;
+- a `gh` alias that hides `pr merge`;
+- a script built at run time whose text never names the PR write in plain words (`printf 'gh p%s merge' r`, base64);
+- an HTTP client other than `curl`, `wget`, `http` and `xh`, or a GitHub Enterprise host without `github` in its name.
+
+It does not check which model each reviewer ran on, only that none ran on Fable. The owner's "merge N" is the last check.
 
 Check it with `node scripts/check-agent-hooks.mjs`.
