@@ -1,4 +1,5 @@
-// Self-check for board-template.html: which section a row lands in, and what a click writes.
+// Self-check for board-template.html: which section a row lands in, what a click writes,
+// and how option buttons read their key.
 // Runs in node with no browser: it pulls the "BEGIN pure" block out of the page and runs it.
 // scripts/validate-plugins.py runs it. Exit code 1 on any failure.
 import { readFileSync } from "node:fs";
@@ -14,7 +15,7 @@ if (!block) {
   console.error("board-template.html: no // BEGIN pure ... // END pure block");
   process.exit(1);
 }
-const { sections, stamp } = new Function(block[1] + "\nreturn { sections, stamp };")();
+const { sections, stamp, option, isRecommended } = new Function(block[1] + "\nreturn { sections, stamp, option, isRecommended };")();
 
 // Sections: only status "closed" is Closed, whatever ackAt says.
 const OLD = "2026-11-16T10:00:00.000Z";
@@ -60,10 +61,39 @@ for (const patch of [
   for (const [k, v] of Object.entries(patch)) if (k !== "ackAt") check(w[k] === v, `stamp drops ${k}`);
 }
 
+// Option buttons: the key comes from key, else id, else the label. Recommended needs a
+// recommended value that equals the key; a row with no recommended marks none.
+const same = (got, want) => JSON.stringify(got) === JSON.stringify(want);
+for (const [o, want] of [
+  [{ key: "A", label: "Ship it" }, { key: "A", label: "Ship it" }],
+  [{ id: "B", label: "Wait" }, { key: "B", label: "Wait" }],
+  [{ key: "A", id: "B", label: "x" }, { key: "A", label: "x" }],
+  [{ key: 2, label: "Two" }, { key: "2", label: "Two" }],
+  ["C", { key: "C", label: "" }],
+  [{ label: "Only a label" }, { key: "Only a label", label: "" }],
+  [{ key: "", label: "" }, { key: "", label: "" }],
+  [{}, { key: "", label: "" }],
+  [null, { key: "", label: "" }],
+  ["  ", { key: "", label: "" }],
+]) check(same(option(o), want), `option(${JSON.stringify(o)}): want ${JSON.stringify(want)}, got ${JSON.stringify(option(o))}`);
+check(isRecommended("A", "A") && isRecommended("B", option({ id: "B", label: "x" }).key), "recommended key must mark its button, for key and id options");
+check(!isRecommended("A", "B"), "a different recommended must not mark the button");
+for (const r of [undefined, null]) {
+  check(!isRecommended(r, "A"), `recommended ${r} must mark no button`);
+  check(!isRecommended(r, option({ id: "A" }).key), `recommended ${r} must not mark an {id} option`);
+}
+check(!isRecommended(undefined, option({ id: "A" }).key) && !isRecommended("", ""), "an empty key is never recommended");
+// The old bug: {id,label} options with no recommended all matched undefined === undefined.
+const idRow = { options: [{ id: "A", label: "x" }, { id: "B", label: "y" }] };
+check(idRow.options.every((o) => option(o).key !== "" && !isRecommended(idRow.recommended, option(o).key)),
+  "{id,label} options with no recommended: every key set and no button recommended");
+
 // Tripwires: the page itself must use both helpers, not a copy of the old logic.
 // They match source text on purpose; update them if write() or render() is reworded.
 check(/\.update\(stamp\(patch,/.test(page), "write() must save stamp(patch, now)");
 check(/sections\(docs\.filter\(/.test(page), "render() must take its lists from sections()");
+check(/= option\(o\)/.test(page) && /isRecommended\(a\.recommended, key\)/.test(page), "card() must read options with option() and isRecommended()");
+check(/key === ""\s*\n?\s*\? say\(/.test(page), "card(): a button with an empty key must not write");
 
 if (problems.length) {
   console.error("board-template.html self-check FAILED:\n  - " + problems.join("\n  - "));

@@ -143,6 +143,23 @@ details > summary::-webkit-details-marker { display: none; }
   function stamp(patch, now) {
     return Object.assign({ updatedAt: now }, patch, { ackAt: null });
   }
+  // One option button's key and label. Rows should use {key, label}. A row written with
+  // {id, label} still works, and an object with neither uses its label as the key (then
+  // shown once, as the key). key is "" when nothing usable is there: the button must
+  // not write then.
+  function option(o) {
+    if (o == null) return { key: "", label: "" };
+    if (typeof o !== "object") return { key: String(o).trim(), label: "" };
+    const label = o.label == null ? "" : String(o.label).trim();
+    const raw = o.key ?? o.id;
+    if (raw == null) return { key: label, label: "" };
+    return { key: String(raw).trim(), label };
+  }
+  // A button is the recommended one only when the row names a recommendation and it is
+  // this key. A row with no recommended marks none.
+  function isRecommended(recommended, key) {
+    return recommended != null && key !== "" && key === String(recommended).trim();
+  }
   // END pure
 
   function thumbs(list, onRemove) {
@@ -338,14 +355,16 @@ details > summary::-webkit-details-marker { display: none; }
     if (Array.isArray(a.options) && a.options.length && where !== "closed") {
       const opts = el("div", { class: "options" });
       for (const o of a.options) {
-        const key = typeof o === "string" ? o : o.key;
-        const label = typeof o === "string" ? "" : o.label || "";
-        const cls = "opt" + (a.answer === key ? " chosen" : key === a.recommended ? " rec" : "");
+        const { key, label } = option(o);
+        const rec = isRecommended(a.recommended, key);
+        const cls = "opt" + (key !== "" && a.answer === key ? " chosen" : rec ? " rec" : "");
         opts.append(el("button", {
           class: cls, type: "button",
-          onclick: (ev) => act(ev, d, { status: "answered", answer: key }, "Sent “" + key + "”.",
-            "{{OWNER}} chose option " + key + (label ? ": " + label : "") + "."),
-        }, [el("b", { text: key + (key === a.recommended ? "  (recommended)" : "") }), label ? el("small", { text: label }) : null]));
+          onclick: (ev) => key === ""
+            ? say("This option has no key, so nothing was sent. Add a note to tell the chat.")
+            : act(ev, d, { status: "answered", answer: key }, "Sent “" + key + "”.",
+              "{{OWNER}} chose option " + key + (label ? ": " + label : "") + "."),
+        }, [el("b", { text: (key || "(no key)") + (rec ? "  (recommended)" : "") }), label ? el("small", { text: label }) : null]));
       }
       body.append(opts);
     }
