@@ -352,37 +352,54 @@ class CheckTerms(unittest.TestCase):
         self.assertEqual(self.run_check(None), ["rules.md: missing"])
 
 
-class UnitTestRule(unittest.TestCase):
+class RepoRules(unittest.TestCase):
+    # (rule, its check); each must pass on the repo's own files
+    CASES = [
+        ("unit-test rule", vp.check_unit_test_rule),
+        ("merge policy", vp.check_merge_policy),
+    ]
+
     def test_repo_files_carry_the_rule(self):
-        with mock.patch.object(vp, "problems", []):
-            vp.check_unit_test_rule()
-            self.assertEqual(vp.problems, [])
+        for rule, check in self.CASES:
+            with self.subTest(rule), mock.patch.object(vp, "problems", []):
+                check()
+                self.assertEqual(vp.problems, [])
 
 
 ASK_LINE = "- **Merge policy:** `ask`"
 ASK_AGENTS = "- **Merge policy: ask.** It is set in git-workflow.md."
+SQUASH_LINE = "- **Merge style:** `squash`"
+SQUASH_AGENTS = "- **PRs merge in the repo's merge style: squash.**"
+BAD_POLICY = [(vp.GIT_WORKFLOW, "needs exactly one '- **Merge policy:** `ask|auto`' line")]
+POLICY = ("Merge policy", vp.MERGE_POLICIES, "ask")
+STYLE = ("Merge style", vp.MERGE_STYLES, "squash")
 
 
-class MergePolicy(unittest.TestCase):
-    # (case, git-workflow.md text, AGENTS.md text, expected problems)
+class WorkflowSetting(unittest.TestCase):
+    # (case, setting, git-workflow.md text, AGENTS.md text, expected problems)
     CASES = [
-        ("ask line and matching AGENTS.md pass", f"x\n{ASK_LINE}\ny", ASK_AGENTS, []),
-        ("missing line fails", "no policy here", ASK_AGENTS,
-         ["needs one '- **Merge policy:** `ask|auto`' line"]),
-        ("two lines fail", f"{ASK_LINE}\n{ASK_LINE}", ASK_AGENTS,
-         ["needs one '- **Merge policy:** `ask|auto`' line"]),
-        ("unknown value fails", "- **Merge policy:** `sometimes`", ASK_AGENTS,
-         ["needs one '- **Merge policy:** `ask|auto`' line"]),
-        ("auto as the shipped default fails", "- **Merge policy:** `auto`", "- **Merge policy: auto.**",
-         ["the Merge policy line says 'auto', but the shipped default is 'ask'"]),
-        ("AGENTS.md naming another policy fails", ASK_LINE, "- **Merge policy: auto.**",
-         ['AGENTS.md must say "Merge policy: ask.", the policy git-workflow.md sets']),
+        ("policy line and matching AGENTS.md pass", POLICY, f"x\n{ASK_LINE}\ny", ASK_AGENTS, []),
+        ("missing policy line fails", POLICY, "no policy here", ASK_AGENTS, BAD_POLICY),
+        ("two policy lines fail", POLICY, f"{ASK_LINE}\n{ASK_LINE}", ASK_AGENTS, BAD_POLICY),
+        ("unknown policy fails", POLICY, "- **Merge policy:** `sometimes`", ASK_AGENTS, BAD_POLICY),
+        ("auto as the shipped default fails", POLICY, "- **Merge policy:** `auto`", "- **Merge policy: auto.**",
+         [(vp.GIT_WORKFLOW, "the Merge policy line says 'auto'. This file is the shipped template, "
+                            "which must say 'ask'. Set it back to 'ask'.")]),
+        ("AGENTS.md naming another policy fails", POLICY, ASK_LINE, "- **Merge policy: auto.**",
+         [(vp.REPO_AGENTS_MD, 'must say "Merge policy: ask." exactly once, the value git-workflow.md sets')]),
+        ("AGENTS.md naming two policies fails", POLICY, ASK_LINE, ASK_AGENTS + "\n- **Merge policy: auto.**",
+         [(vp.REPO_AGENTS_MD, 'must say "Merge policy: ask." exactly once, the value git-workflow.md sets')]),
+        ("style line and matching AGENTS.md pass", STYLE, SQUASH_LINE, SQUASH_AGENTS, []),
+        ("style other than the ruleset's fails", STYLE, "- **Merge style:** `rebase`",
+         "- **PRs merge in the repo's merge style: rebase.**",
+         [(vp.GIT_WORKFLOW, "the Merge style line says 'rebase'. This file is the shipped template, "
+                            "which must say 'squash'. Set it back to 'squash'.")]),
     ]
 
-    def test_merge_policy_line(self):
-        for case, workflow, agents_md, expected in self.CASES:
+    def test_setting_problems(self):
+        for case, (name, allowed, default), workflow, agents_md, expected in self.CASES:
             with self.subTest(case):
-                self.assertEqual(vp.merge_policy_problems(workflow, agents_md), expected)
+                self.assertEqual(vp.setting_problems(name, allowed, default, workflow, agents_md), expected)
 
 
 class MergeOnBoard(unittest.TestCase):
@@ -390,8 +407,10 @@ class MergeOnBoard(unittest.TestCase):
     CASES = [
         ('every task, including "merge N" requests and hosting choices', True),
         ('"Type `merge 42` in chat to merge PR 42"', True),
+        ('Add a board row: type "merge N" once the PR is ready', True),
         ('The one exception is "merge N": ask for it in chat only', False),
         ('"PR 42 is ready. Type `merge 42` to merge it."', False),
+        ('ask for "merge N" in this chat only, never on the board', False),
     ]
 
     def test_merge_on_board_pattern(self):
@@ -400,11 +419,19 @@ class MergeOnBoard(unittest.TestCase):
                 self.assertEqual(bool(vp.MERGE_ON_BOARD.search(line)), flagged)
 
 
-class MergePolicyRule(unittest.TestCase):
-    def test_repo_files_carry_the_rule(self):
-        with mock.patch.object(vp, "problems", []):
-            vp.check_merge_policy()
-            self.assertEqual(vp.problems, [])
+class MergeOnBoardScan(unittest.TestCase):
+    def test_doc_with_a_merge_row_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "doc.md"
+            doc.write_text('Add a board row: type "merge N" once the PR is ready\n', encoding="utf-8")
+            agents = Path(tmp) / "AGENTS.md"
+            agents.write_text(ASK_AGENTS + "\n", encoding="utf-8")
+            with mock.patch.object(vp, "problems", []), mock.patch.object(vp, "REPO_AGENTS_MD", agents), \
+                    mock.patch.object(vp, "repo_docs", lambda suffixes: [doc]), \
+                    mock.patch.object(vp, "rel", lambda path: path.name):
+                vp.check_merge_policy()
+                self.assertIn("doc.md:1: puts a merge ask on the Asks board; merge asks go in the coordinator chat",
+                              vp.problems)
 
 
 class SelfChecks(unittest.TestCase):

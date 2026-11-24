@@ -211,22 +211,16 @@ When Spotlight gets an MCP server, fill the `mcp` column from its tool list and 
 
 ## The merge policy
 
-Each repo picks who decides that a PR merges. The setting is one line in `docs/agents/git-workflow.md`, `- **Merge policy:** \`ask\`` or `auto`, and the `AGENTS.md` merge bullet names it too.
+Each repo picks who decides that a PR merges. The setting is this line in `docs/agents/git-workflow.md`, and the `AGENTS.md` merge bullet names the same value:
 
-- `ask` (the default): the coordinator merges PR N only after the owner types "merge N" in chat. It asks for that in chat, never on the Asks board: the board cannot merge, and a click there is not approval.
-- `auto`: the coordinator merges a ready PR on its own: up to date with `main`, review record complete, test gate and CI passed on the exact head sha. It still takes the merge lock, names the head with `--match-head-commit`, never forces and never bypasses a hook.
-
-The review gate hook does not read the policy. It checks the `## Review` record on every merge, under either policy.
-
-**Auto mode needs a permission rule for `auto`.** Claude Code's auto mode classifier blocks "merging a PR no human has approved" by default (its `Merge Without Review` rule). Under `ask`, the owner's own "merge N" in chat is the approval the classifier looks for, so the merge runs. Under `auto` there is none, so the merge is blocked until the owner adds this rule themselves, in the main checkout's `.claude/settings.local.json` (that repo only) or `~/.claude/settings.json` (every repo):
-
-```json
-{ "permissions": { "allow": ["Bash(gh pr merge *)"] } }
+```markdown
+- **Merge policy:** `ask`
 ```
 
-A narrow allow rule like this one resolves before the classifier, and auto mode keeps it (it drops only broad rules such as `Bash(*)`). With `autoMode.classifyAllShell` set to `true`, auto mode ignores it. The setup gives the rule and never edits settings itself. In Manual mode, `gh pr merge` prompts as usual, and the owner's yes is the approval.
+- `ask` (the default): the coordinator merges PR N only after the owner types "merge N" in chat. It asks for that in chat, never on the Asks board: the board cannot merge, and a click there is not approval.
+- `auto`: the coordinator merges a ready PR on its own, through every merge step (review record, test gate and CI on the exact head sha, merge lock, `--match-head-commit`). PRs that change the workflow files, PRs its agents did not open, drafts and PRs on hold still wait for "merge N".
 
-**To change it later,** ask a coordinator to "change the merge policy to `auto`" (or `ask`). The `setup-agentic-workflow` skill's "Change the merge policy" section changes the two lines in one PR. A running coordinator reads the line before each merge, so it needs no restart.
+The full rule is the **Merge policy** section of [`git-workflow.md`](skills/setup-agentic-workflow/templates/docs-agents/git-workflow.md#merge-policy): how the coordinator reads the policy (from `origin/main` only; anything unclear is `ask`), what `auto` never covers, and the permission rule the owner adds for Claude Code's auto mode, which otherwise blocks a merge no human has approved. The setup never edits settings. To change the policy later, ask a coordinator; the `setup-agentic-workflow` skill's "Change the merge policy" section does it.
 
 ## Start a coordinator chat
 

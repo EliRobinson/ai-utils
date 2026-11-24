@@ -7,18 +7,20 @@
 **Upgrade steps:**
 
 1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils` and `claude plugin update asks-board@ai-utils`, then restart Claude Code.
-2. Rerun `setup-agentic-workflow` in each repo set up before 1.12.0 and merge its setup PR. It asks for the merge policy, adds the **Merge policy** line to `docs/agents/git-workflow.md`, changes the two `AGENTS.md` bullets on the Asks board and merging, and writes a new `docs/agents/coordinator-prompt.md`. Start a new coordinator chat from that prompt once it merges.
-3. If you pick `auto` and use auto mode, add the permission rule from the README ("The merge policy") yourself. Until you do, auto mode blocks the coordinator's merges.
+2. Rerun `setup-agentic-workflow` in each repo set up before 1.12.0 and merge its setup PR. It asks for the merge policy, adds the **Merge policy** line to `docs/agents/git-workflow.md`, updates the `AGENTS.md` bullets on the Asks board, merging and the coordinator, and writes a new `docs/agents/coordinator-prompt.md`. Start a new coordinator chat from that prompt once it merges; an older chat does not read the policy.
+3. If you pick `auto` and use Claude Code's auto mode, add the permission rule from the **Merge policy** section of `docs/agents/git-workflow.md` yourself, in the main checkout's `.claude/settings.local.json`. Until you do, auto mode blocks the coordinator's merges.
 
 **Changes:**
 
-- **Merge asks go in chat, never on the Asks board.** The board cannot merge, and a click there is not approval, so a merge row only added a step. The guardrails, the coordinator prompt, `route-work`, `multi-agent.md` and the README say so. The `asks-board` skill (1.0.9) says it too.
-- **A merge policy per repo: `ask` or `auto`.** `ask` is the default and today's rule: merge PR N only after the owner types "merge N" in chat. With `auto`, the coordinator merges a ready PR on its own: review record complete, test gate and CI passed on the exact head sha, under the merge lock, with `--match-head-commit`. The policy is one line in `docs/agents/git-workflow.md`, and the coordinator reads it before each merge.
-- **The setup asks for the policy**, writes it into `git-workflow.md` and `AGENTS.md`, and for `auto` gives the owner the permission rule to add: `Bash(gh pr merge *)` in `permissions.allow`. Auto mode's classifier blocks a merge no human has approved by default. The setup never edits settings itself.
-- **Change it later** with the setup skill's new "Change the merge policy" section: one ticket, one PR, two lines.
+- **Merge asks go in chat, never on the Asks board.** The board cannot merge, and a click there is not approval, so a merge row only adds a step. The guardrails, the coordinator prompt, `route-work`, `multi-agent.md` and the README say so. The `asks-board` skill (1.0.9) says it too.
+- **A merge policy per repo: `ask` or `auto`.** `ask` is the default and today's rule: merge PR N only after the owner types "merge N" in chat. With `auto`, the coordinator merges a ready PR on its own, through every merge step: review record complete, test gate and CI passed on the exact head sha, merge lock, `--match-head-commit`. The full rule is one section of `docs/agents/git-workflow.md`.
+- **The coordinator reads the policy from `origin/main` before each merge**, never from a working tree or a PR's branch. It is `auto` only when the `git-workflow.md` line and the `AGENTS.md` bullet both say so; anything else is `ask`.
+- **`auto` never covers** a PR that changes the workflow files (`.claude/`, `.github/`, `docs/agents/`, `AGENTS.md`, `CLAUDE.md`, hook scripts), a PR the coordinator's agents did not open, a draft, or a PR the owner put on hold with "hold N". Those wait for "merge N". So a PR that changes the policy always waits for the owner.
+- **The setup asks for the policy**, writes it into `git-workflow.md` and `AGENTS.md`, and for `auto` gives the owner a narrow permission rule to add to the main checkout's `.claude/settings.local.json`: an allow rule for the coordinator's own `gh pr merge * --match-head-commit * -R owner/name`, and deny rules for `--admin` and `--auto`. Claude Code's auto mode classifier blocks a merge no human has approved by default. The setup never edits settings itself.
+- **Change it later** with the setup skill's new "Change the merge policy" section: only on the owner's own words, one ticket, one PR, two lines. A repo whose `git-workflow.md` is a symlink into the shipped template keeps `ask`.
 - The review gate hook does not read the policy, and no hook change was needed: it already checks the `## Review` record on every merge, under either policy.
-- The coordinator's merge steps also check the PR's CI checks on the exact head, where the repo has CI.
-- `validate-plugins.py` checks the Merge policy line, that `AGENTS.md` names the same policy, and that no file puts a merge ask on the board.
+- The coordinator's merge steps also wait for the PR's CI checks on the exact head, where the repo has CI. "No checks reported" is not a pass.
+- `validate-plugins.py` checks the Merge policy line, that `AGENTS.md` names the same policy once, and that no doc puts a merge ask on the board. The Merge style and Merge policy lines now share one checker.
 
 ## 1.11.0
 
