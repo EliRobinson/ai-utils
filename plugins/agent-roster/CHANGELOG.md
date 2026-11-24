@@ -16,6 +16,12 @@
 - `correctness-critic` flags a unit test that checks several behaviours. `dry-critic` flags copied test bodies. `route-work`'s table says so.
 - `validate-plugins.py` checks that the guardrails template, this repo's `AGENTS.md`, both implementers and both critics keep the rule.
 
+## 1.10.1
+
+- **Wording fixes in the guardrails template, the setup skill's summary and the coordinator prompt**, from the copy review. The guardrails keep the same rules.
+- **Style change in the coordinator prompt:** it no longer names the ASD-STE100 controlled-language standard. The coordinator still talks to the owner in plain, short English.
+- **Upgrade:** rerun `setup-agentic-workflow` to get the new coordinator prompt, since setup writes `docs/agents/coordinator-prompt.md` fresh. Setup keeps `AGENTS.md` guardrail bullets that already state the same rule, so copy the new guardrail wording from `templates/agents-guardrails.md` by hand if you want it.
+
 ## 1.10.0
 
 **Upgrade steps:**
