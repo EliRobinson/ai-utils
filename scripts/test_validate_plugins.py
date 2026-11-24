@@ -321,6 +321,44 @@ class CheckManifest(unittest.TestCase):
         ])
 
 
+class CheckTerms(unittest.TestCase):
+    TERM = "One Behaviour"
+
+    def run_check(self, text: str | None, terms: tuple[str, ...] = (TERM,)) -> list[str]:
+        """check_terms on one file holding `text` (None: no file) that must contain `terms`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "rules.md"
+            if text is not None:
+                path.write_text(text)
+            with mock.patch.multiple(vp, ROOT=root, problems=[]):
+                vp.check_terms({path: list(terms)}, "test rule")
+                return list(vp.problems)
+
+    def test_term_present_in_any_case_passes(self):
+        for text in ("one behaviour", "ONE BEHAVIOUR", "x One Behaviour y"):
+            with self.subTest(text=text):
+                self.assertEqual(self.run_check(text), [])
+
+    def test_missing_term_names_file_term_and_rule(self):
+        self.assertEqual(self.run_check("two behaviours"),
+                         ["rules.md: must contain 'One Behaviour' (any case), part of the test rule"])
+
+    def test_only_the_missing_term_is_reported(self):
+        self.assertEqual(self.run_check("alpha only", ("alpha", "beta")),
+                         ["rules.md: must contain 'beta' (any case), part of the test rule"])
+
+    def test_missing_file_fails(self):
+        self.assertEqual(self.run_check(None), ["rules.md: missing"])
+
+
+class UnitTestRule(unittest.TestCase):
+    def test_repo_files_carry_the_rule(self):
+        with mock.patch.object(vp, "problems", []):
+            vp.check_unit_test_rule()
+            self.assertEqual(vp.problems, [])
+
+
 class SelfChecks(unittest.TestCase):
     def run_without_node(self, env: dict) -> list[str]:
         with tempfile.TemporaryDirectory() as tmp:

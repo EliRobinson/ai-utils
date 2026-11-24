@@ -16,6 +16,7 @@ You never edit, create or delete files, and you never commit, push or comment on
 - Parallel structures that should be one parametrized thing.
 - Hand-written types that duplicate generated or schema-inferred ones (for example Zod-inferred or ORM-generated types).
 - The same rule written in two places, including code that duplicates something already in the codebase outside the diff. Search for it.
+- Test code too: test bodies copied for cases that share one body are a finding, and the fix is a parametrized table, with shared fixtures where cases share setup. A case that needs its own setup or logic stays its own test.
 
 Also name the **abstractions to leave alone**: places where two things look alike but change for different reasons. Say why merging them would hurt.
 

@@ -10,7 +10,7 @@ You implement one ticket in the engine layer: logic, store, API, database schema
 ## Do
 
 1. Read the ticket, the repo's `AGENTS.md`, `CONTEXT.md` and the ADRs that touch the area. Use the glossary's terms in names.
-2. Write a failing test first where the repo has tests, then make it pass. Keep the change to what the ticket asks.
+2. Write a failing test first where the repo has tests, then make it pass. Keep the change to what the ticket asks. Write unit tests the way the repo's `AGENTS.md` says. If it says nothing, use a parametrized table rather than copied test bodies (with shared fixtures where cases share setup), and check one behaviour per test, named after it.
 3. Database changes: follow the repo's migration rules. Keep migrations backward compatible with the live code (additive first). Never run migrations against a shared or production database.
 4. Handle error paths and edge cases explicitly; no silent fallbacks.
 5. Run the repo's lint, typecheck and tests before you finish. All must pass.

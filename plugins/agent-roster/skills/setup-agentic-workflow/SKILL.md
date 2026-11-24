@@ -20,7 +20,8 @@ You set up the owner's agent workflow in the repo you are run in. The workflow:
 - the reviewers have the skills and plugins they need (copy editing, design, accessibility);
 - an ownership registry outside the repo keeps concurrent sessions apart;
 - tickets live in one ticketing tool (GitHub Issues unless the owner picks another), set in one repo file, `docs/agents/issue-tracker.md`, that every agent reads;
-- follow-up work is a ticket in that tool, and every behaviour change adds tests and docs.
+- follow-up work is a ticket in that tool, and every behaviour change adds tests and docs;
+- unit tests are DRY (parametrized tables, shared fixtures) and check one behaviour per test.
 
 ## Where your files are
 
