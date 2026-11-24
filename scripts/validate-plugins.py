@@ -604,26 +604,27 @@ def run_self_checks() -> None:
             fail(f"{check.relative_to(ROOT)}: self-check failed\n{tail}")
 
 
-def check_manifest(source: str, entry_name: str, entry: dict, manifest: dict) -> None:
-    """A plugin.json must agree with its marketplace entry on name, version and
-    description, and must have a description."""
+def check_manifest(source: str, entry: dict, manifest: dict) -> None:
+    """A plugin.json must have a description, and must agree with its
+    marketplace entry on name and on any version or description the entry sets."""
+    entry_name = entry.get("name", "<unnamed>")
     if manifest.get("name") != entry_name:
         fail(
             f"{source}: plugin.json name {manifest.get('name')!r} "
             f"does not match marketplace entry {entry_name!r}"
         )
-    if "version" in entry and manifest.get("version") != entry["version"]:
-        fail(
-            f"{source}: plugin.json version {manifest.get('version')!r} "
-            f"does not match marketplace entry {entry['version']!r}"
-        )
-    if "description" in entry and manifest.get("description") != entry["description"]:
-        fail(
-            f"{source}: plugin.json description does not match its marketplace entry; "
-            "copy one to the other so both say the same"
-        )
-    if not manifest.get("description", "").strip():
+    description = manifest.get("description")
+    has_description = isinstance(description, str) and bool(description.strip())
+    if not has_description:
         fail(f"{source}: plugin.json has no description")
+    # A missing description is reported once, above, not again as a mismatch.
+    for field in ("version", "description") if has_description else ("version",):
+        if field in entry and manifest.get(field) != entry[field]:
+            fail(
+                f"{source}: plugin.json {field} {manifest.get(field)!r} "
+                f"does not match marketplace entry {entry[field]!r}; "
+                "decide which is current and copy it to the other file"
+            )
 
 
 def main() -> int:
@@ -659,7 +660,7 @@ def main() -> int:
         if manifest is None:
             continue
 
-        check_manifest(source, entry_name, entry, manifest)
+        check_manifest(source, entry, manifest)
 
         skills_dir = plugin_dir / "skills"
         if not skills_dir.is_dir():

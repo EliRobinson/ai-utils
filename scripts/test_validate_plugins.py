@@ -9,7 +9,6 @@ validate-plugins.py runs these itself. To run only them, from the repo root:
 from __future__ import annotations
 
 import importlib.util
-import json
 import os
 import tempfile
 import unittest
@@ -255,7 +254,7 @@ class CheckManifest(unittest.TestCase):
 
     def run_check(self, entry: dict, manifest: dict) -> list[str]:
         with mock.patch.object(vp, "problems", []):
-            vp.check_manifest("./plugins/p", entry["name"], entry, manifest)
+            vp.check_manifest("./plugins/p", entry, manifest)
             return list(vp.problems)
 
     def test_matching_manifest_passes(self):
@@ -263,18 +262,29 @@ class CheckManifest(unittest.TestCase):
 
     def test_different_description_fails(self):
         out = self.run_check(self.ENTRY, {**self.ENTRY, "description": "Does another thing."})
-        self.assertEqual(len(out), 1, out)
-        self.assertIn("description does not match its marketplace entry", out[0])
+        self.assertEqual(out, [
+            "./plugins/p: plugin.json description 'Does another thing.' does not match "
+            "marketplace entry 'Does a thing.'; decide which is current and copy it to the other file"
+        ])
 
-    def test_whitespace_difference_fails(self):
+    def test_whitespace_difference_fails_and_shows_it(self):
         out = self.run_check(self.ENTRY, {**self.ENTRY, "description": "Does a thing. "})
-        self.assertTrue(any("description does not match" in p for p in out), out)
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("'Does a thing. '", out[0])
 
-    def test_missing_manifest_description_fails(self):
+    def test_missing_manifest_description_reported_once(self):
         manifest = {k: v for k, v in self.ENTRY.items() if k != "description"}
-        out = self.run_check(self.ENTRY, manifest)
-        self.assertTrue(any("description does not match" in p for p in out), out)
-        self.assertTrue(any("has no description" in p for p in out), out)
+        self.assertEqual(self.run_check(self.ENTRY, manifest),
+                         ["./plugins/p: plugin.json has no description"])
+
+    def test_blank_manifest_description_reported_once(self):
+        out = self.run_check(self.ENTRY, {**self.ENTRY, "description": "  "})
+        self.assertEqual(out, ["./plugins/p: plugin.json has no description"])
+
+    def test_non_string_description_reported_not_crashed(self):
+        for value in (None, 42, ["Does a thing."]):
+            out = self.run_check(self.ENTRY, {**self.ENTRY, "description": value})
+            self.assertEqual(out, ["./plugins/p: plugin.json has no description"], value)
 
     def test_entry_without_description_skips_the_match(self):
         entry = {k: v for k, v in self.ENTRY.items() if k != "description"}
@@ -282,14 +292,12 @@ class CheckManifest(unittest.TestCase):
 
     def test_different_version_fails(self):
         out = self.run_check(self.ENTRY, {**self.ENTRY, "version": "1.0.1"})
-        self.assertTrue(any("version '1.0.1' does not match" in p for p in out), out)
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("version '1.0.1' does not match marketplace entry '1.0.0'", out[0])
 
-    def test_repo_marketplace_descriptions_match(self):
-        marketplace = json.loads((HERE.parent / ".claude-plugin" / "marketplace.json").read_text())
-        for entry in marketplace["plugins"]:
-            manifest_path = HERE.parent / entry["source"] / ".claude-plugin" / "plugin.json"
-            manifest = json.loads(manifest_path.read_text())
-            self.assertEqual(self.run_check(entry, manifest), [], entry["name"])
+    def test_different_name_fails(self):
+        out = self.run_check(self.ENTRY, {**self.ENTRY, "name": "q"})
+        self.assertEqual(out, ["./plugins/p: plugin.json name 'q' does not match marketplace entry 'p'"])
 
 
 class SelfChecks(unittest.TestCase):
