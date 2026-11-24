@@ -2,11 +2,12 @@
 """Validate this repo's plugin marketplace.
 
 Checks the things that silently stop a plugin or skill from loading — a
-mangled frontmatter block, a manifest name that drifted from its marketplace
-entry, a ${CLAUDE_PLUGIN_ROOT} path left behind by a move. It also runs each skill's
-scripts/check-*.mjs self-check when node is installed, runs the unit tests in
-scripts/test_*.py, and checks the GitHub Actions workflows (rules in
-docs/agents/ci.md). It is the whole test gate, locally and in CI.
+mangled frontmatter block, a manifest name, version or description that
+drifted from its marketplace entry, a ${CLAUDE_PLUGIN_ROOT} path left behind
+by a move. It also runs each skill's scripts/check-*.mjs self-check when node
+is installed, runs the unit tests in scripts/test_*.py, and checks the GitHub
+Actions workflows (rules in docs/agents/ci.md). It is the whole test gate,
+locally and in CI.
 
 Run from the repo root:
 
@@ -603,6 +604,59 @@ def run_self_checks() -> None:
             fail(f"{check.relative_to(ROOT)}: self-check failed\n{tail}")
 
 
+MARKETPLACE_REL = ".claude-plugin/marketplace.json"
+
+
+def first_difference(a: str, b: str) -> int:
+    """Index of the first character where `a` and `b` differ."""
+    return next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+
+
+def excerpt(text: str, at: int, width: int = 30) -> str:
+    """repr of `text` around index `at`, with ... where it was cut."""
+    start = max(0, at - width)
+    end = at + width
+    return ("..." if start else "") + repr(text[start:end]) + ("..." if end < len(text) else "")
+
+
+def check_manifest(source: str, entry: dict, manifest: dict) -> None:
+    """A plugin.json must have a description, and must agree with its
+    marketplace entry on name and on any version or description the entry sets."""
+    entry_name = entry.get("name", "<unnamed>")
+    if manifest.get("name") != entry_name:
+        fail(
+            f"{source}: plugin.json name {manifest.get('name')!r} does not match "
+            f"its {MARKETPLACE_REL} entry {entry_name!r}; rename one so they match"
+        )
+
+    if "version" in entry and manifest.get("version") != entry["version"]:
+        fail(
+            f"{source}: plugin.json version {manifest.get('version')!r} does not match "
+            f"its {MARKETPLACE_REL} entry {entry['version']!r}; "
+            "decide which is current and copy it to the other file"
+        )
+
+    description = manifest.get("description")
+    if not isinstance(description, str) or not description.strip():
+        fail(f"{source}: plugin.json has no description (it must be a non-empty string)")
+    elif "description" in entry and description != entry["description"]:
+        wanted = entry["description"]
+        if not isinstance(wanted, str):
+            fail(
+                f"{source}: plugin.json description does not match its {MARKETPLACE_REL} "
+                f"entry {wanted!r}, which is not a string"
+            )
+            return
+        at = first_difference(description, wanted)
+        fail(
+            f"{source}: plugin.json description does not match its {MARKETPLACE_REL} "
+            f"entry; they first differ at character {at + 1}. "
+            "Decide which is current and copy it to the other file.\n"
+            f"      plugin.json:      {excerpt(description, at)}\n"
+            f"      marketplace.json: {excerpt(wanted, at)}"
+        )
+
+
 def main() -> int:
     marketplace = load_json(MARKETPLACE)
     if marketplace is None:
@@ -636,18 +690,7 @@ def main() -> int:
         if manifest is None:
             continue
 
-        if manifest.get("name") != entry_name:
-            fail(
-                f"{source}: plugin.json name {manifest.get('name')!r} "
-                f"does not match marketplace entry {entry_name!r}"
-            )
-        if "version" in entry and manifest.get("version") != entry["version"]:
-            fail(
-                f"{source}: plugin.json version {manifest.get('version')!r} "
-                f"does not match marketplace entry {entry['version']!r}"
-            )
-        if not manifest.get("description", "").strip():
-            fail(f"{source}: plugin.json has no description")
+        check_manifest(source, entry, manifest)
 
         skills_dir = plugin_dir / "skills"
         if not skills_dir.is_dir():

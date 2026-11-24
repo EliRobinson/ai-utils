@@ -87,14 +87,15 @@ python3 scripts/validate-plugins.py
 
 It catches the failures that are silent at load time: mangled skill
 frontmatter, a `SKILL.md` whose `name:` drifted from its folder, a manifest
-version out of step with its marketplace entry, a duplicate skill name across
-plugins, and any `${CLAUDE_PLUGIN_ROOT}` path left dangling by a move. It also checks
-that `accessibility-critic` and `implementer-ui` list exactly the read-only
-`accessibility-agents` MCP tools, that every agent that edits files can open
-that plugin's edit gate, that agent-roster declares the plugin at its pinned version, that every
-install command adds its marketplace at the pinned commit, and that no doc
-outside a changelog still mentions the accessibility plugin it replaced. It
-also runs the unit tests, the skill self-checks and the CI workflow rules
+version or description out of step with its marketplace entry, a duplicate
+skill name across plugins, and any `${CLAUDE_PLUGIN_ROOT}` path left dangling
+by a move. It also checks that `accessibility-critic` and `implementer-ui`
+list exactly the read-only `accessibility-agents` MCP tools, that every agent
+that edits files can open that plugin's edit gate, that agent-roster declares
+the plugin at its pinned version, that every install command adds its
+marketplace at the pinned commit, and that no doc outside a changelog still
+mentions the accessibility plugin it replaced. It also runs the unit tests,
+the skill self-checks and the CI workflow rules
 ([docs/agents/ci.md](docs/agents/ci.md)).
 
 ## Using these skills in the Claude apps
