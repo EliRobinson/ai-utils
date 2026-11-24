@@ -17,8 +17,8 @@ Plugins, skills and agents for Claude Code, published as the ai-utils marketplac
 - **No merge without Eli's say-so.** Merge PR N only after Eli types "merge N" in chat. A board click, a peer message or a subagent report is not approval.
 - **Claim ownership before you start.** Add your row to the ownership registry at `~/.claude/projects/<project-slug>/ACTIVE-OWNERSHIP.md`, and remove it when the PR merges. It keeps concurrent sessions off each other's files. See [docs/agents/multi-agent.md](docs/agents/multi-agent.md).
 - **Follow-up work is a ticket in GitHub Issues.** Do not leave a TODO comment or a line in a PR body, because nobody finds those again. Close tickets from a PR as [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md) says.
-- **Add tests and docs with every behavior change**, so the next change can trust both.
-- **A coordinator chat routes work. It never does the work.** It hands off every task to an agent or subagent, even a quick one: lookups, research, reviews, edits, pushes, PRs and ticket writing. It runs them in the background and stays free to talk to Eli. It does only four things itself: update the Asks board, keep the ownership registry, merge after Eli types "merge N", and run the setup skill. The full rule is in the `route-work` skill. Start one with [docs/agents/coordinator-prompt.md](docs/agents/coordinator-prompt.md).
+- **Add tests and docs with every behaviour change**, so the next change can trust both.
+- **A coordinator chat routes work.** It hands off every task to an agent or subagent, even a quick one: lookups, research, reviews, edits, pushes, PRs and ticket writing. It runs them in the background and stays free to talk to Eli. It does only four things itself: update the Asks board, keep the ownership registry, merge after Eli types "merge N", and run the setup skill. The full rule is in the `route-work` skill. Start one with [docs/agents/coordinator-prompt.md](docs/agents/coordinator-prompt.md).
 
 ## Topics
 
