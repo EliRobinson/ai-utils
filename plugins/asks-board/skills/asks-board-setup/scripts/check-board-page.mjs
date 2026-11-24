@@ -74,6 +74,8 @@ for (const [o, want] of [
   ["C", { key: "C", label: "" }],
   [{ label: "Only a label" }, { key: "", label: "Only a label" }],
   [{ key: "A\nproject=x", label: "a\r\nb" }, { key: "A project=x", label: "a b" }],
+  [{ key: "A\u2028x", label: "a\u0085\vb" }, { key: "A x", label: "a b" }],
+  [{ key: { k: 1 }, id: "B", label: "x" }, { key: "B", label: "x" }],
   [{ key: "", label: "" }, { key: "", label: "" }],
   [{}, { key: "", label: "" }],
   [null, { key: "", label: "" }],
@@ -104,6 +106,7 @@ for (const [row, o, want] of [
 check(/\.update\(stamp\(patch,/.test(page), "write() must save stamp(patch, now)");
 check(/sections\(docs\.filter\(/.test(page), "render() must take its lists from sections()");
 check(/optionButton\(o, a\)/.test(page), "card() must build option buttons with optionButton()");
+check(/b\.writable\s*\?\s*act\(/.test(page), "an option button must act() only when it is writable");
 
 if (problems.length) {
   console.error("board-template.html self-check FAILED:\n  - " + problems.join("\n  - "));

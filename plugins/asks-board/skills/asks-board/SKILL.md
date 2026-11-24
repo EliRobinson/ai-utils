@@ -33,7 +33,7 @@ Whenever you ask the user to do, decide or approve something, also add it here (
   - `kind`: `do` (a task for the user), `decide` (pick an option) or `approve` (look and say ok).
   - `title`: one short line, plain words, what the user must do.
   - `detail`: the long version. Supports paragraphs, `- ` bullets, `1. ` steps, `**bold**`, `` `code` `` and ``` fenced blocks (each gets a Copy button). Put exact commands, links, why, and what happens if they skip it.
-  - `options` (REQUIRED for decide, optional for approve; without it the page draws no buttons): a list of `{key, label}`. The field is `key`, not `id`. `key` is the short value the click writes to `answer`; `label` is the text under it. Max 2 to 3. Example:
+  - `options` (REQUIRED for decide, optional for approve; without it the page draws no buttons): a list of `{key, label}`. The field is `key`, not `id`. `key` is the short value the click writes to `answer` (trimmed, with line breaks as spaces); `label` is the text under it. Max 2 to 3. Example:
     ```json
     "options": [{"key": "A", "label": "Ship it today"}, {"key": "B", "label": "Wait for review"}],
     "recommended": "A"
@@ -132,6 +132,6 @@ The source for this plugin is `plugins/asks-board/` in the public `ai-utils` rep
 - Skill text: `plugins/asks-board/skills/asks-board/SKILL.md`.
 - Board page: `plugins/asks-board/skills/asks-board-setup/board-template.html`. Keep logic that can be tested in its `// BEGIN pure` block and add cases to `asks-board-setup/scripts/check-board-page.mjs`.
 - When you change how the board or the router works, update `asks-board-setup/SKILL.md` and `plugins/asks-board/README.md` to match.
-- Ship it through a PR, never a push to `main`, following that repo's `AGENTS.md`. For this plugin, also bump the version in `plugins/asks-board/.claude-plugin/plugin.json` and its entry in `.claude-plugin/marketplace.json`. `python3 scripts/validate-plugins.py` runs the page tests too. The PR merges only after the owner types "merge N" in chat.
+- Ship it through a PR, never a push to `main`, following that repo's `AGENTS.md`. For this plugin, also bump the version in `plugins/asks-board/.claude-plugin/plugin.json` and its entry in `.claude-plugin/marketplace.json`. `python3 scripts/validate-plugins.py` runs the page tests too.
 - After the PR merges, publish the new page: copy `board-template.html` from the merged `main` to your scratchpad, replace every `{{OWNER}}` with the `Owner:` value, and publish that file with the `Artifact` tool, `url` = the board, `contract: "latest"`. Publishing re-arms your chat's watch: stop it again unless you are the router.
 - Never put personal values (board link, names, session ids) in the repo. They live in `~/.claude/asks-board.md` and in the board's `routes` rows.

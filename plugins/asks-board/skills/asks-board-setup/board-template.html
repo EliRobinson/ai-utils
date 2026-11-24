@@ -66,6 +66,7 @@ h2 { font-family: var(--display); font-weight: 600; font-size: 1.05rem; margin: 
 .opt.chosen { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .opt small { color: inherit; opacity: 0.8; }
 .opt.nokey { border-style: dashed; color: var(--muted); cursor: default; }
+.opt.nokey small { opacity: 1; }
 .body > .hint { margin: 0; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .btn { font: inherit; font-size: 0.9rem; border: 1px solid var(--line); background: transparent; color: var(--accent); padding: 4px 10px; border-radius: 6px; cursor: pointer; font-weight: 700; }
@@ -149,8 +150,10 @@ details > summary::-webkit-details-marker { display: none; }
   // the ping text). Rows use {key, label}; a row written with {id, label} still works, and
   // an empty key falls back to id. A bare string is its own key. key is "" when there is
   // no usable key or id: the button must not write then.
+  // An object or list is not text, so it counts as missing.
   function oneLine(v) {
-    return v == null ? "" : String(v).replace(/[\r\n]+/g, " ").trim();
+    if (v == null || typeof v === "object") return "";
+    return String(v).replace(/[\r\n\v\f\u0085\u2028\u2029]+/g, " ").trim();
   }
   function option(o) {
     if (o == null) return { key: "", label: "" };
@@ -168,9 +171,10 @@ details > summary::-webkit-details-marker { display: none; }
     const { key, label } = option(o);
     const chosen = matchesKey(row.answer, key);
     const rec = matchesKey(row.recommended, key);
+    const writable = key !== "";
     return {
-      key, label, chosen, writable: key !== "",
-      cls: "opt" + (key === "" ? " nokey" : chosen ? " chosen" : rec ? " rec" : ""),
+      key, label, chosen, writable,
+      cls: "opt" + (!writable ? " nokey" : chosen ? " chosen" : rec ? " rec" : ""),
       text: (key || "(no key)") + (rec ? "  (recommended)" : ""),
     };
   }
@@ -204,13 +208,14 @@ details > summary::-webkit-details-marker { display: none; }
   try { tab = localStorage.getItem("asks.tab"); } catch (e) {}
 
   // The same text twice is cleared first, so a screen reader announces it again.
+  const REANNOUNCE_MS = 100;
   let sayTimer = 0;
   function say(t) {
     const s = $("status");
     clearTimeout(sayTimer);
     if (s.textContent !== t) { s.textContent = t; return; }
     s.textContent = "";
-    sayTimer = setTimeout(() => { s.textContent = t; }, 100);
+    sayTimer = setTimeout(() => { s.textContent = t; }, REANNOUNCE_MS);
   }
   function ago(iso) {
     if (!iso) return "";
@@ -385,7 +390,7 @@ details > summary::-webkit-details-marker { display: none; }
           onclick: (ev) => b.writable
             ? act(ev, d, { status: "answered", answer: b.key }, "Sent “" + b.key + "”.",
               "{{OWNER}} chose option " + b.key + (b.label ? ": " + b.label : "") + ".")
-            : say("This option has no key, so nothing was sent. Add a note to tell the chat."),
+            : say("This option has no key, so nothing was sent."),
         }, [el("b", { text: b.text }), b.label ? el("small", { text: b.label }) : null]));
       }
       body.append(opts);
