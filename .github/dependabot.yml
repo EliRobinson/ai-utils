@@ -1,9 +1,13 @@
 # Keeps the SHA-pinned actions in .github/workflows current.
+# How its PRs are handled: docs/agents/ci.md.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    # Wait a week after a release, so a bad release is caught before we pin it.
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: ci

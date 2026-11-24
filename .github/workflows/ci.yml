@@ -1,9 +1,5 @@
-# CI for the ai-utils marketplace. One job, `validate`, runs the same checks
-# agents run locally (see docs/agents/ci.md). It must pass before a merge.
-#
-# Hardening, checked by scripts/validate-plugins.py:
-# - read-only token, no secrets, never pull_request_target
-# - every action pinned to a full commit SHA (Dependabot keeps them fresh)
+# CI for the ai-utils marketplace: one job, `validate`. Rules and how to fix a
+# failure: docs/agents/ci.md. scripts/validate-plugins.py checks this file.
 name: ci
 
 on:
@@ -18,7 +14,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A new push to a PR cancels its older run; runs on main always finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   validate:
@@ -38,14 +35,6 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Test the validator
-        run: python3 -m unittest discover -s scripts -p 'test_*.py'
-
-      - name: Validate plugins, skills, templates and this workflow
+      # The whole gate: unit tests, plugins and skills, workflows, self-checks.
+      - name: Run the test gate
         run: python3 scripts/validate-plugins.py
-
-      - name: Check the agent hooks
-        run: node scripts/check-agent-hooks.mjs
-
-      - name: Check the asks board page
-        run: node plugins/asks-board/skills/asks-board-setup/scripts/check-board-page.mjs

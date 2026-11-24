@@ -34,7 +34,7 @@ cd ../<repo>-<task>
 - Catch up with `git rebase origin/main`. Never merge `main` into a branch.
 - Never force push. If `main` moves after you pushed, rebase onto a new `<branch>-r2` and push that. Run the review gate on it again if the rebase changed more than a clean replay (this uses a round; see [review-gate.md](review-gate.md)), then open a new PR. Close the old one with a link to the new one.
 - Review before you open the PR, drafts included: see [review-gate.md](review-gate.md).
-- Only the coordinator merges, and only after the owner types "merge N" in chat. It follows the merge steps in [coordinator-prompt.md](coordinator-prompt.md#merging): up to date with `main`, review record complete, test gate passed on the exact head, merge lock, `gh pr merge --rebase --match-head-commit <sha>`.
+- Only the coordinator merges, and only after the owner types "merge N" in chat. It follows the merge steps in [coordinator-prompt.md](coordinator-prompt.md#merging): up to date with `main`, review record complete, test gate and the `validate` CI job passed on the exact head, merge lock, `gh pr merge --rebase --match-head-commit <sha>`.
 
 ## What is enforced, and what is a rule
 

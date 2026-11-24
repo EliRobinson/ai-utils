@@ -4,10 +4,9 @@
 Checks the things that silently stop a plugin or skill from loading — a
 mangled frontmatter block, a manifest name that drifted from its marketplace
 entry, a ${CLAUDE_PLUGIN_ROOT} path left behind by a move. It also runs each skill's
-scripts/check-*.mjs self-check when node is installed, and checks that
-.github/workflows/ci.yml exists and every workflow stays hardened (read-only
-token, no pull_request_target, actions pinned to full commit SHAs). Tests for
-the workflow checks: python3 -m unittest discover -s scripts -p 'test_*.py'
+scripts/check-*.mjs self-check when node is installed, runs the unit tests in
+scripts/test_*.py, and checks the GitHub Actions workflows (rules in
+docs/agents/ci.md). It is the whole test gate, locally and in CI.
 
 Run from the repo root:
 
@@ -20,14 +19,16 @@ problem it found.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import unittest
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parent.parent
 MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
@@ -432,78 +433,165 @@ def check_vendored_thermonuclear() -> None:
 
 WORKFLOWS = ROOT / ".github" / "workflows"
 CI_WORKFLOW = WORKFLOWS / "ci.yml"
-# Owners whose actions a workflow may use. The repo plans to allow only
-# GitHub-owned and verified actions; add an owner here only on purpose.
+# Owners whose actions a workflow may use: GitHub's own. Add an owner here only
+# on purpose, after review.
 ALLOWED_ACTION_OWNERS = {"actions", "github"}
+# Triggers that run with the base repo's rights on events an outsider can start.
+BANNED_TRIGGERS = ("pull_request_target", "workflow_run", "issue_comment")
 USES = re.compile(r"^\s*(?:-\s*)?uses:\s*['\"]?([^\s'\"#]+)['\"]?\s*(#.*)?$")
+ANY_USES = re.compile(r"\buses\b['\"]?\s*:")
 PINNED_ACTION = re.compile(r"^([A-Za-z0-9_.-]+)/[A-Za-z0-9_./-]+@[0-9a-f]{40}$")
 VERSION_COMMENT = re.compile(r"^#\s*v\d")
+WRITE = re.compile(
+    r"(?:^|[\s{,])[\w-]+\s*:\s*['\"]?write['\"]?\s*(?:[,}]|$)|:\s*['\"]?write-all['\"]?\s*$"
+)
+SECRETS = re.compile(r"\$\{\{[^}]*\bsecrets\b|^\s*(?:-\s*)?['\"]?secrets['\"]?\s*:")
+PERSIST_FALSE = re.compile(r"^\s*persist-credentials:\s*['\"]?false['\"]?\s*$")
+STEP_START = re.compile(r"^(\s*)-\s")
+
+# A problem: (line number, or None for the whole file; message).
+Problem = Tuple[Optional[int], str]
 
 
-def strip_comment_lines(text: str) -> list[str]:
-    """The workflow's lines with whole-line comments blanked (numbers kept)."""
-    return ["" if line.lstrip().startswith("#") else line for line in text.splitlines()]
+def strip_comments(text: str) -> list[str]:
+    """The workflow's lines with comments removed (line numbers kept)."""
+    return ["" if line.lstrip().startswith("#") else line.split(" #", 1)[0].rstrip()
+            for line in text.splitlines()]
 
 
-def workflow_problems(text: str, *, require_validate_job: bool = False) -> list[str]:
-    """Problems in one GitHub Actions workflow, as 'line N: ...' strings.
+def indent(line: str) -> int:
+    return len(line) - len(line.lstrip())
 
-    A line-based check (no YAML parser in the standard library), strict on
-    purpose: top-level `permissions:` is exactly `contents: read`, nothing
-    asks for write access, no `pull_request_target`, no secrets, and every
-    `uses:` is an allowed owner's action pinned to a 40-hex commit SHA with
-    a `# vX` comment.
-    """
-    found: list[str] = []
-    lines = strip_comment_lines(text)
 
-    top = [i for i, line in enumerate(lines) if re.match(r"^permissions:", line)]
+def nested(lines: list[str], start: int, depth: int | None = None) -> list[int]:
+    """Indexes of the non-blank lines nested deeper than `depth` (default: lines[start]'s indent)."""
+    depth = indent(lines[start]) if depth is None else depth
+    out = []
+    for j in range(start + 1, len(lines)):
+        if not lines[j].strip():
+            continue
+        if indent(lines[j]) <= depth:
+            break
+        out.append(j)
+    return out
+
+
+def unquote(s: str) -> str:
+    return re.sub(r"\s+", " ", s.replace("'", "").replace('"', "").strip())
+
+
+def permissions_problems(lines: list[str]) -> list[Problem]:
+    """Top-level `permissions:` is exactly `contents: read`."""
+    top = [i for i, line in enumerate(lines) if re.match(r"^permissions\s*:", line)]
     if not top:
-        found.append("no top-level `permissions:` block; want `permissions:` / `contents: read`")
-    else:
-        i = top[0]
-        inline = lines[i].split(":", 1)[1].strip()
-        body = []
-        for line in lines[i + 1:]:
-            if line.strip() == "":
-                continue
-            if not line.startswith((" ", "\t")):
-                break
-            body.append(line.strip())
-        if inline or body != ["contents: read"]:
-            found.append(f"line {i + 1}: top-level permissions must be exactly `contents: read`")
-
-    for number, line in enumerate(lines, 1):
-        code = line.split(" #", 1)[0]
-        if "pull_request_target" in code:
-            found.append(f"line {number}: uses pull_request_target; use pull_request")
-        if re.search(r":\s*write\b|write-all", code):
-            found.append(f"line {number}: asks for write access")
-        if "secrets." in code or "secrets[" in code:
-            found.append(f"line {number}: uses a secret; the CI needs none")
-        match = USES.match(line)
-        if not match:
-            continue
-        ref, comment = match.group(1), (match.group(2) or "")
-        if ref.startswith("./"):
-            continue  # an action in this repo, reviewed with the PR
-        pinned = PINNED_ACTION.match(ref)
-        if not pinned:
-            found.append(f"line {number}: {ref} is not pinned to a full 40-hex commit SHA")
-            continue
-        if pinned.group(1) not in ALLOWED_ACTION_OWNERS:
-            found.append(
-                f"line {number}: {ref} is not from an allowed owner "
-                f"({', '.join(sorted(ALLOWED_ACTION_OWNERS))})"
-            )
-        if not VERSION_COMMENT.match(comment):
-            found.append(f"line {number}: {ref} has no `# vX.Y.Z` comment naming the pinned version")
-
-    if require_validate_job and not (
-        re.search(r"^  validate:\s*$", text, re.M) and re.search(r"^    name: validate\s*$", text, re.M)
+        return [(None, "no top-level `permissions:` block; add `permissions:` with `contents: read`")]
+    i = top[0]
+    inline = unquote(lines[i].split(":", 1)[1])
+    body = [unquote(lines[j]) for j in nested(lines, i)]
+    if (not inline and body == ["contents: read"]) or (
+        re.fullmatch(r"\{ ?contents ?: ?read ?\}", inline) and not body
     ):
-        found.append("no job `validate` with `name: validate`, the check that must pass before merge")
+        return []
+    found = inline or "; ".join(body) or "nothing"
+    return [(i + 1, f"top-level permissions must be exactly `contents: read`, found `{found}`")]
+
+
+def uses_problems(number: int, raw: str) -> list[Problem]:
+    """A `uses:` line names an allowed owner's action, pinned to a SHA, with a version comment."""
+    match = USES.match(raw)
+    if not match:
+        return [(number, "`uses` is written in a form this check cannot read; "
+                         "write it as `uses: owner/name@<sha> # vX.Y.Z`")]
+    ref, comment = match.group(1), match.group(2) or ""
+    if ref.startswith("./"):
+        return []  # an action in this repo, reviewed with the PR
+    pinned = PINNED_ACTION.match(ref)
+    if not pinned:
+        return [(number, f"{ref} is not pinned to a full 40-hex commit SHA; "
+                         "pin the tag's commit (see docs/agents/ci.md)")]
+    found: list[Problem] = []
+    if pinned.group(1) not in ALLOWED_ACTION_OWNERS:
+        found.append((number, f"{ref} is not from an allowed owner "
+                              f"({', '.join(sorted(ALLOWED_ACTION_OWNERS))}); use one of theirs, "
+                              "or add the owner to ALLOWED_ACTION_OWNERS in "
+                              "scripts/validate-plugins.py on purpose"))
+    if "/.github/workflows/" in ref:
+        found.append((number, f"{ref} calls a reusable workflow; write the steps in this workflow"))
+    if not VERSION_COMMENT.match(comment):
+        found.append((number, f"{ref} has no `# vX.Y.Z` comment naming the pinned version"))
     return found
+
+
+def line_problems(raw: list[str], lines: list[str]) -> list[Problem]:
+    """Per-line rules: no privileged trigger, no write access, no secrets, pinned actions.
+
+    `raw` is the file's lines; `lines` the same lines with comments removed.
+    """
+    found: list[Problem] = []
+    for number, code in enumerate(lines, 1):
+        for trigger in BANNED_TRIGGERS:
+            if re.search(rf"\b{trigger}\b", code):
+                found.append((number, f"uses the `{trigger}` trigger, which runs with the base "
+                                      "repo's rights; use `pull_request`"))
+        if WRITE.search(code):
+            found.append((number, "asks for write access; CI may only have `contents: read`"))
+        if SECRETS.search(code):
+            found.append((number, "uses secrets; CI uses no secrets"))
+        if ANY_USES.search(code):
+            found.extend(uses_problems(number, raw[number - 1]))
+    return found
+
+
+def checkout_problems(lines: list[str]) -> list[Problem]:
+    """Every actions/checkout step sets `persist-credentials: false`."""
+    found: list[Problem] = []
+    for i, code in enumerate(lines):
+        match = USES.match(code)
+        if not match or not match.group(1).startswith("actions/checkout@"):
+            continue
+        step = STEP_START.match(code)
+        if step:
+            depth = len(step.group(1))
+        else:  # `uses:` under a `- name:` line: the step starts at the nearest dash above
+            starts = [len(m.group(1)) for line in lines[:i]
+                      if (m := STEP_START.match(line)) and len(m.group(1)) < indent(code)]
+            depth = starts[-1] if starts else indent(code) - 1
+        step_lines = [lines[j] for j in nested(lines, i, depth)]
+        if not any(PERSIST_FALSE.match(line) for line in step_lines):
+            found.append((i + 1, "actions/checkout without `persist-credentials: false`; add it "
+                                 "under `with:`, so later steps cannot read the token"))
+    return found
+
+
+def workflow_problems(text: str) -> list[Problem]:
+    """Problems in one GitHub Actions workflow (rules: docs/agents/ci.md).
+
+    Line-based (no YAML parser in the standard library) and strict on purpose:
+    a form it cannot read fails rather than passes.
+    """
+    lines = strip_comments(text)
+    return [*permissions_problems(lines), *line_problems(text.splitlines(), lines),
+            *checkout_problems(lines)]
+
+
+def ci_job_problems(text: str) -> list[Problem]:
+    """ci.yml has a job `validate` named `validate`: the check that must pass before merge."""
+    lines = strip_comments(text)
+    for i, line in enumerate(lines):
+        if not re.match(r"^jobs\s*:\s*$", line):
+            continue
+        jobs = nested(lines, i)
+        if not jobs:
+            break
+        depth = indent(lines[jobs[0]])
+        for j in jobs:
+            if indent(lines[j]) == depth and re.fullmatch(r"['\"]?validate['\"]?\s*:", lines[j].strip()):
+                job = nested(lines, j)
+                keys = [lines[k] for k in job if job and indent(lines[k]) == indent(lines[job[0]])]
+                if any(re.fullmatch(r"name\s*:\s*['\"]?validate['\"]?", k.strip()) for k in keys):
+                    return []
+    return [(None, "no job `validate` with `name: validate`; it is the check that must pass "
+                   "before a PR merges")]
 
 
 def check_workflows() -> None:
@@ -512,8 +600,11 @@ def check_workflows() -> None:
         fail(f"{rel(CI_WORKFLOW)}: missing; it runs these checks on every PR")
     for path in sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")]):
         text = path.read_text(encoding="utf-8")
-        for problem in workflow_problems(text, require_validate_job=path == CI_WORKFLOW):
-            fail(f"{rel(path)}: {problem}")
+        found = workflow_problems(text)
+        if path == CI_WORKFLOW:
+            found += ci_job_problems(text)
+        for number, msg in found:
+            fail(f"{rel(path)}:{number}: {msg}" if number else f"{rel(path)}: {msg}")
 
 
 def main() -> int:
@@ -584,20 +675,35 @@ def main() -> int:
     check_vendored_thermonuclear()
     check_accessibility_agents()
     check_workflows()
+    run_unit_tests()
     run_self_checks()
     report(skill_count, len(entries))
     return 1 if problems else 0
 
 
+def run_unit_tests() -> None:
+    """Run scripts/test_*.py, so this one command is the whole gate."""
+    suite = unittest.defaultTestLoader.discover(str(ROOT / "scripts"), pattern="test_*.py")
+    out = io.StringIO()
+    result = unittest.TextTestRunner(stream=out, verbosity=0).run(suite)
+    if not result.wasSuccessful():
+        tail = "\n".join(out.getvalue().strip().splitlines()[-30:])
+        fail(f"scripts/test_*.py: unit tests failed\n{tail}")
+
+
 def run_self_checks() -> None:
     """Run every skill's scripts/check-*.mjs, so a hook regression fails here.
 
-    Skipped, with a note, when node is not installed.
+    Skipped, with a note, when node is not installed; in CI (`CI` set) a
+    missing node fails instead, so CI never skips them.
     """
     checks = sorted(ROOT.glob("plugins/*/skills/*/scripts/check-*.mjs"))
     if not checks:
         return
     if shutil.which("node") is None:
+        if os.environ.get("CI"):
+            fail(f"node not found; CI must run the {len(checks)} self-check(s)")
+            return
         print(f"note: node not found, skipped {len(checks)} self-check(s)", file=sys.stderr)
         return
     for check in checks:

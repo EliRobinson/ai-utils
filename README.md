@@ -21,7 +21,8 @@ docs/agents/                     agent rules: git workflow, review gate, coordin
 .github/workflows/ci.yml         CI: the `validate` job (see docs/agents/ci.md)
 AGENTS.md                        agent rules for this repo (CLAUDE.md links to it)
 LICENSE, SECURITY.md             MIT license, how to report a security problem
-scripts/                         validate-plugins.py, build-skill-bundles.py,
+scripts/                         validate-plugins.py (the test gate) and its tests
+                                 test_validate_plugins.py, build-skill-bundles.py,
                                  hook scripts (symlinks into agent-roster)
 ```
 
@@ -75,7 +76,8 @@ and is installed from its own marketplace.
 ## Validation
 
 CI (`.github/workflows/ci.yml`, job `validate`) runs `scripts/validate-plugins.py`
-and the other checks on every pull request and push to `main`; see
+on every pull request and push to `main`. That one command is the whole test
+gate, so the same command passes locally and in CI; see
 [docs/agents/ci.md](docs/agents/ci.md). Run it yourself before pushing:
 
 ```bash
@@ -90,7 +92,10 @@ that `accessibility-critic` and `implementer-ui` list exactly the read-only
 `accessibility-agents` MCP tools, that every agent that edits files can open
 that plugin's edit gate, that agent-roster declares the plugin at its pinned version, that every
 install command adds its marketplace at the pinned commit, and that no doc
-outside a changelog still mentions the accessibility plugin it replaced.
+outside a changelog still mentions the accessibility plugin it replaced. It
+also runs the unit tests in `scripts/test_*.py`, each skill's
+`scripts/check-*.mjs` self-check when Node is installed, and the CI workflow
+rules.
 
 ## Using these skills in the Claude apps
 
