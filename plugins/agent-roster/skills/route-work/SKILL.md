@@ -28,11 +28,11 @@ This section is the full rule; the coordinator prompt and the repo's `AGENTS.md`
 | Renames, codemods, generated files, dependency bumps | `agent-roster:mechanical-editor` | sonnet | yes |
 | User-facing and legal strings (plain-words voice) | `agent-roster:copy-writer` | sonnet | yes |
 | Maintainability review (`agent-roster:thermo-nuclear-code-quality-review` skill, Cursor's, vendored in agent-roster) | `agent-roster:thermonuclear-reviewer` | opus | no |
-| Edge cases, errors, concurrency, payments and entitlements, test strength | `agent-roster:correctness-critic` | opus | no |
+| Edge cases, errors, concurrency, payments and entitlements, test strength and shape | `agent-roster:correctness-critic` | opus | no |
 | `CONTEXT.md` and ADRs, docs and agent rules | `agent-roster:spec-critic` | sonnet | no |
 | auth, input, injection, secrets, dependencies, CI and the repo's security rules | `agent-roster:security-critic` | opus | no |
 | Every user-facing string (`marketing-skills:copy-editing` skill) | `agent-roster:copy-critic` | sonnet | no |
-| Duplication, and abstractions to leave alone | `agent-roster:dry-critic` | opus | no |
+| Duplication (test code too), and abstractions to leave alone | `agent-roster:dry-critic` | opus | no |
 | UX on every change, visual design on UI changes (`impeccable` skill) | `agent-roster:design-critic` | opus | no |
 | WCAG problems on UI changes (`accessibility-agents` plugin) | `agent-roster:accessibility-critic` | sonnet | no |
 | Review gate, split big PRs, catch up with the base branch, open the PR | `agent-roster:pr-finisher` | sonnet | yes |

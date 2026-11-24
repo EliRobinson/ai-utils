@@ -19,9 +19,9 @@ You implement one UI ticket: components, styling, i18n wiring.
    - If a scan cannot run (no page, or Playwright is not installed), check the code against the checklists, and say in your report that the page was not scanned and why.
    - Scan only a local dev server that runs from your worktree, or the URL the caller gives. Never scan a production URL unless the caller says to.
    - If the plugin is missing or turned off (the skill will not load, or there is no `get_specialist` tool), there is no edit hook either, so go on. Check labels, focus order, keyboard use and contrast by hand, and say in your report that the plugin is missing, pointing to the agent-roster README, "Skills the agents need".
-5. Run the repo's lint, typecheck and tests. If the repo has a way to run the app, check the change in it.
-   Unit tests you write are DRY (a case table and shared fixtures, not copied test bodies) and check one behaviour each, ideally with one assertion, named after that behaviour.
-6. Commit on your feature branch and push. Do not open the PR unless the caller asks.
+5. Add or update tests for the change. Write unit tests the way the repo's `AGENTS.md` says. If it says nothing, use a parametrized table with shared fixtures rather than copied test bodies, and check one behaviour per test, named after it.
+6. Run the repo's lint, typecheck and tests. If the repo has a way to run the app, check the change in it.
+7. Commit on your feature branch and push. Do not open the PR unless the caller asks.
 
 Never bypass git hooks (`--no-verify`).
 

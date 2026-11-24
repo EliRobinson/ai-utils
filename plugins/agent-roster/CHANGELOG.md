@@ -4,7 +4,17 @@
 
 ## 1.11.0
 
-- Unit tests: DRY (case tables) and one behaviour per test; implementers write them that way and the correctness and DRY critics check it. The rule is in the guardrails template, so rerunning `setup-agentic-workflow` adds it to a repo's `AGENTS.md`.
+**Upgrade steps:**
+
+1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
+2. Rerun `setup-agentic-workflow` in each repo set up before 1.11.0 and merge its setup PR. It adds the two unit-test bullets to `AGENTS.md` and refreshes `correctness-critic` and `dry-critic` in `.claude/agents/`. Until then, the repo's critics do not check the new rule.
+
+**Changes:**
+
+- **Unit tests are DRY and check one behaviour each.** The guardrails gain two bullets: cases that share one test body go in a table that drives a parametrized test, with shared fixtures, so each case runs and fails on its own; and each unit test checks one behaviour, named after it. A case that needs its own branch gets its own test.
+- `implementer-engine` and `implementer-ui` write tests the way the repo's `AGENTS.md` says, and fall back to the same rule when it says nothing. `implementer-ui` gains a step to add tests.
+- `correctness-critic` flags a unit test that checks several behaviours. `dry-critic` flags copied test bodies. `route-work`'s table says so.
+- `validate-plugins.py` checks that the guardrails template, this repo's `AGENTS.md`, both implementers and both critics keep the rule.
 
 ## 1.10.0
 

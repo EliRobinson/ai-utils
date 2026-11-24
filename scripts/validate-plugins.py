@@ -415,12 +415,19 @@ def check_old_branch_rule_gone() -> None:
                             "rule in templates/docs-agents/git-workflow.md instead")
 
 
-def check_branch_rule_stated() -> None:
-    for path, terms in BRANCH_RULE_TERMS.items():
-        text = (read_or_fail(path) or "").lower()
+def check_terms(table: dict, rule: str) -> None:
+    """Each file in `table` contains each of its terms, in any case."""
+    for path, terms in table.items():
+        text = read_or_fail(path)
+        if text is None:
+            continue
         for term in terms:
-            if term not in text:
-                fail(f"{rel(path)}: must contain {term!r} (any case), part of the same-branch rule")
+            if term.lower() not in text.lower():
+                fail(f"{rel(path)}: must contain {term!r} (any case), part of the {rule}")
+
+
+def check_branch_rule_stated() -> None:
+    check_terms(BRANCH_RULE_TERMS, "same-branch rule")
     for agent in sorted((AGENT_ROSTER / "agents").glob("*.md")):
         if BRANCH_RULE_LINE not in (read_or_fail(agent) or ""):
             fail(f"{rel(agent)}: must carry the branch rule word for word: {BRANCH_RULE_LINE!r}")
@@ -479,6 +486,26 @@ def check_branch_rule() -> None:
     if default:
         check_setup_patch(default)
         check_merge_style(default)
+
+
+# The unit-test rule (#6): the guardrails state it in full, the implementers
+# carry one line word for word, and each critic keeps its half.
+UNIT_TEST_GUARDRAIL_TERMS = ["that drives a parametrized test", "each unit test checks one behaviour"]
+UNIT_TEST_IMPLEMENTER_LINE = ("Write unit tests the way the repo's `AGENTS.md` says. If it says nothing, use a "
+                              "parametrized table with shared fixtures rather than copied test bodies, and check one "
+                              "behaviour per test, named after it.")
+UNIT_TEST_RULE_TERMS = {
+    GUARDRAILS: UNIT_TEST_GUARDRAIL_TERMS,
+    REPO_AGENTS_MD: UNIT_TEST_GUARDRAIL_TERMS,
+    AGENT_ROSTER / "agents" / "implementer-engine.md": [UNIT_TEST_IMPLEMENTER_LINE],
+    IMPLEMENTER_UI: [UNIT_TEST_IMPLEMENTER_LINE],
+    AGENT_ROSTER / "agents" / "correctness-critic.md": ["one test per behaviour"],
+    AGENT_ROSTER / "agents" / "dry-critic.md": ["parametrized table with shared fixtures"],
+}
+
+
+def check_unit_test_rule() -> None:
+    check_terms(UNIT_TEST_RULE_TERMS, "unit-test rule")
 
 
 VENDORED_SKILL = AGENT_ROSTER / "skills" / "thermo-nuclear-code-quality-review"
@@ -712,6 +739,7 @@ def main() -> int:
 
     check_agent_roster_templates()
     check_branch_rule()
+    check_unit_test_rule()
     check_vendored_thermonuclear()
     check_accessibility_agents()
     check_workflows()
