@@ -4,7 +4,10 @@
 Checks the things that silently stop a plugin or skill from loading — a
 mangled frontmatter block, a manifest name that drifted from its marketplace
 entry, a ${CLAUDE_PLUGIN_ROOT} path left behind by a move. It also runs each skill's
-scripts/check-*.mjs self-check when node is installed.
+scripts/check-*.mjs self-check when node is installed, and checks that
+.github/workflows/ci.yml exists and every workflow stays hardened (read-only
+token, no pull_request_target, actions pinned to full commit SHAs). Tests for
+the workflow checks: python3 -m unittest discover -s scripts -p 'test_*.py'
 
 Run from the repo root:
 
@@ -427,6 +430,92 @@ def check_vendored_thermonuclear() -> None:
         )
 
 
+WORKFLOWS = ROOT / ".github" / "workflows"
+CI_WORKFLOW = WORKFLOWS / "ci.yml"
+# Owners whose actions a workflow may use. The repo plans to allow only
+# GitHub-owned and verified actions; add an owner here only on purpose.
+ALLOWED_ACTION_OWNERS = {"actions", "github"}
+USES = re.compile(r"^\s*(?:-\s*)?uses:\s*['\"]?([^\s'\"#]+)['\"]?\s*(#.*)?$")
+PINNED_ACTION = re.compile(r"^([A-Za-z0-9_.-]+)/[A-Za-z0-9_./-]+@[0-9a-f]{40}$")
+VERSION_COMMENT = re.compile(r"^#\s*v\d")
+
+
+def strip_comment_lines(text: str) -> list[str]:
+    """The workflow's lines with whole-line comments blanked (numbers kept)."""
+    return ["" if line.lstrip().startswith("#") else line for line in text.splitlines()]
+
+
+def workflow_problems(text: str, *, require_validate_job: bool = False) -> list[str]:
+    """Problems in one GitHub Actions workflow, as 'line N: ...' strings.
+
+    A line-based check (no YAML parser in the standard library), strict on
+    purpose: top-level `permissions:` is exactly `contents: read`, nothing
+    asks for write access, no `pull_request_target`, no secrets, and every
+    `uses:` is an allowed owner's action pinned to a 40-hex commit SHA with
+    a `# vX` comment.
+    """
+    found: list[str] = []
+    lines = strip_comment_lines(text)
+
+    top = [i for i, line in enumerate(lines) if re.match(r"^permissions:", line)]
+    if not top:
+        found.append("no top-level `permissions:` block; want `permissions:` / `contents: read`")
+    else:
+        i = top[0]
+        inline = lines[i].split(":", 1)[1].strip()
+        body = []
+        for line in lines[i + 1:]:
+            if line.strip() == "":
+                continue
+            if not line.startswith((" ", "\t")):
+                break
+            body.append(line.strip())
+        if inline or body != ["contents: read"]:
+            found.append(f"line {i + 1}: top-level permissions must be exactly `contents: read`")
+
+    for number, line in enumerate(lines, 1):
+        code = line.split(" #", 1)[0]
+        if "pull_request_target" in code:
+            found.append(f"line {number}: uses pull_request_target; use pull_request")
+        if re.search(r":\s*write\b|write-all", code):
+            found.append(f"line {number}: asks for write access")
+        if "secrets." in code or "secrets[" in code:
+            found.append(f"line {number}: uses a secret; the CI needs none")
+        match = USES.match(line)
+        if not match:
+            continue
+        ref, comment = match.group(1), (match.group(2) or "")
+        if ref.startswith("./"):
+            continue  # an action in this repo, reviewed with the PR
+        pinned = PINNED_ACTION.match(ref)
+        if not pinned:
+            found.append(f"line {number}: {ref} is not pinned to a full 40-hex commit SHA")
+            continue
+        if pinned.group(1) not in ALLOWED_ACTION_OWNERS:
+            found.append(
+                f"line {number}: {ref} is not from an allowed owner "
+                f"({', '.join(sorted(ALLOWED_ACTION_OWNERS))})"
+            )
+        if not VERSION_COMMENT.match(comment):
+            found.append(f"line {number}: {ref} has no `# vX.Y.Z` comment naming the pinned version")
+
+    if require_validate_job and not (
+        re.search(r"^  validate:\s*$", text, re.M) and re.search(r"^    name: validate\s*$", text, re.M)
+    ):
+        found.append("no job `validate` with `name: validate`, the check that must pass before merge")
+    return found
+
+
+def check_workflows() -> None:
+    """The CI workflow exists, and every workflow keeps the hardening rules."""
+    if not CI_WORKFLOW.is_file():
+        fail(f"{rel(CI_WORKFLOW)}: missing; it runs these checks on every PR")
+    for path in sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")]):
+        text = path.read_text(encoding="utf-8")
+        for problem in workflow_problems(text, require_validate_job=path == CI_WORKFLOW):
+            fail(f"{rel(path)}: {problem}")
+
+
 def main() -> int:
     marketplace = load_json(MARKETPLACE)
     if marketplace is None:
@@ -494,6 +583,7 @@ def main() -> int:
     check_agent_roster_templates()
     check_vendored_thermonuclear()
     check_accessibility_agents()
+    check_workflows()
     run_self_checks()
     report(skill_count, len(entries))
     return 1 if problems else 0

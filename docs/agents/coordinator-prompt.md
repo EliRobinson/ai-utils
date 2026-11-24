@@ -41,7 +41,7 @@ No merge unless Eli types "merge N" in chat. Each "merge N" covers that one PR. 
 
 1. `git fetch origin`. The branch must be 0 commits behind `origin/main`. If it is behind, have its agent rebase onto a new `-r2` branch (never force push), take it through the review gate again with `pr-finisher` if the rebase changed more than a clean replay, and open a new PR. That PR needs its own review record and its own "merge N".
 2. The PR body has a complete `## Review` record: a row for every reviewer in the gate, none on Fable, every finding fixed, declined with a reason, or filed.
-3. The full test gate (`python3 scripts/validate-plugins.py`) must have passed on the exact head sha. A pass on an older head does not count. CI is off on this repo, so run the gate yourself on the head you merge.
+3. The full test gate (`python3 scripts/validate-plugins.py`) must have passed on the exact head sha. A pass on an older head does not count. The `validate` CI job ([ci.md](ci.md)) must also pass on that head.
 4. Take the merge lock, so no other session merges at the same time: `mkdir "$HOME/.claude/projects/<project-slug>/merge-lock"`. It fails while another session holds it; wait and try again. If it stays held for a long time, ask Eli before you remove it. Remove it yourself when you are done, even if the merge fails.
 5. Merge, naming the head you tested: `gh pr merge N --rebase --match-head-commit <sha> -R EliRobinson/ai-utils`.
 6. Check it worked: the PR shows merged, the ticket it closes is closed (if `docs/agents/issue-tracker.md` says the merge does not close it, have `ticket-writer` close it), and the test gate still passes on `main`. Remove the item's registry row. Tell Eli in one or two lines.

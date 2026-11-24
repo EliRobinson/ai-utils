@@ -18,7 +18,7 @@ plugins/
 .claude/agents/                  this repo's reviewer agents (symlinks into agent-roster)
 .claude/settings.json            wires the guard and review-gate hooks
 docs/agents/                     agent rules: git workflow, review gate, coordinator prompt, ...
-.github/workflows/validate.yml   CI for validate-plugins.py (commented out for now)
+.github/workflows/ci.yml         CI: the `validate` job (see docs/agents/ci.md)
 AGENTS.md                        agent rules for this repo (CLAUDE.md links to it)
 LICENSE, SECURITY.md             MIT license, how to report a security problem
 scripts/                         validate-plugins.py, build-skill-bundles.py,
@@ -74,9 +74,9 @@ and is installed from its own marketplace.
 
 ## Validation
 
-`.github/workflows/validate.yml` runs `scripts/validate-plugins.py` on pull
-requests and pushes to `main` once it is switched on (it is commented out for now). Run it yourself
-before pushing:
+CI (`.github/workflows/ci.yml`, job `validate`) runs `scripts/validate-plugins.py`
+and the other checks on every pull request and push to `main`; see
+[docs/agents/ci.md](docs/agents/ci.md). Run it yourself before pushing:
 
 ```bash
 python3 scripts/validate-plugins.py
