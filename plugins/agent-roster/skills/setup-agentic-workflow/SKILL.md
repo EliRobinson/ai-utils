@@ -14,13 +14,13 @@ You set up the owner's agent workflow in the repo you are run in. The workflow:
 - the reviewer agents run on the branch before a PR is opened, and a hook checks their record;
 - a PR gets at most two rounds of review (the rule is in `docs/agents/review-gate.md`);
 - no PR merges until the owner types "merge N";
-- a coordinator chat only manages agents and subagents: it hands off every task, runs agents in the background, and stays free to talk;
+- a coordinator chat routes work: it hands off every task, runs agents in the background, and stays free to talk;
 - every ask for the owner (question, decision, approval, review, task) goes on the owner's Asks board;
 - only the Board Router watches the board for live pings; a coordinator never does (it reads the board at every check-in), never messages the router back, and handles a ping as the `asks-board` skill's "If you are a project coordinator" section says;
 - the reviewers have the skills and plugins they need (copy editing, design, accessibility);
 - an ownership registry outside the repo keeps concurrent sessions apart;
 - tickets live in one ticketing tool (GitHub Issues unless the owner picks another), set in one repo file, `docs/agents/issue-tracker.md`, that every agent reads;
-- follow-up work is a ticket in that tool, and behaviour changes ship with tests and docs.
+- follow-up work is a ticket in that tool, and every behaviour change adds tests and docs.
 
 ## Where your files are
 
