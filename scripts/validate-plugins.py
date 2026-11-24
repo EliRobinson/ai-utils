@@ -2,9 +2,10 @@
 """Validate this repo's plugin marketplace.
 
 Checks the things that silently stop a plugin or skill from loading — a
-mangled frontmatter block, a manifest name that drifted from its marketplace
-entry, a ${CLAUDE_PLUGIN_ROOT} path left behind by a move. It also runs each skill's
-scripts/check-*.mjs self-check when node is installed.
+mangled frontmatter block, a manifest name, version or description that
+drifted from its marketplace entry, a ${CLAUDE_PLUGIN_ROOT} path left behind
+by a move. It also runs each skill's scripts/check-*.mjs self-check when node
+is installed.
 
 Run from the repo root:
 
@@ -469,6 +470,11 @@ def main() -> int:
             fail(
                 f"{source}: plugin.json version {manifest.get('version')!r} "
                 f"does not match marketplace entry {entry['version']!r}"
+            )
+        if "description" in entry and manifest.get("description") != entry["description"]:
+            fail(
+                f"{source}: plugin.json description does not match its marketplace entry; "
+                "copy one to the other so both say the same"
             )
         if not manifest.get("description", "").strip():
             fail(f"{source}: plugin.json has no description")
