@@ -4,8 +4,9 @@
 //
 // It is not a full shell parser. It handles quotes, escapes, heredocs,
 // here-strings, redirections, $(...), backticks, ( ) subshells, cd, pushd,
-// popd, common wrappers (env, sudo, timeout, xargs, ...) and `sh -c`.
-// Each hook decides what to do with a command it cannot read.
+// popd, common wrappers (env, sudo, timeout, xargs, ...), `sh -c` and `eval`.
+// It flags a script it cannot read (built at run time, or read from stdin)
+// as opaque. Each hook decides what to do with a command it cannot read.
 //
 // The plumbing at the end (readPayload, isEntry, refuse) is used by the
 // guard. The review gate keeps its own copy on purpose: it must still work,
@@ -294,7 +295,9 @@ export function programOf(words) {
       i++;
       while (words[i] && words[i].text.startsWith("-") && words[i].text !== "--") {
         const flag = words[i].text.split("=")[0];
-        if ((wrapper.rewrites ?? []).includes(flag)) dynamic = true;
+        const rewrites = wrapper.rewrites ?? [];
+        // -S'...' glued to its value counts as -S.
+        if (rewrites.includes(flag) || (/^-[a-zA-Z]./.test(flag) && rewrites.includes(flag.slice(0, 2)))) dynamic = true;
         i += (wrapper.values ?? []).includes(words[i].text) ? 2 : 1;
       }
       if (words[i]?.text === "--") i++;
@@ -303,21 +306,68 @@ export function programOf(words) {
     }
     break;
   }
-  if (i >= words.length) return null;
+  // env -S 'gh pr merge 5' runs its value: a program the caller cannot read.
+  if (i >= words.length) return dynamic ? { env, program: { text: "", dynamic: true }, args: [], wrappers } : null;
   const program = dynamic ? { ...words[i], dynamic: true } : words[i];
   return { env, program, args: words.slice(i + 1), wrappers };
 }
 
 export const nameOf = (call) => (call.program.dynamic ? null : path.basename(call.program.text));
 
-const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "mksh", "fish"]);
+// Shell options that take a separate value: bash -o pipefail, -O extglob,
+// +o, and -euo pipefail (a cluster with o or O takes the next word).
+const SHELL_VALUE_FLAGS = new Set(["--rcfile", "--init-file"]);
+// A script file that is really stdin or a pipe.
+const STDIN_FILE = /^(?:-|\/dev\/stdin|\/dev\/fd\/\d+|\/proc\/self\/fd\/\d+)$/;
+const readsStdin = (word) => !word || word.dynamic || STDIN_FILE.test(word.text);
+const OPAQUE = { script: null };
 
-// The literal script of `bash -c '...'` (or -lc, -ec ...), or null.
-function shellScript(call) {
-  if (!SHELLS.has(nameOf(call) ?? "")) return null;
-  const at = call.args.findIndex((w) => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(w.text));
-  const script = at === -1 ? undefined : call.args[at + 1];
-  return script && !script.dynamic ? script.text : null;
+// What a command runs as a nested script, or null when it runs none (or
+// runs a script file, which no hook reads):
+//   { script, sameShell }  the literal script; sameShell for eval, whose cd
+//                          moves the rest of the line
+//   { script: null }       a script the walk cannot read: built at run time,
+//                          or read from stdin, a pipe or <(...)
+// eval, source and ., sh -c, bash reading stdin, busybox sh. Anything run
+// under xargs gets its words from stdin, so it cannot be read either.
+export function nestedScript(call) {
+  const name = nameOf(call);
+  let args = call.args;
+  let shellName = name;
+  if (name === "busybox" && args[0] && !args[0].dynamic) {
+    shellName = path.basename(args[0].text);
+    args = args.slice(1);
+  }
+  const runsScript = name === "eval" || name === "source" || name === "." || SHELLS.has(shellName ?? "");
+  if (!runsScript) return null;
+  if (call.wrappers.includes("xargs")) return OPAQUE;
+  if (name === "eval") {
+    return args.some((w) => w.dynamic) ? OPAQUE : { script: args.map((w) => w.text).join(" "), sameShell: true };
+  }
+  if (name === "source" || name === ".") return readsStdin(args[0]) ? OPAQUE : null;
+  // Like the shell: read the options, then the first other word is the
+  // script (with -c) or the script file. -s, or no word, reads stdin.
+  let command = false;
+  let stdin = false;
+  for (let i = 0; i < args.length; i++) {
+    const { text, dynamic } = args[i];
+    if (dynamic) return OPAQUE;
+    if (text === "--command") command = true;
+    else if (SHELL_VALUE_FLAGS.has(text)) i++;
+    else if (/^[-+][a-zA-Z]+$/.test(text)) {
+      if (text[0] === "-" && text.includes("c")) command = true;
+      if (text[0] === "-" && text.includes("s")) stdin = true;
+      if (text.includes("o") || text.includes("O")) i++;
+    } else if (text.startsWith("--") && text !== "--") {
+      // --login, --norc: no value
+    } else {
+      const word = text === "--" ? args[i + 1] : args[i];
+      if (command) return word && !word.dynamic ? { script: word.text, sameShell: false } : OPAQUE;
+      return stdin || readsStdin(word) ? OPAQUE : null;
+    }
+  }
+  return OPAQUE; // no script and no file: the shell reads stdin
 }
 
 // Resolve a directory word against base, or null when that cannot be known.
@@ -330,10 +380,12 @@ export function resolveDir(base, word) {
 }
 
 // Walk every simple command in a Bash command line, following cd, pushd,
-// popd, subshells and $(...) scopes, and reading into `sh -c '...'`.
-// Yields { call, dir }: dir is where the command runs, or null when a cd
-// could not be followed. A `sh -c` script inherits its caller's NAME=
-// prefixes. Throws when the line cannot be lexed.
+// popd, subshells and $(...) scopes, and reading into `sh -c '...'` and
+// `eval '...'`. Yields { call, dir, opaque }: dir is where the command runs,
+// or null when a cd could not be followed; opaque is true when call runs a
+// script the walk cannot read (see nestedScript). A `sh -c` or `eval` script inherits its
+// caller's NAME= prefixes. Returns the directory the line ends in. Throws
+// when the line cannot be lexed.
 export function* walk(command, cwd, depth = 0, inherited = {}) {
   if (depth > 4) throw new Error("shells nested too deeply");
   let dir = cwd === null ? null : path.resolve(cwd);
@@ -366,13 +418,15 @@ export function* walk(command, cwd, depth = 0, inherited = {}) {
       dir = pushd.length > 0 ? pushd.pop() : null;
       continue;
     }
-    const script = shellScript(call);
-    if (script !== null) {
-      yield* walk(script, dir, depth + 1, call.env);
+    const nested = nestedScript(call);
+    if (nested?.script != null) {
+      const end = yield* walk(nested.script, dir, depth + 1, call.env);
+      if (nested.sameShell) dir = end;
       continue;
     }
-    yield { call, dir };
+    yield nested ? { call, dir, opaque: true } : { call, dir };
   }
+  return dir;
 }
 
 // ------------------------------------------------------------- plumbing
