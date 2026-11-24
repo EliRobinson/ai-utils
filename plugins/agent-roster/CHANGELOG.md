@@ -2,6 +2,10 @@
 
 1.8.0 is the first version published in this public repo. Earlier entries are kept for reference.
 
+## 1.11.0
+
+- Unit tests: DRY (case tables) and one behaviour per test; implementers write them that way and the correctness and DRY critics check it. The rule is in the guardrails template, so rerunning `setup-agentic-workflow` adds it to a repo's `AGENTS.md`.
+
 ## 1.8.0
 
 **Upgrade steps, in this order:**

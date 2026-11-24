@@ -13,4 +13,6 @@
 - **Claim ownership before you start.** Add your row to the ownership registry at `{{REGISTRY_PATH}}`, and remove it when the PR merges. It keeps concurrent sessions off each other's files. See [docs/agents/multi-agent.md](docs/agents/multi-agent.md).
 - **Follow-up work is a ticket in {{TICKETING_TOOL}}.** Never a TODO comment or a line in a PR body, because nobody finds those again. Close tickets from a PR as [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md) says.
 - **Ship paired tests and paired docs** with every behaviour change, so the next change can trust both.
+- **Keep unit tests DRY.** Put cases in a table and loop over it, with shared fixtures, rather than copying test bodies.
+- **Each test checks the smallest thing it can.** One behaviour, ideally one assertion, and the test is named after that behaviour.
 - **A coordinator chat only manages agents.** It hands off every task to an agent or subagent, even a quick one: lookups, research, reviews, edits, pushes, PRs and ticket writing. It runs them in the background and stays free to talk to {{OWNER}}. It does only four things itself: update the Asks board, keep the ownership registry, merge after {{OWNER}} types "merge N", and run the setup skill. The full rule is in the `route-work` skill. Start one with [docs/agents/coordinator-prompt.md](docs/agents/coordinator-prompt.md).
