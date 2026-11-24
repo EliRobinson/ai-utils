@@ -363,6 +363,69 @@ def check_accessibility_agents() -> None:
     check_retired_a11y_names()
 
 
+GIT_WORKFLOW = SETUP_SKILL / "templates" / "docs-agents" / "git-workflow.md"
+REVIEW_GATE = SETUP_SKILL / "templates" / "docs-agents" / "review-gate.md"
+REPO_AGENTS_MD = ROOT / "AGENTS.md"
+REPO_COORDINATOR_PROMPT = ROOT / "docs" / "agents" / "coordinator-prompt.md"
+# The dropped branch rule (#2): a new `-r2` branch and PR when main moves,
+# and "rebase, never merge main in". It must not come back in any rule file.
+OLD_BRANCH_RULE = re.compile(
+    r"-r2\b|never merge `?main`? into|rebase, never merge|clean replay|rebase-only|rebase merges only", re.I
+)
+# The rule that replaced it, as each file must state it (lowercase).
+BRANCH_RULE_PHRASES = {
+    GUARDRAILS: ["keep one branch and one pr", "never force push", "git merge origin/main"],
+    REPO_AGENTS_MD: ["keep one branch and one pr", "never force push", "git merge origin/main"],
+    GIT_WORKFLOW: ["keep the same branch and the same pr", "never force push", "git merge origin/main",
+                   "gh repo view --json mergecommitallowed,squashmergeallowed,rebasemergeallowed"],
+    REVIEW_GATE: ["merging `main` into the branch with no conflicts needs no new round"],
+    COORDINATOR_PROMPT: ["one branch and one pr", "merge `origin/main` into it"],
+    REPO_COORDINATOR_PROMPT: ["one branch and one pr", "merge `origin/main` into it"],
+}
+MERGE_STYLES = ("merge", "squash", "rebase")
+MERGE_STYLE_LINE = re.compile(r"^- \*\*Merge style:\*\* `([a-z]+)`$", re.M)
+
+
+def branch_rule_files() -> list[Path]:
+    files = [REPO_AGENTS_MD, *sorted((ROOT / "docs" / "agents").glob("*.md"))]
+    files += [f for f in sorted(AGENT_ROSTER.rglob("*.md")) if f.name != "CHANGELOG.md"]
+    return files
+
+
+def check_branch_rule() -> None:
+    """The -r2 rule stays gone; the same-branch rule and the merge style are stated."""
+    for path in branch_rule_files():
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if OLD_BRANCH_RULE.search(line):
+                fail(f"{rel(path)}:{number}: states the dropped -r2 / rebase-only branch rule")
+
+    agent_files = sorted((AGENT_ROSTER / "agents").glob("*.md"))
+    phrases = dict(BRANCH_RULE_PHRASES)
+    for agent in agent_files:
+        phrases[agent] = ["keep one branch and one pr", "never force push"]
+    for path, wanted in phrases.items():
+        text = (read_or_fail(path) or "").lower()
+        for phrase in wanted:
+            if phrase not in text:
+                fail(f"{rel(path)}: must say {phrase!r} (the same-branch rule)")
+
+    # The coordinator template merges in the placeholder style; this repo's
+    # filled copies all name the style its git-workflow.md sets.
+    if "--{{MERGE_STYLE}} --match-head-commit" not in (read_or_fail(COORDINATOR_PROMPT) or ""):
+        fail(f"{rel(COORDINATOR_PROMPT)}: merge step must use `gh pr merge N --{{{{MERGE_STYLE}}}}`")
+    if "{{MERGE_STYLE}}" not in (read_or_fail(GUARDRAILS) or ""):
+        fail(f"{rel(GUARDRAILS)}: must name the merge style with {{{{MERGE_STYLE}}}}")
+    found = MERGE_STYLE_LINE.findall(read_or_fail(GIT_WORKFLOW) or "")
+    if len(found) != 1 or found[0] not in MERGE_STYLES:
+        fail(f"{rel(GIT_WORKFLOW)}: needs one '- **Merge style:** `merge|squash|rebase`' line")
+        return
+    style = found[0]
+    if f"--{style} --match-head-commit" not in (read_or_fail(REPO_COORDINATOR_PROMPT) or ""):
+        fail(f"{rel(REPO_COORDINATOR_PROMPT)}: merge step must use --{style}, the style git-workflow.md sets")
+    if f"preferred style: {style}." not in (read_or_fail(REPO_AGENTS_MD) or ""):
+        fail(f"{rel(REPO_AGENTS_MD)}: must name the merge style {style!r} that git-workflow.md sets")
+
+
 VENDORED_SKILL = AGENT_ROSTER / "skills" / "thermo-nuclear-code-quality-review"
 REMOVED_LINE = "disable-model-invocation: true"  # the last frontmatter key upstream
 PINNED_COMMIT = re.compile(r"^- Commit: `([0-9a-f]{40})`$", re.M)
@@ -492,6 +555,7 @@ def main() -> int:
         check_plugin_root_refs(plugin_dir)
 
     check_agent_roster_templates()
+    check_branch_rule()
     check_vendored_thermonuclear()
     check_accessibility_agents()
     run_self_checks()

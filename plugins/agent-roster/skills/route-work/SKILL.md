@@ -35,7 +35,7 @@ This section is the full rule; the coordinator prompt and the repo's `AGENTS.md`
 | Duplication, and abstractions to leave alone | `agent-roster:dry-critic` | opus | no |
 | UX on every change, visual design on UI changes (`impeccable` skill) | `agent-roster:design-critic` | opus | no |
 | WCAG problems on UI changes (`accessibility-agents` plugin) | `agent-roster:accessibility-critic` | sonnet | no |
-| Review gate, split big PRs, rebase, open the PR | `agent-roster:pr-finisher` | sonnet | yes |
+| Review gate, split big PRs, bring the base branch in, open the PR | `agent-roster:pr-finisher` | sonnet | yes |
 
 Usual flow for a change: `ticket-writer` -> an implementer (or `mechanical-editor` / `copy-writer`) -> `pr-finisher`, which runs every critic on the branch as its review gate, fixes what they find, and only then opens the PR. At most two rounds of review per PR (see the repo's `docs/agents/review-gate.md`, or `pr-finisher`).
 

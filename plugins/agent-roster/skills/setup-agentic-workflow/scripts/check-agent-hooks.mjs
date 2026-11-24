@@ -101,6 +101,8 @@ try {
   const cases = [
     // The guard refuses writes in the main checkout.
     guard(main, "git commit -m x", "refuse"),
+    // Catching up a pushed branch merges main in; that is a tree change, so main refuses it.
+    guard(main, "git fetch origin && git merge origin/main", "refuse"),
     guard(main, "git add -A && git status", "refuse"),
     guard(main, "git checkout -- README.md", "refuse"),
     guard(main, "git worktree remove ../repo-task", "refuse"),
@@ -126,6 +128,7 @@ try {
     guard(tree, "git commit -m x", "allow", fromTree),
     guard(main, `cd ${tree} && git commit -m x`, "allow"),
     guard(main, `git -C ${tree} rebase origin/main`, "allow"),
+    guard(tree, "git fetch origin && git merge origin/main", "allow"),
     guard(tree, `(cd ${main} && git log -1); git commit -m x`, "allow"),
     guard(tree, `git --git-dir=${main}/.git/worktrees/repo-task commit -m x`, "allow"),
     guard(main, `${W}=1 git commit -m x`, "allow"),
@@ -161,8 +164,8 @@ try {
     review(`gh pr create --title t --body "$(cat <<'EOF'\n${good}EOF\n)"`, "allow"),
     review(`gh pr create --title t -b "$(cat <<'EOF'\n${good}EOF\n)"`, "allow"),
     review(`gh pr create --title t --body "$(cat <<EOF\n${good}EOF\n)"`, "refuse"),
-    review("gh pr merge 5 --rebase", "allow", { FAKE_PR_BODY: good }),
-    review("gh pr merge 5 --rebase", "refuse", { FAKE_PR_BODY: "no record" }),
+    review("gh pr merge 5 --squash --match-head-commit abc123", "allow", { FAKE_PR_BODY: good }),
+    review("gh pr merge 5 --squash --match-head-commit abc123", "refuse", { FAKE_PR_BODY: "no record" }),
     review("gh pr merge 5 --rebase 2>&1", "refuse", { FAKE_PR_BODY: "no record", FAKE_PR_BODY_2: good }),
     review("gh pr ready 5", "refuse", { FAKE_PR_BODY: fable }),
     review("gh pr merge -r 7", "refuse", { FAKE_PR_BODY: good, FAKE_PR_BODY_7: "no record" }),

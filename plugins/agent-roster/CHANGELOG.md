@@ -2,6 +2,14 @@
 
 1.8.0 is the first version published in this public repo. Earlier entries are kept for reference.
 
+## 1.9.0
+
+- **No more `-r2` branches.** An item keeps one branch and one PR until it merges. Review fixes are new commits on that branch. When `main` moves after a push, the agent merges `origin/main` into the same branch (or runs `gh pr update-branch`) and pushes normally. Rebasing your own commits is fine before the first push. Never force push, as before. The guardrails template, `git-workflow.md`, the coordinator prompt, `pr-finisher`, every agent's rules line, `route-work`, the setup skill and the README say so.
+- **Review after a catch-up.** `review-gate.md`: merging `main` in with no conflicts needs no new round. If conflicts were resolved, the reviewers whose areas the conflicted files touch run again, as round 2 if one is left; otherwise it is a decision for the owner. At most two rounds, as before.
+- **PRs merge in the repo's preferred style.** `git-workflow.md` has a `## Merge style` section with one **Merge style** line (`merge`, `squash` or `rebase`), and says how to find the style when it is missing: `gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed`, use the only allowed one, or ask the owner. New placeholder `{{MERGE_STYLE}}` in the coordinator prompt (merge step 5) and the guardrails. The setup skill asks for the style with the names question, writes it to all three, and sets the ruleset and repo merge settings to that style. `squash` is the new default and the setup's recommendation (the ruleset template now allows squash merges): a branch that caught up by merging `main` in has merge commits, and GitHub can refuse to rebase-merge it. ai-utils moves to squash merges too.
+- `check-agent-hooks.mjs` checks that `git merge origin/main` is allowed in a worktree and refused in the main checkout.
+- `validate-plugins.py` fails if the `-r2` or rebase-only rule comes back in a rule file, checks that each file states the same-branch rule, and checks that this repo's `AGENTS.md` and coordinator prompt name the merge style its `git-workflow.md` sets.
+
 ## 1.8.0
 
 **Upgrade steps, in this order:**

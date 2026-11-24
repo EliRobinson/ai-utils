@@ -31,7 +31,8 @@ A PR gets at most two rounds of review. This stops reviews that never end. This 
   - a blocker still open, and any open security-critic finding (a ticket can publish an unfixed hole), goes to the owner as a `decide` ask on the Asks board, and the PR waits. The options: **A (recommended):** fix it, and allow round 3 for that fix only (record `Owner allowed round 3: <when and where>`); **B:** file it as a ticket and open the PR (record `[filed <ticket ID>]`, and say the owner chose this);
   - any other finding still open is filed as a ticket, listed in the record, and the PR goes ahead.
 - New work after round 2 goes in a new PR.
-- A `-r2` branch that replaces another keeps its count. A clean replay needs no new round. If the rebase changed more, it uses round 2 if one is left; if not, it is a decision for the owner.
+- Review fixes are new commits on the same branch and PR, so the PR keeps its count.
+- Merging `main` into the branch with no conflicts needs no new round. If you resolved conflicts, run the reviewers whose areas the conflicted files touch. That is round 2 if one is left; if not, it is a decision for the owner.
 - Only the owner, in their own words in chat, can allow a third round. The record then says so (see below).
 
 ## After the reviews
