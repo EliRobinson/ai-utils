@@ -168,6 +168,8 @@ Then it installs:
 
 It asks before changing GitHub settings. That covers a `main` ruleset and the merge style you pick (merge commit, squash or rebase). It recommends git hooks if the repo has none.
 
+The guardrails include the unit-test rule: no copied test bodies (use a parametrized table instead), and each test checks one behaviour. The implementers write tests this way. `correctness-critic` flags a test that checks several behaviours, and `dry-critic` flags copied test bodies.
+
 The reviewer agents and the coordinator prompt have one copy each, in `agents/` and `coordinator/`. Installed as a plugin, the skill reads them from there. For the standalone `.skill` bundle, `scripts/build-skill-bundles.py` copies them in, as listed in the skill's `bundle-extras.txt`. `scripts/validate-plugins.py` runs the hooks' self-check.
 
 ## The ticketing tool

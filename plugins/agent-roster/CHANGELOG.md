@@ -2,6 +2,20 @@
 
 1.8.0 is the first version published in this public repo. Earlier entries are kept for reference.
 
+## 1.11.0
+
+**Upgrade steps:**
+
+1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
+2. Rerun `setup-agentic-workflow` in each repo set up before 1.11.0 and merge its setup PR. It adds the two unit-test bullets to `AGENTS.md` and refreshes `correctness-critic` and `dry-critic` in `.claude/agents/`. Until then, the repo's critics do not check the new rule.
+
+**Changes:**
+
+- **Unit tests are DRY and check one behaviour each.** The guardrails gain two bullets for this. They cover the tests a change adds or touches; existing tests that break the rule become a follow-up ticket.
+- `implementer-engine` and `implementer-ui` write tests the way the repo's `AGENTS.md` says, and fall back to the same rule when it says nothing. `implementer-ui` gains a step to add tests.
+- `correctness-critic` flags a unit test that checks several behaviours. `dry-critic` flags copied test bodies. `route-work`'s table says so.
+- `validate-plugins.py` checks that the guardrails template, this repo's `AGENTS.md`, both implementers and both critics keep the rule.
+
 ## 1.10.1
 
 - **Wording fixes in the guardrails template, the setup skill's summary and the coordinator prompt**, from the copy review. The guardrails keep the same rules.

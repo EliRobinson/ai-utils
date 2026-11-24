@@ -18,6 +18,8 @@ Plugins, skills and agents for Claude Code, published as the ai-utils marketplac
 - **Claim ownership before you start.** Add your row to the ownership registry at `~/.claude/projects/<project-slug>/ACTIVE-OWNERSHIP.md`, and remove it when the PR merges. It keeps concurrent sessions off each other's files. See [docs/agents/multi-agent.md](docs/agents/multi-agent.md).
 - **Follow-up work is a ticket in GitHub Issues.** Do not leave a TODO comment or a line in a PR body, because nobody finds those again. Close tickets from a PR as [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md) says.
 - **Add tests and docs with every behaviour change**, so the next change can trust both.
+- **Keep unit tests DRY.** In the tests you add or change, put cases that share one test body in a table that drives a parametrized test (`test.each`, `pytest.mark.parametrize` or the repo's equivalent), so each case runs and fails on its own. Share fixtures where cases share setup. A case that needs its own setup or logic gets its own test. Existing tests that break this rule are a follow-up ticket, not part of your change.
+- **Each unit test checks one behaviour.** Aim for one assertion, and name the test after that behaviour.
 - **A coordinator chat routes work.** It hands off every task to an agent or subagent, even a quick one: lookups, research, reviews, edits, pushes, PRs and ticket writing. It runs them in the background and stays free to talk to Eli. It does only four things itself: update the Asks board, keep the ownership registry, merge after Eli types "merge N", and run the setup skill. The full rule is in the `route-work` skill. Start one with [docs/agents/coordinator-prompt.md](docs/agents/coordinator-prompt.md).
 
 ## Topics
