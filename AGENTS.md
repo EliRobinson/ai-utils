@@ -24,6 +24,7 @@ Plugins, skills and agents for Claude Code, published as the ai-utils marketplac
 
 - [Git workflow](docs/agents/git-workflow.md)
 - [Review gate](docs/agents/review-gate.md)
+- [CI](docs/agents/ci.md)
 - [Multi-agent work](docs/agents/multi-agent.md)
 - [Coordinator prompt](docs/agents/coordinator-prompt.md)
 - [Ticketing tool](docs/agents/issue-tracker.md)
