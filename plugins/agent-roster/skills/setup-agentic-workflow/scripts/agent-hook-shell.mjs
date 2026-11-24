@@ -4,7 +4,7 @@
 //
 // It is not a full shell parser. It handles quotes, escapes, heredocs,
 // here-strings, redirections, $(...), backticks, ( ) subshells, cd, pushd,
-// popd, common wrappers (env, sudo, timeout, xargs, ...) and `sh -c`.
+// popd, common wrappers (env, sudo, timeout, xargs, ...), `sh -c` and `eval`.
 // Each hook decides what to do with a command it cannot read.
 //
 // The plumbing at the end (readPayload, isEntry, refuse) is used by the
@@ -310,7 +310,7 @@ export function programOf(words) {
 
 export const nameOf = (call) => (call.program.dynamic ? null : path.basename(call.program.text));
 
-const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+export const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 
 // The literal script of `bash -c '...'` (or -lc, -ec ...), or null.
 function shellScript(call) {
@@ -329,11 +329,19 @@ export function resolveDir(base, word) {
   return path.resolve(base, text);
 }
 
+// The script `eval` runs: its words joined by spaces, or null when any word
+// is built at run time.
+function evalScript(call) {
+  if (nameOf(call) !== "eval" || call.args.some((w) => w.dynamic)) return null;
+  return call.args.map((w) => w.text).join(" ");
+}
+
 // Walk every simple command in a Bash command line, following cd, pushd,
-// popd, subshells and $(...) scopes, and reading into `sh -c '...'`.
-// Yields { call, dir }: dir is where the command runs, or null when a cd
-// could not be followed. A `sh -c` script inherits its caller's NAME=
-// prefixes. Throws when the line cannot be lexed.
+// popd, subshells and $(...) scopes, and reading into `sh -c '...'` and
+// `eval '...'`. Yields { call, dir }: dir is where the command runs, or null
+// when a cd could not be followed. A `sh -c` or `eval` script inherits its
+// caller's NAME= prefixes. Returns the directory the line ends in. Throws
+// when the line cannot be lexed.
 export function* walk(command, cwd, depth = 0, inherited = {}) {
   if (depth > 4) throw new Error("shells nested too deeply");
   let dir = cwd === null ? null : path.resolve(cwd);
@@ -371,8 +379,15 @@ export function* walk(command, cwd, depth = 0, inherited = {}) {
       yield* walk(script, dir, depth + 1, call.env);
       continue;
     }
+    // eval runs in this shell, so a cd inside it moves the rest of the line.
+    const evaluated = evalScript(call);
+    if (evaluated !== null) {
+      dir = yield* walk(evaluated, dir, depth + 1, call.env);
+      continue;
+    }
     yield { call, dir };
   }
+  return dir;
 }
 
 // ------------------------------------------------------------- plumbing

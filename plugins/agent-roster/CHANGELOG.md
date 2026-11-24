@@ -2,6 +2,11 @@
 
 1.8.0 is the first version published in this public repo. Earlier entries are kept for reference.
 
+## 1.10.0
+
+- **The review gate refuses merges it could not check.** `review-gate-hook.mjs` now refuses `gh api graphql` with the query from a file, stdin or a variable (`-F query=@file`, `--input`, `-f query="$Q"`), `curl` writes to a PR's `pulls/N/merge` or to `pulls`, and `curl` to GitHub's GraphQL API. Inline `gh api graphql -f query='...'` reads and `curl` reads of `pulls` still pass. `check-agent-hooks.mjs` has a case for each, and `review-gate.md` names them.
+- **More bypasses closed.** A quoted `eval "gh pr merge 5"` is now read and checked, and `eval` or `sh -c` scripts built at run time, or piped into a shell, are refused when the command names a PR write. `-R owner/name.git`, `--repo https://github.com/owner/name` and other spellings of this repo are checked as this repo instead of passing as another one. New `check-agent-hooks.mjs` cases cover each, plus GraphQL queries from `$(...)` and backticks.
+
 ## 1.8.0
 
 **Upgrade steps, in this order:**

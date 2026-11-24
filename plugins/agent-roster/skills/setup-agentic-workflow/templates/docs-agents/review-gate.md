@@ -83,7 +83,11 @@ Rounds: 1
 - MCP tools that merge or take a PR out of draft, always. Use `gh` instead.
 - A PR command it cannot read, such as one run through `xargs`, `eval` or a variable, always.
 
-A command that names another repository with `-R owner/name` is not held. There is no escape. If the hook itself fails while checking a PR command, it refuses.
+It also refuses, always, what would skip the record check: `gh api graphql` with the query from a file, stdin or a variable (`-F query=@file`, `--input`, `-f query="$Q"`); `curl` writes to a PR's `pulls/N/merge` or to `pulls` (opening a PR); and `curl` to GitHub's GraphQL API. Pass a GraphQL query inline with `-f query='...'`, and use `gh` for PR writes. `curl` reads of `pulls` still pass.
+
+It reads the script of `eval '...'` and `bash -c '...'` (or `sh`, `zsh`) like any command. When that script is built at run time, or a shell reads it from stdin (`... | bash`, `bash <<< '...'`), it refuses if the command names a PR write.
+
+A command that names another repository with `-R owner/name` is not held. Any spelling of this repo counts as this repo and is checked: a trailing `.git` or `/`, other letter case, `github.com/owner/name`, an `https://` URL or `git@github.com:owner/name.git`. There is no escape. If the hook itself fails while checking a PR command, it refuses.
 
 It cannot stop a merge in the GitHub web UI, a record that lies, a script that calls `gh` from a file, or a `gh` alias that hides `pr merge`. It does not check which model each reviewer ran on, only that none ran on Fable. The owner's "merge N" is the last check.
 

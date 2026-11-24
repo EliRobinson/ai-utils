@@ -33,6 +33,7 @@ const main = path.join(tmp, "repo");
 const tree = path.join(tmp, "repo-task");
 const bin = path.join(tmp, "bin");
 const lone = path.join(tmp, "lone");
+const named = path.join(tmp, "named");
 try {
   fs.mkdirSync(path.join(main, "scripts"), { recursive: true });
   for (const file of Object.values(FILES)) fs.copyFileSync(path.join(source, file), path.join(main, "scripts", file));
@@ -40,6 +41,10 @@ try {
   git(main, "add", "-A");
   git(main, "commit", "-qm", "init");
   git(main, "worktree", "add", "-q", tree, "-b", "task");
+  // A repo whose origin is on GitHub, for the cases that name a repo.
+  fs.mkdirSync(named);
+  git(named, "init", "-q", "-b", "main");
+  git(named, "remote", "add", "origin", "git@github.com:Owner/Name.git");
 
   // A review gate without its shell module, and a guard outside any repo.
   fs.mkdirSync(lone);
@@ -95,6 +100,7 @@ try {
   const W = "ALLOW_MAIN_CHECKOUT_WRITE";
   const guard = (cwd, command, expect, hookDir = path.join(main, "scripts")) => ({ hook: "guard", hookDir, cwd, command, expect });
   const review = (command, expect, extra = {}) => ({ hook: "review", hookDir: path.join(tree, "scripts"), cwd: tree, command, expect, extra });
+  const reviewIn = (cwd, command, expect, extra = {}) => ({ ...review(command, expect, extra), cwd });
   const mcp = (tool, input, expect) => ({ hook: "review", hookDir: path.join(tree, "scripts"), cwd: tree, tool, input, expect });
   const fromTree = path.join(tree, "scripts");
 
@@ -110,6 +116,7 @@ try {
     guard(main, "nice -n 5 git commit -m x", "refuse"),
     guard(main, "timeout 60 git commit -m x", "refuse"),
     guard(main, "bash -lc 'git add -A'", "refuse"),
+    guard(main, "eval 'git add -A'", "refuse"),
     guard(main, "echo `git add -A`", "refuse"),
     guard(main, "cat <<< \"$p\"\ngit commit -m y", "refuse"),
     guard(main, `(cd ${tree} && git commit -m x); git commit -m y`, "refuse"),
@@ -125,6 +132,7 @@ try {
     guard(tree, "git commit -m x", "allow"),
     guard(tree, "git commit -m x", "allow", fromTree),
     guard(main, `cd ${tree} && git commit -m x`, "allow"),
+    guard(main, `eval "cd ${tree}" && git commit -m x`, "allow"),
     guard(main, `git -C ${tree} rebase origin/main`, "allow"),
     guard(tree, `(cd ${main} && git log -1); git commit -m x`, "allow"),
     guard(tree, `git --git-dir=${main}/.git/worktrees/repo-task commit -m x`, "allow"),
@@ -208,7 +216,80 @@ try {
     review("gh pr ready 5 --undo", "allow"),
     review("gh api -X PUT repos/o/r/pulls/5/merge", "refuse", { FAKE_PR_BODY: "" }),
     review("gh api repos/o/r/pulls/5/merge", "allow"),
+    // GraphQL the gate cannot read: a query from a file, stdin or a variable.
+    review("gh api graphql -F query=@merge.graphql", "refuse"),
+    review("gh api graphql -Fquery=@merge.graphql", "refuse"),
+    review("gh api graphql --field=query=@merge.graphql", "refuse"),
+    review("gh api graphql --input q.json", "refuse"),
+    review("gh api graphql --input=- < q.json", "refuse"),
+    review("gh api graphql -f query=\"$Q\"", "refuse"),
+    review("gh api graphql -f query='mutation { mergePullRequest(input: {}) { clientMutationId } }'", "refuse"),
+    review("gh api graphql -f query='query { viewer { login } }'", "allow"),
+    review("gh api graphql -F owner=o -F n=5 -f query='query($owner: String!) { viewer { login } }'", "allow"),
+    review("gh api graphql -F body=@notes.md -f query='query { viewer { login } }'", "allow"),
+    review("gh api graphql -F query=@-", "refuse"),
+    review("gh api graphql --field query=@merge.graphql", "refuse"),
+    review("gh api graphql --input=q.json", "refuse"),
+    review("gh api graphql -f query=\"$(cat q.graphql)\"", "refuse"),
+    review("gh api graphql -f query=$(cat q.graphql)", "refuse"),
+    review("gh api graphql -f query=\"`cat q.graphql`\"", "refuse"),
+    review("gh api graphql -f query=`cat q.graphql`", "refuse"),
+    review("gh api graphql --raw-field \"query=$(cat q.graphql)\"", "refuse"),
+    review("gh api graphql -f query=\"$(cat <<'EOF'\nquery { viewer { login } }\nEOF\n)\"", "allow"),
+    // curl: PR merges and opens, and GitHub GraphQL, are refused; reads pass.
+    review("curl -X PUT -H \"Authorization: Bearer $T\" https://api.github.com/repos/o/r/pulls/5/merge", "refuse"),
+    review("curl -sXPUT https://api.github.com/repos/o/r/pulls/5/merge", "refuse"),
+    review("curl --request PUT \"$API/repos/o/r/pulls/5/merge\"", "refuse"),
+    review("curl -d '{\"merge_method\":\"rebase\"}' https://api.github.com/repos/o/r/pulls/5/merge", "refuse"),
+    review("curl https://api.github.com/repos/o/r/pulls --data @pr.json", "refuse"),
+    review("curl -d @q.json https://api.github.com/graphql", "refuse"),
+    review("curl --json @- https://github.example.com/api/graphql < q.json", "refuse"),
+    review("timeout 30 curl -X PUT https://api.github.com/repos/o/r/pulls/5/merge?x=1", "refuse"),
+    review("curl -s -H \"Authorization: Bearer $T\" https://api.github.com/repos/o/r/pulls/5/merge", "allow"),
+    review("curl -sI https://api.github.com/repos/o/r/pulls/5/merge", "allow"),
+    review("curl -sL https://api.github.com/repos/o/r/pulls?state=open | head", "allow"),
+    review("curl -X GET https://api.github.com/repos/o/r/pulls/5/merge", "allow"),
+    review("curl -d @q.json https://api.example.com/graphql", "allow"),
     review("bash -lc 'gh pr merge 5'", "refuse", { FAKE_PR_BODY: "" }),
+    // eval and sh -c: a literal script is read like any command; one built at
+    // run time, or read from stdin, is refused when the line names a PR write.
+    review("eval gh pr merge 5", "refuse", { FAKE_PR_BODY: "" }),
+    review("eval \"gh pr merge 5\"", "refuse", { FAKE_PR_BODY: "" }),
+    review("eval 'gh pr merge 5'", "refuse", { FAKE_PR_BODY: "" }),
+    review("eval 'gh pr' merge 5", "refuse", { FAKE_PR_BODY: "" }),
+    review("eval \"gh pr merge $N\"", "refuse"),
+    review("X='gh pr merge 5'; eval \"$X\"", "refuse"),
+    review("eval \"gh api -X PUT repos/o/r/pulls/$N/merge\"", "refuse"),
+    review("bash -c \"gh pr merge 5\"", "refuse", { FAKE_PR_BODY: "" }),
+    review("sh -c 'gh pr merge 5'", "refuse", { FAKE_PR_BODY: "" }),
+    review("zsh -c \"gh pr merge 5\"", "refuse", { FAKE_PR_BODY: "" }),
+    review("bash -c \"gh pr merge $N\"", "refuse"),
+    review("echo 'gh pr merge 5' | bash", "refuse"),
+    review("bash <<< 'gh pr merge 5'", "refuse"),
+    review("sh -s <<'EOF'\ngh pr merge 5\nEOF", "refuse"),
+    review("eval \"gh pr merge 5\"", "allow", { FAKE_PR_BODY: good }),
+    review("eval \"echo hi\"", "allow"),
+    review("eval \"$(ssh-agent -s)\" && gh pr view 5", "allow"),
+    review("bash -c \"echo $HOME\"", "allow"),
+    review("bash -c \"gh pr view $N\"", "allow"),
+    review("bash build.sh && gh pr merge 5", "allow", { FAKE_PR_BODY: good }),
+    // -R and --repo: every spelling of origin (Owner/Name) is checked; another repo is not held.
+    reviewIn(named, "gh pr merge 5", "refuse", { FAKE_PR_BODY: "no record" }),
+    reviewIn(named, "gh pr merge 5 -R Owner/Name", "refuse", { FAKE_PR_BODY: "no record" }),
+    reviewIn(named, "gh pr merge 5 -R owner/name.git", "refuse", { FAKE_PR_BODY: "no record" }),
+    reviewIn(named, "gh pr merge 5 --repo OWNER/NAME.git/", "refuse", { FAKE_PR_BODY: "no record" }),
+    reviewIn(named, "gh pr merge 5 --repo=owner/name/", "refuse", { FAKE_PR_BODY: "no record" }),
+    reviewIn(named, "gh pr merge 5 -R github.com/owner/name", "refuse", { FAKE_PR_BODY: "no record" }),
+    reviewIn(named, "gh pr merge 5 -R https://github.com/Owner/Name", "refuse", { FAKE_PR_BODY: "no record" }),
+    reviewIn(named, "gh pr merge 5 -R git@github.com:owner/name.git", "refuse", { FAKE_PR_BODY: "no record" }),
+    reviewIn(named, "gh pr merge 5 -R ssh://git@github.com/owner/name.git", "refuse", { FAKE_PR_BODY: "no record" }),
+    reviewIn(named, "gh api -X PUT repos/owner/Name.git/pulls/5/merge", "refuse", { FAKE_PR_BODY: "no record" }),
+    reviewIn(named, "gh pr merge 5 -R ghe.example.com/other/repo", "refuse", { FAKE_PR_BODY: "no record" }),
+    reviewIn(named, "gh pr merge 5 -R Owner/Name", "allow", { FAKE_PR_BODY: good }),
+    reviewIn(named, "gh pr merge 5 -R other-owner/other-repo", "allow", { FAKE_PR_BODY: "no record" }),
+    reviewIn(named, "gh pr merge 5 -R owner/name-fork.git", "allow", { FAKE_PR_BODY: "no record" }),
+    reviewIn(named, "gh pr merge 5 --repo https://github.com/other-owner/name", "allow", { FAKE_PR_BODY: "no record" }),
+    reviewIn(named, "gh api -X PUT repos/other/repo/pulls/5/merge", "allow", { FAKE_PR_BODY: "no record" }),
     review("timeout 60 gh pr merge 5", "refuse", { FAKE_PR_BODY: "" }),
     review("echo 5 | xargs gh pr merge", "refuse"),
     review("$GH pr merge 5", "refuse"),

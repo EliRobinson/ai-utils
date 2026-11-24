@@ -216,6 +216,8 @@ function refusal(what, problems, next = "Run them on the branch before you open 
 const PR_ACTIONS = ["merge", "ready", "create", "new"];
 const NAMES_PR_OP = new RegExp(`\\bpr\\s+(?:${PR_ACTIONS.join("|")})\\b`);
 const MAY_CONCERN = /\bgh\b|pulls\/|graphql|\bpr\b/;
+// A command line that may hold a PR write somewhere the gate cannot read.
+const mayWritePr = (command) => NAMES_PR_OP.test(command) || /pulls\/|graphql/.test(command);
 // Flags that take a value, per subcommand. On `merge`, -r and -m are the
 // booleans --rebase and --merge; on `create` they take a value.
 const REPO_FLAGS = ["-R", "--repo"];
@@ -284,14 +286,71 @@ function apiMethod(text) {
   return text.some((t) => /^(-f|-F|--field|--raw-field|--input)(=|$)/.test(t)) ? "POST" : "GET";
 }
 
+// True when the gate can read the query of a `gh api graphql` call: no
+// --input body, and a query field given inline, not from a file (`-F
+// query=@file`), stdin or a variable.
+function graphqlQueryReadable(words) {
+  for (let i = 0; i < words.length; i++) {
+    const { text, dynamic } = words[i];
+    if (/^--input(?:=|$)/.test(text)) return false;
+    const m = /^(-F|-f|--field=|--raw-field=|--field|--raw-field)(.*)$/.exec(text);
+    if (!m) continue;
+    const field = m[2] !== "" ? { text: m[2], dynamic } : words[++i];
+    if (!field) return false;
+    const name = /^([\w-]+)=/.exec(field.text)?.[1];
+    if (name === undefined) return false;
+    if (name !== "query") continue;
+    // -F and --field read `@file`; -f and --raw-field send it as text.
+    const fromFile = /^(?:-F|--field)/.test(m[1]) && field.text.startsWith("query=@");
+    if (field.dynamic || fromFile) return false;
+  }
+  return true;
+}
+
+// curl to the GitHub API: a write to a PR's merge, or to `pulls` (opening a
+// PR), and any GitHub GraphQL call are refused. The gate cannot read a curl
+// body, and gh does all three in a form it can check.
+function classifyCurl(call) {
+  const text = call.args.map((w) => w.text);
+  const urls = call.args.map((w) => ({ ...w, path: w.text.replace(/[?#].*$/, "").replace(/\/+$/, "") }));
+  if (urls.some((u) => /\/graphql$/.test(u.path) && (u.dynamic || /github/i.test(u.path)))) {
+    return { kind: "refuse", reason: "GitHub GraphQL through curl is refused; use gh api graphql with the query inline" };
+  }
+  if (!urls.some((u) => /\/pulls(?:\/[^/]+\/merge)?$/.test(u.path))) return null;
+  // curl sends GET (or HEAD with -I) unless it is given a method, a body or an upload.
+  const at = text.findIndex((t) => t === "-X" || t === "--request");
+  const method = at !== -1 ? text[at + 1] ?? "" : null;
+  const writes = method !== null
+    ? !/^(?:GET|HEAD)$/i.test(method)
+    : text.some((t) => /^--(?:data|json|form|upload-file)/.test(t) || /^-[a-zA-Z]*[dFTX]/.test(t));
+  return writes
+    ? { kind: "refuse", reason: "merging or opening a PR through curl is refused; use gh pr merge or gh pr create, which the gate can check" }
+    : null;
+}
+
+// True when call runs a script the walk could not read: an `eval` or
+// `sh -c` built at run time, or a shell reading its script from stdin
+// (`... | bash`, `bash <<< ...`). The walk reads literal ones itself.
+function runsUnreadScript(call, prog, shell) {
+  if (prog === "eval") return true;
+  if (!shell.SHELLS.has(prog ?? "")) return false;
+  return call.args.every((w) => w.text.startsWith("-")) || call.args.some((w) => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(w.text));
+}
+
 // Classify one simple command into the PR operation it makes, or null:
 //   { kind: "create", pr, repo }               gh pr create / new, draft or not
 //   { kind: "remote", what, selector, repo }   a merge or ready of an existing PR
 //   { kind: "refuse", reason }                 a form the gate cannot read
-function classify(call, shell) {
+// command is the whole Bash line the call came from.
+function classify(call, shell, command) {
   const prog = shell.nameOf(call);
   const text = call.args.map((w) => w.text);
   const namesOp = text.some((t, i) => t === "pr" && PR_ACTIONS.includes(text[i + 1]));
+  const viaCurl = prog === "curl" ? classifyCurl(call) : null;
+  if (viaCurl) return viaCurl;
+  if (runsUnreadScript(call, prog, shell) && mayWritePr(command)) {
+    return { kind: "refuse", reason: `the gate cannot read the script \`${prog}\` runs here, and this command names a PR write; run gh directly, with the PR command in plain text` };
+  }
   if (prog !== "gh") {
     return namesOp && !READERS.has(prog)
       ? { kind: "refuse", reason: "the gate cannot read a PR command run through another program or a variable; run gh directly" }
@@ -313,6 +372,10 @@ function classify(call, shell) {
     if (MERGE_MUTATIONS.test(text.join(" "))) {
       return { kind: "refuse", reason: "GraphQL PR merge, ready and create mutations are refused; use gh pr merge, ready or create" };
     }
+    const graphql = call.args.slice(1).some((w) => /(?:^|\/)graphql$/.test(w.text));
+    if (graphql && !graphqlQueryReadable(call.args.slice(1))) {
+      return { kind: "refuse", reason: "the gate cannot read a GraphQL query from a file, stdin or a variable; pass it inline with -f query='...'" };
+    }
     const createPath = call.args.some((w) => /(?:^|\/)pulls\/?$/.test(w.text));
     if (createPath && apiMethod(text) !== "GET") {
       return { kind: "refuse", reason: "opening a PR through gh api is refused; use gh pr create, which the gate can check" };
@@ -333,6 +396,22 @@ function classify(call, shell) {
   return null;
 }
 
+// "owner/name", lower case, for any spelling of a github.com repo: owner/name,
+// with a trailing .git or /, github.com/owner/name, an https or ssh URL, or
+// git@github.com:owner/name.git. GitHub names ignore case. null for anything
+// else, another host included.
+function repoKey(text) {
+  const bare = text
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//, "")
+    .replace(/^[^@/]*@/, "")
+    .replace(/^(?:www\.)?github\.com(?::\d+)?[/:]/, "")
+    .replace(/\/+$/, "")
+    .replace(/\.git$/, "");
+  return /^[\w.-]+\/[\w.-]+$/.test(bare) ? bare : null;
+}
+
 function thisRepo(cwd) {
   try {
     const url = execFileSync("git", ["-C", cwd, "remote", "get-url", "origin"], {
@@ -340,18 +419,19 @@ function thisRepo(cwd) {
       timeout: 5000,
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    return /github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(url)?.[1].toLowerCase() ?? null;
+    return /github\.com[/:]/i.test(url) ? repoKey(url) : null;
   } catch {
     return null;
   }
 }
 
-// True only when the command names, as plain text, a repo that is not this one.
+// True only when the command names, as plain text, a github.com repo that is
+// not this one. Any spelling of this repo, or one it cannot read, is checked.
 function isAnotherRepo(repo, cwd) {
   if (!repo || repo.dynamic) return false;
-  const named = repo.text.toLowerCase();
+  const named = repoKey(repo.text);
   const own = thisRepo(cwd);
-  return own !== null && /^[\w.-]+\/[\w.-]+$/.test(named) && named !== own;
+  return own !== null && named !== null && named !== own;
 }
 
 function fetchBody(selector, repo, cwd) {
@@ -412,11 +492,11 @@ export function bashProblems(command, cwd, shell) {
   try {
     steps = [...shell.walk(command, cwd)];
   } catch {
-    return NAMES_PR_OP.test(command) || /pulls\/|graphql/.test(command) ? ["the gate cannot parse this command"] : [];
+    return mayWritePr(command) ? ["the gate cannot parse this command"] : [];
   }
   return steps
     .map(({ call, dir }) => {
-      const op = classify(call, shell);
+      const op = classify(call, shell, command);
       return op && problemFor(op, dir, cwd);
     })
     .filter(Boolean);
