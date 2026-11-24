@@ -4,11 +4,25 @@
 
 ## 1.9.0
 
-- **No more `-r2` branches.** An item keeps one branch and one PR until it merges. Review fixes are new commits on that branch. When `main` moves after a push, the agent merges `origin/main` into the same branch (or runs `gh pr update-branch`) and pushes normally. Rebasing your own commits is fine before the first push. Never force push, as before. The guardrails template, `git-workflow.md`, the coordinator prompt, `pr-finisher`, every agent's rules line, `route-work`, the setup skill and the README say so.
-- **Review after a catch-up.** `review-gate.md`: merging `main` in with no conflicts needs no new round. If conflicts were resolved, the reviewers whose areas the conflicted files touch run again, as round 2 if one is left; otherwise it is a decision for the owner. At most two rounds, as before.
-- **PRs merge in the repo's preferred style.** `git-workflow.md` has a `## Merge style` section with one **Merge style** line (`merge`, `squash` or `rebase`), and says how to find the style when it is missing: `gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed`, use the only allowed one, or ask the owner. New placeholder `{{MERGE_STYLE}}` in the coordinator prompt (merge step 5) and the guardrails. The setup skill asks for the style with the names question, writes it to all three, and sets the ruleset and repo merge settings to that style. `squash` is the new default and the setup's recommendation (the ruleset template now allows squash merges): a branch that caught up by merging `main` in has merge commits, and GitHub can refuse to rebase-merge it. ai-utils moves to squash merges too.
+**Upgrade steps, in this order:**
+
+1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
+2. Rerun `setup-agentic-workflow` in each repo set up before 1.9.0. Answer its new merge-style question; it recommends `squash`. On a yes, it updates the `main` ruleset and the repo's merge settings to that style. It also replaces the old branch rule in `AGENTS.md`, `docs/agents/git-workflow.md`, `docs/agents/review-gate.md` and `docs/agents/coordinator-prompt.md`, and refreshes `.claude/agents/` and `scripts/check-agent-hooks.mjs`.
+3. Merge that setup PR before any agent catches up a pushed branch by merging `main` in. Until then, the repo still allows only rebase merges, and GitHub can refuse to rebase-merge such a branch.
+4. Open `-r2` branches and their PRs can finish as they are. Do not start new ones.
+
+**Changes:**
+
+- **No more `-r2` branches.** An item keeps one branch and one PR until it merges, and review fixes are new commits on that branch. When `main` moves after a push, the agent merges `origin/main` into the same branch and pushes normally. `gh pr update-branch` works too, never with `--rebase`; the agent then runs `git pull --ff-only` before its next commit. Rebasing your own commits is fine before the first push. Never force push. The guardrails template, `git-workflow.md`, the coordinator prompt, `pr-finisher`, every agent's rules line, `route-work`, the setup skill and the README say so.
+- **Review after a catch-up.** In `review-gate.md`, a catch-up merge is clean when Git reported no conflicts and `git show --remerge-diff` shows nothing. A clean merge needs no new round, only the test gate on the new head. After resolved conflicts, the security critic, the correctness critic and the reviewers whose areas the conflicted files touch review the remerge diff. That is round 2, or a decision for the owner if both rounds are used. The definition of a round now covers this partial round 2. Before merging, the coordinator checks the remerge diff of every merge commit on the branch.
+- **PRs merge in the repo's merge style.** `git-workflow.md` has a `## Merge style` section with one **Merge style** line: `merge`, `squash` or `rebase`. It also says how to find the style when the line is missing. New placeholder `{{MERGE_STYLE}}` in the coordinator prompt (merge step 5) and the guardrails.
+- **Setup asks for the merge style.** It asks with the names question and writes the answer to all three files. It sets the ruleset and repo merge settings to that style, and can update an existing `main` ruleset in place. `squash` is the new default: the ruleset template now allows squash merges. ai-utils moves to squash merges too.
 - `check-agent-hooks.mjs` checks that `git merge origin/main` is allowed in a worktree and refused in the main checkout.
-- `validate-plugins.py` fails if the `-r2` or rebase-only rule comes back in a rule file, checks that each file states the same-branch rule, and checks that this repo's `AGENTS.md` and coordinator prompt name the merge style its `git-workflow.md` sets.
+- `validate-plugins.py` checks four things:
+  - the `-r2` or rebase-only rule does not come back in any doc;
+  - each rule file keeps the same-branch rule, and every agent carries its rules line word for word;
+  - the ruleset template and the setup's PATCH command allow only `squash`;
+  - this repo's `AGENTS.md` and coordinator prompt name the merge style its `git-workflow.md` sets.
 
 ## 1.8.0
 

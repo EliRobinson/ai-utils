@@ -129,6 +129,8 @@ try {
     guard(main, `cd ${tree} && git commit -m x`, "allow"),
     guard(main, `git -C ${tree} rebase origin/main`, "allow"),
     guard(tree, "git fetch origin && git merge origin/main", "allow"),
+    guard(main, `git -C ${tree} merge origin/main`, "allow"),
+    guard(main, `cd ${tree} && git merge origin/main`, "allow"),
     guard(tree, `(cd ${main} && git log -1); git commit -m x`, "allow"),
     guard(tree, `git --git-dir=${main}/.git/worktrees/repo-task commit -m x`, "allow"),
     guard(main, `${W}=1 git commit -m x`, "allow"),

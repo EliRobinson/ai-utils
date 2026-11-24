@@ -103,6 +103,8 @@ COORDINATOR_PROMPT = AGENT_ROSTER / "coordinator" / "coordinator-prompt.md"
 ROUTE_WORK = AGENT_ROSTER / "skills" / "route-work" / "SKILL.md"
 GUARDRAILS = SETUP_SKILL / "templates" / "agents-guardrails.md"
 MULTI_AGENT = SETUP_SKILL / "templates" / "docs-agents" / "multi-agent.md"
+GIT_WORKFLOW = SETUP_SKILL / "templates" / "docs-agents" / "git-workflow.md"
+REVIEW_GATE = SETUP_SKILL / "templates" / "docs-agents" / "review-gate.md"
 ASKS_BOARD_SKILL = ROOT / "plugins" / "asks-board" / "skills" / "asks-board" / "SKILL.md"
 PLACEHOLDER = re.compile(r"\{\{([A-Z_]+)\}\}")
 LEADING_COMMENT = re.compile(r"\A<!--(.*?)-->", re.S)
@@ -112,8 +114,8 @@ LEADING_COMMENT = re.compile(r"\A<!--(.*?)-->", re.S)
 TOOL_NEUTRAL = [
     COORDINATOR_PROMPT,
     GUARDRAILS,
-    SETUP_SKILL / "templates" / "docs-agents" / "git-workflow.md",
-    SETUP_SKILL / "templates" / "docs-agents" / "review-gate.md",
+    GIT_WORKFLOW,
+    REVIEW_GATE,
     MULTI_AGENT,
 ]
 HARD_CODED_TRACKER = re.compile(r"gh issue|github issue", re.I)
@@ -363,58 +365,77 @@ def check_accessibility_agents() -> None:
     check_retired_a11y_names()
 
 
-GIT_WORKFLOW = SETUP_SKILL / "templates" / "docs-agents" / "git-workflow.md"
-REVIEW_GATE = SETUP_SKILL / "templates" / "docs-agents" / "review-gate.md"
 REPO_AGENTS_MD = ROOT / "AGENTS.md"
 REPO_COORDINATOR_PROMPT = ROOT / "docs" / "agents" / "coordinator-prompt.md"
+RULESET = SETUP_SKILL / "templates" / "github-main-ruleset.json"
 # The dropped branch rule (#2): a new `-r2` branch and PR when main moves,
-# and "rebase, never merge main in". It must not come back in any rule file.
+# and "rebase, never merge main in". It must not come back in any doc.
 OLD_BRANCH_RULE = re.compile(
     r"-r2\b|never merge `?main`? into|rebase, never merge|clean replay|rebase-only|rebase merges only", re.I
 )
-# The rule that replaced it, as each file must state it (lowercase).
-BRANCH_RULE_PHRASES = {
-    GUARDRAILS: ["keep one branch and one pr", "never force push", "git merge origin/main"],
-    REPO_AGENTS_MD: ["keep one branch and one pr", "never force push", "git merge origin/main"],
-    GIT_WORKFLOW: ["keep the same branch and the same pr", "never force push", "git merge origin/main",
-                   "gh repo view --json mergecommitallowed,squashmergeallowed,rebasemergeallowed"],
-    REVIEW_GATE: ["merging `main` into the branch with no conflicts needs no new round"],
-    COORDINATOR_PROMPT: ["one branch and one pr", "merge `origin/main` into it"],
-    REPO_COORDINATOR_PROMPT: ["one branch and one pr", "merge `origin/main` into it"],
+# Every agent prompt carries the rule that replaced it, word for word.
+BRANCH_RULE_LINE = ("- Never force push. Keep one branch and one PR. Catch up with the base branch by merging it in "
+                    "(`git merge origin/<base>`) and push normally; before your first push you may rebase your own "
+                    "commits instead.")
+# The key terms each rule file must keep (lowercase). A template and its
+# filled copy share one list.
+GUARDRAIL_TERMS = ["keep one branch and one pr", "never force push", "git merge origin/main"]
+COORDINATOR_TERMS = ["catch up on the same branch", "--remerge-diff"]
+BRANCH_RULE_TERMS = {
+    GUARDRAILS: GUARDRAIL_TERMS,
+    REPO_AGENTS_MD: GUARDRAIL_TERMS,
+    GIT_WORKFLOW: ["keep the same branch and the same pr", "never force push", "git merge origin/main"],
+    REVIEW_GATE: ["--remerge-diff"],
+    COORDINATOR_PROMPT: COORDINATOR_TERMS,
+    REPO_COORDINATOR_PROMPT: COORDINATOR_TERMS,
 }
 MERGE_STYLES = ("merge", "squash", "rebase")
 MERGE_STYLE_LINE = re.compile(r"^- \*\*Merge style:\*\* `([a-z]+)`$", re.M)
+# The repo merge flag that turns on each style.
+MERGE_FLAGS = {"merge": "allow_merge_commit", "squash": "allow_squash_merge", "rebase": "allow_rebase_merge"}
+# The style the ruleset template and the setup's PATCH command default to.
+DEFAULT_MERGE_STYLE = "squash"
 
 
-def branch_rule_files() -> list[Path]:
-    files = [REPO_AGENTS_MD, *sorted((ROOT / "docs" / "agents").glob("*.md"))]
-    files += [f for f in sorted(AGENT_ROSTER.rglob("*.md")) if f.name != "CHANGELOG.md"]
-    return files
+def check_old_branch_rule_gone() -> None:
+    paths = {p.resolve(): p for p in [REPO_AGENTS_MD, *repo_docs({".md"})]}  # docs/agents has symlinks
+    for path in paths.values():
+        fail_matching_lines(path, path.read_text(encoding="utf-8"), OLD_BRANCH_RULE,
+                            "brings back the dropped -r2 / rebase-only branch rule; state the same-branch "
+                            "rule in templates/docs-agents/git-workflow.md instead")
 
 
-def check_branch_rule() -> None:
-    """The -r2 rule stays gone; the same-branch rule and the merge style are stated."""
-    for path in branch_rule_files():
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if OLD_BRANCH_RULE.search(line):
-                fail(f"{rel(path)}:{number}: states the dropped -r2 / rebase-only branch rule")
-
-    agent_files = sorted((AGENT_ROSTER / "agents").glob("*.md"))
-    phrases = dict(BRANCH_RULE_PHRASES)
-    for agent in agent_files:
-        phrases[agent] = ["keep one branch and one pr", "never force push"]
-    for path, wanted in phrases.items():
+def check_branch_rule_stated() -> None:
+    for path, terms in BRANCH_RULE_TERMS.items():
         text = (read_or_fail(path) or "").lower()
-        for phrase in wanted:
-            if phrase not in text:
-                fail(f"{rel(path)}: must say {phrase!r} (the same-branch rule)")
+        for term in terms:
+            if term not in text:
+                fail(f"{rel(path)}: must contain {term!r} (any case), part of the same-branch rule")
+    for agent in sorted((AGENT_ROSTER / "agents").glob("*.md")):
+        if BRANCH_RULE_LINE not in (read_or_fail(agent) or ""):
+            fail(f"{rel(agent)}: must carry the branch rule word for word: {BRANCH_RULE_LINE!r}")
 
-    # The coordinator template merges in the placeholder style; this repo's
-    # filled copies all name the style its git-workflow.md sets.
+
+def check_default_merge_style() -> None:
+    """The ruleset template and the setup's PATCH command both set the default style, and only it."""
+    ruleset = load_json(RULESET) or {}
+    methods = [rule.get("parameters", {}).get("allowed_merge_methods")
+               for rule in ruleset.get("rules", []) if rule.get("type") == "pull_request"]
+    if methods != [[DEFAULT_MERGE_STYLE]]:
+        fail(f"{rel(RULESET)}: the pull_request rule must allow only {DEFAULT_MERGE_STYLE!r} merges")
+    setup = read_or_fail(SETUP_SKILL / "SKILL.md") or ""
+    patch = [line for line in setup.splitlines() if line.startswith("gh api -X PATCH repos/{owner}/{repo} ")]
+    wanted = {f"-F {flag}={'true' if style == DEFAULT_MERGE_STYLE else 'false'}" for style, flag in MERGE_FLAGS.items()}
+    if len(patch) != 1 or not all(part in patch[0] for part in wanted):
+        fail(f"{rel(SETUP_SKILL)}/SKILL.md: needs one PATCH command that sets {sorted(wanted)}")
+
+
+def check_merge_style() -> None:
+    """The coordinator template uses the placeholder; this repo's filled copies name its own style."""
     if "--{{MERGE_STYLE}} --match-head-commit" not in (read_or_fail(COORDINATOR_PROMPT) or ""):
         fail(f"{rel(COORDINATOR_PROMPT)}: merge step must use `gh pr merge N --{{{{MERGE_STYLE}}}}`")
-    if "{{MERGE_STYLE}}" not in (read_or_fail(GUARDRAILS) or ""):
-        fail(f"{rel(GUARDRAILS)}: must name the merge style with {{{{MERGE_STYLE}}}}")
+    if "merge style: {{MERGE_STYLE}}." not in (read_or_fail(GUARDRAILS) or ""):
+        fail(f"{rel(GUARDRAILS)}: must say \"merge style: {{{{MERGE_STYLE}}}}.\"")
     found = MERGE_STYLE_LINE.findall(read_or_fail(GIT_WORKFLOW) or "")
     if len(found) != 1 or found[0] not in MERGE_STYLES:
         fail(f"{rel(GIT_WORKFLOW)}: needs one '- **Merge style:** `merge|squash|rebase`' line")
@@ -422,8 +443,16 @@ def check_branch_rule() -> None:
     style = found[0]
     if f"--{style} --match-head-commit" not in (read_or_fail(REPO_COORDINATOR_PROMPT) or ""):
         fail(f"{rel(REPO_COORDINATOR_PROMPT)}: merge step must use --{style}, the style git-workflow.md sets")
-    if f"preferred style: {style}." not in (read_or_fail(REPO_AGENTS_MD) or ""):
-        fail(f"{rel(REPO_AGENTS_MD)}: must name the merge style {style!r} that git-workflow.md sets")
+    if f"merge style: {style}." not in (read_or_fail(REPO_AGENTS_MD) or ""):
+        fail(f"{rel(REPO_AGENTS_MD)}: must say \"merge style: {style}.\", the style git-workflow.md sets")
+
+
+def check_branch_rule() -> None:
+    """The -r2 rule stays gone; the same-branch rule and the merge style are stated."""
+    check_old_branch_rule_gone()
+    check_branch_rule_stated()
+    check_default_merge_style()
+    check_merge_style()
 
 
 VENDORED_SKILL = AGENT_ROSTER / "skills" / "thermo-nuclear-code-quality-review"

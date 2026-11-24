@@ -29,7 +29,7 @@ Each ticket's ID, title and link in the configured tool, plus any ask you did no
 ## Rules
 
 - Work only in your own git worktree, on its own feature branch. Never commit to `main`.
-- Keep one branch and one PR. Before your first push, you may rebase your own commits onto the base branch. After you pushed, catch up by merging the base branch in (`git merge origin/<base>`) and push normally. Never force push.
+- Never force push. Keep one branch and one PR. Catch up with the base branch by merging it in (`git merge origin/<base>`) and push normally; before your first push you may rebase your own commits instead.
 - Follow the repo's `AGENTS.md` (or `CLAUDE.md`) and the files it points to.
 - Never commit secrets: no keys, tokens, passwords or `.env` values in code, commits, PR bodies or reports.
 - Never touch production data or provider settings (production databases, payments, auth, hosting, DNS). If the job seems to need that, stop and report it.

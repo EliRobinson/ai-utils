@@ -23,7 +23,7 @@ No PR is opened until every reviewer below has run on the branch's diff and ever
 
 A PR gets at most two rounds of review. This stops reviews that never end. This section is the full rule; other files point here.
 
-- A round is one run of every reviewer on the branch's diff. Rerunning one reviewer that failed or was blocked is part of the same round.
+- A round is one pass of review on the branch. Round 1 runs every reviewer on the branch's diff. Round 2 runs either every reviewer again (after round 1 fixes) or the catch-up set below (after a catch-up that resolved conflicts); both count as round 2. Rerunning one reviewer that failed or was blocked is part of the same round.
 - Round 1 is the full gate. Handle every finding (see below).
 - Round 2 is optional. Run it only if the round 1 fixes changed behaviour, or touched files the reviewers had not seen.
 - Fixing a round 2 finding in place does not start a new round.
@@ -32,7 +32,8 @@ A PR gets at most two rounds of review. This stops reviews that never end. This 
   - any other finding still open is filed as a ticket, listed in the record, and the PR goes ahead.
 - New work after round 2 goes in a new PR.
 - Review fixes are new commits on the same branch and PR, so the PR keeps its count.
-- Merging `main` into the branch with no conflicts needs no new round. If you resolved conflicts, run the reviewers whose areas the conflicted files touch. That is round 2 if one is left; if not, it is a decision for the owner.
+- A catch-up merge of `main` is clean when Git reported no conflicts and `git show --remerge-diff --format= <merge>` prints nothing. A clean merge needs no new round, but the full test gate still runs on the new head.
+- Any other catch-up merge counts as resolved conflicts. Run the catch-up set on its remerge diff: the security critic, the correctness critic, and every reviewer whose area the conflicted files touch. That is round 2 if round 2 is unused; if both rounds are used, it is a decision for the owner. Then update the open PR's `## Review` record (`gh pr edit N --body-file <file>`): `Rounds: 2`, and the new findings in the table and the finding lines.
 - Only the owner, in their own words in chat, can allow a third round. The record then says so (see below).
 
 ## After the reviews

@@ -86,7 +86,7 @@ Ask one question. Show two names and let the owner correct them in the same answ
 - the owner's name for the merge rule and the coordinator prompt: the first word of `git config user.name`, or "the owner" if that is empty;
 - the `<username>` for branch names, from step 1.13 (if it is empty, ask for one), with an example such as `sam/123/fix-login`;
 - the ticketing tool: the one step 1.14 found, or GitHub Issues if none. If the owner names another tool, they also say whether agents reach it through a CLI or an MCP server;
-- the merge style, `merge` (a merge commit), `squash` or `rebase`: if step 1.8 shows exactly one allowed, that one; otherwise `squash` (recommended: it keeps history linear, and works on branches that caught up by merging `main` in, which GitHub can refuse to rebase-merge), and the owner may pick another.
+- the merge style: `merge` (a merge commit), `squash` or `rebase`. Recommend `squash`; the **Merge style** section of `templates/docs-agents/git-workflow.md` says why. If step 1.8 shows exactly one allowed and it is `merge` or `squash`, recommend that one. If it is only `rebase` (every repo set up before agent-roster 1.9.0), still recommend `squash` and say why: agents now catch up by merging `main` in, and GitHub can refuse to rebase-merge such a branch. If the owner picks `merge`, say it drops the linear-history rule. The owner may pick any of the three.
 
 Then learn the tool's commands. GitHub Issues needs nothing more: the template already has them. For any other tool, never guess a command:
 
@@ -130,7 +130,7 @@ For each file below: if it is missing, create it. If it exists and is identical,
 2. **Self-check.** Run `node scripts/check-agent-hooks.mjs` in the repo. Every case must pass. It builds a throwaway repo with a worktree and checks that the guard refuses `git commit` in the main checkout and allows it in a worktree and with the escape, and that the review gate refuses a merge without a valid record. If a case fails, stop and report it. Do not wire a hook that fails its check.
 3. **Settings.** Run `node <skill folder>/scripts/merge-settings.mjs <repo>`. It prints the merged `.claude/settings.json` and writes nothing. Show what it adds and ask. On a yes, run it again with `--write`. It keeps every existing setting and hook, but rewrites the file with 2-space indent.
 4. **Reviewer agents.** Copy every reviewer file listed under "Where your files are" into `.claude/agents/`. Keep their models. Never set one to Fable. On an upgrade, if `.claude/agents/spec-security-copy-critic.md` exists, it is the old combined reviewer that `spec-critic`, `security-critic` and `copy-critic` replace: ask, and on a yes delete it. Update `scripts/review-gate-hook.mjs`, `docs/agents/review-gate.md` and the `AGENTS.md` guardrails bullet in the same change, so the hook and the record name the same reviewers. The newer hook also needs a `Rounds:` line in every record: tell the owner that open PRs need one added before they can leave draft or merge.
-5. **Docs.** Copy `templates/docs-agents/git-workflow.md`, `review-gate.md` and `multi-agent.md` into `docs/agents/`. Replace `{{REGISTRY_PATH}}` with the registry path. In `git-workflow.md`, set the **Merge style** line to the style from step 3. If the repo already has a file on that topic under another name, merge into it instead.
+5. **Docs.** Copy `templates/docs-agents/git-workflow.md`, `review-gate.md` and `multi-agent.md` into `docs/agents/`. Replace `{{REGISTRY_PATH}}` with the registry path. In `git-workflow.md`, set the **Merge style** line to the style from step 3. If the repo already has a file on that topic under another name, merge into it instead. If an older copy of one of these files differs from the template, show the diff and replace the old rules (such as a new branch and PR whenever `main` moves) rather than keeping both.
    - **The ticketing tool setting.** Copy `templates/docs-agents/issue-tracker.md` to `docs/agents/issue-tracker.md`, and replace `{{GITHUB_REPO}}` with `owner/name`. For GitHub Issues that is all. For another tool, fill the `## Setting` lines and the `## Commands` table with what step 3 learned: **Tool**, **Access** (`cli` or `mcp`), **Ticket ID**, **In branch names** (letters, digits and `-` only), **Link**, and **Close from a PR** (`none` unless the tool closes a ticket from a line in the PR body). Put the commands in the column that **Access** names, and `<not set>` in the other column and for any action nobody could name. Keep the rest of the file as it is. The file must then name no `gh issue` command.
    - If `docs/agents/issue-tracker.md` already exists without a `## Setting` section, show the diff and propose replacing it with the filled template, keeping any section of its own that the template lacks.
 6. **Coordinator prompt.** Fill `coordinator/coordinator-prompt.md` and write it to `docs/agents/coordinator-prompt.md`:
@@ -139,7 +139,7 @@ For each file below: if it is missing, create it. If it exists and is identical,
    - Drop the HTML comment at the top.
 7. **AGENTS.md.** Fill `templates/agents-guardrails.md` (`{{OWNER}}`, `{{BRANCH_USER}}`, `{{REGISTRY_PATH}}`, `{{TICKETING_TOOL}}`, `{{MERGE_STYLE}}`).
    - No `AGENTS.md`: create one with a one-line description of the repo, the guardrails block, and a `## Topics` list linking the five docs.
-   - An `AGENTS.md` exists: add the block under its guardrails heading, or as a new `## Guardrails` section near the top. Drop bullets it already states, and show the diff. Where it names GitHub issues as the tracker but the tool is another one, propose a change to name the configured tool.
+   - An `AGENTS.md` exists: add the block under its guardrails heading, or as a new `## Guardrails` section near the top. Drop bullets it already states. Replace any bullet the new block contradicts, such as an older rule that forbids merging `main` into a branch or opens a new branch when `main` moves. Show the diff. Where it names GitHub issues as the tracker but the tool is another one, propose a change to name the configured tool.
    - Keep the root file short. If it is long, suggest the `optimize-agents-md` skill rather than restructuring it yourself.
 8. **CLAUDE.md.** `AGENTS.md` is the single entry point.
    - Missing: create `CLAUDE.md` as a symlink to `AGENTS.md`. Where symlinks do not work (Windows without developer mode), write a one-line `CLAUDE.md` that says `Read AGENTS.md. It holds every rule for this repo.`
@@ -152,14 +152,20 @@ These change GitHub settings for everyone, so ask before you run them. Say what 
 - **A (recommended):** add a ruleset on the default branch, and allow only the merge style from step 3. Nobody can push straight to `main`, force push or delete it, admins included; every change lands as a PR merged in that style. The other two merge methods are turned off for the repo. The owner can change or remove this under Settings, Rules.
 - **B:** skip; the owner will do it by hand.
 
-The ruleset template allows `squash`. For another style, write a copy of it to a temporary file (`mktemp`) with `allowed_merge_methods` set to that style (`merge` or `rebase`), and for `merge` also drop the `required_linear_history` rule, because merge commits are not linear. Post that copy instead. In the second command, set `true` only for the chosen style's flag (`allow_rebase_merge`, `allow_squash_merge` or `allow_merge_commit`) and `false` for the other two.
+The commands below are for `squash`, the style the ruleset template allows. For `merge` or `rebase`:
+
+1. Write a copy of the ruleset template to a temporary file (`mktemp`).
+2. In the copy, set `allowed_merge_methods` to the chosen style.
+3. For `merge` only, also drop the `required_linear_history` rule, because merge commits are not linear.
+4. Use the copy in place of the template in the first command.
+5. In the second command, set `true` only for the chosen style's flag (`allow_rebase_merge`, `allow_squash_merge` or `allow_merge_commit`) and `false` for the other two.
 
 ```bash
 gh api -X POST repos/{owner}/{repo}/rulesets --input <skill folder>/templates/github-main-ruleset.json
 gh api -X PATCH repos/{owner}/{repo} -F allow_squash_merge=true -F allow_rebase_merge=false -F allow_merge_commit=false
 ```
 
-If a ruleset named `main` already exists, show it and ask before changing it. A private repo on a free plan cannot use rulesets; report that rather than work around it.
+If a ruleset named `main` already exists (any repo set up before agent-roster 1.9.0 has one that allows only `rebase`), show it and ask before changing it. On a yes, update it in place with its ID from step 1.8, instead of the POST: `gh api -X PUT repos/{owner}/{repo}/rulesets/<id> --input <file>`. A private repo on a free plan cannot use rulesets; report that rather than work around it.
 
 ### 8. Git hooks
 

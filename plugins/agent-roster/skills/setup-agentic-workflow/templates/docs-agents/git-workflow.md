@@ -33,7 +33,9 @@ cd ../<repo>-<task>
 - Branch off `origin/main`. Never push to `main`.
 - Keep the same branch and the same PR until it merges. Review fixes are new commits on that branch. Never open a second branch or PR for the same item.
 - Before your first push, you may rebase your own local commits onto `origin/main`.
-- Never force push, and never rewrite commits you have pushed. If `main` moves after you pushed, update the same branch: `git fetch origin && git merge origin/main`, or `gh pr update-branch <N>` once the PR exists. Resolve conflicts in the merge commit, run the checks, and push normally. [review-gate.md](review-gate.md) says when that needs review.
+- Never force push, and never rewrite commits you have pushed. If `main` moves after you pushed, catch up on the same branch: `git fetch origin && git merge origin/main`, resolve any conflicts in the merge commit, run the checks, and push normally.
+- Once the PR exists, `gh pr update-branch <N>` does the same merge on GitHub. Never add `--rebase`: it rewrites the pushed branch. There is nothing to push afterwards; run `git pull --ff-only` in your worktree before your next commit, or that push is refused. If it reports conflicts, catch up with `git merge` as above.
+- [review-gate.md](review-gate.md) says when a catch-up needs review.
 - Review before you open the PR, drafts included: see [review-gate.md](review-gate.md).
 - Only the coordinator merges, and only after the owner types "merge N" in chat. It follows the merge steps in [coordinator-prompt.md](coordinator-prompt.md#merging): up to date with `main`, review record complete, test gate passed on the exact head, merge lock, then `gh pr merge N --<style> --match-head-commit <sha>` in the merge style below.
 
@@ -41,7 +43,11 @@ cd ../<repo>-<task>
 
 - **Merge style:** `squash`
 
-This line is the repo's preferred way to merge a PR: `merge` (a merge commit), `squash` or `rebase`. It is the `--<style>` flag of `gh pr merge`. The setup skill writes it. `squash` is the default for new repos: a branch that caught up by merging `main` in has merge commits, and GitHub can refuse to rebase-merge such a branch. A squash merge still lands one linear commit per PR. If it is missing or not one of the three, find the style this way:
+This line is the repo's preferred way to merge a PR: `merge` (a merge commit), `squash` or `rebase`. It is the `--<style>` flag of `gh pr merge`, and the setup skill writes it.
+
+`squash` is the default for new repos. A branch that caught up by merging `main` in has merge commits, and GitHub can refuse to rebase-merge it. A squash merge lands one linear commit per PR.
+
+If the line is missing or not one of the three, find the style this way. Unlike the setup skill, this never picks a default, because the owner is not there to confirm it:
 
 1. Check what the GitHub repo allows: `gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed`.
 2. If only one is allowed, use it.
