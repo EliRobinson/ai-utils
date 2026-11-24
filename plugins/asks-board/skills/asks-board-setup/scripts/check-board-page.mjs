@@ -15,7 +15,7 @@ if (!block) {
   console.error("board-template.html: no // BEGIN pure ... // END pure block");
   process.exit(1);
 }
-const { sections, stamp, option, isRecommended } = new Function(block[1] + "\nreturn { sections, stamp, option, isRecommended };")();
+const { sections, stamp, option, matchesKey, optionButton } = new Function(block[1] + "\nreturn { sections, stamp, option, matchesKey, optionButton };")();
 
 // Sections: only status "closed" is Closed, whatever ackAt says.
 const OLD = "2026-11-16T10:00:00.000Z";
@@ -61,39 +61,49 @@ for (const patch of [
   for (const [k, v] of Object.entries(patch)) if (k !== "ackAt") check(w[k] === v, `stamp drops ${k}`);
 }
 
-// Option buttons: the key comes from key, else id, else the label. Recommended needs a
-// recommended value that equals the key; a row with no recommended marks none.
+// Option buttons: the key comes from key, else id, else nothing (a bare string is its own
+// key). Keys and labels are one line. The empty key is never writable, chosen or recommended.
 const same = (got, want) => JSON.stringify(got) === JSON.stringify(want);
 for (const [o, want] of [
   [{ key: "A", label: "Ship it" }, { key: "A", label: "Ship it" }],
   [{ id: "B", label: "Wait" }, { key: "B", label: "Wait" }],
   [{ key: "A", id: "B", label: "x" }, { key: "A", label: "x" }],
+  [{ key: "", id: "B", label: "x" }, { key: "B", label: "x" }],
+  [{ key: "  ", id: "B", label: "x" }, { key: "B", label: "x" }],
   [{ key: 2, label: "Two" }, { key: "2", label: "Two" }],
   ["C", { key: "C", label: "" }],
-  [{ label: "Only a label" }, { key: "Only a label", label: "" }],
+  [{ label: "Only a label" }, { key: "", label: "Only a label" }],
+  [{ key: "A\nproject=x", label: "a\r\nb" }, { key: "A project=x", label: "a b" }],
   [{ key: "", label: "" }, { key: "", label: "" }],
   [{}, { key: "", label: "" }],
   [null, { key: "", label: "" }],
   ["  ", { key: "", label: "" }],
 ]) check(same(option(o), want), `option(${JSON.stringify(o)}): want ${JSON.stringify(want)}, got ${JSON.stringify(option(o))}`);
-check(isRecommended("A", "A") && isRecommended("B", option({ id: "B", label: "x" }).key), "recommended key must mark its button, for key and id options");
-check(!isRecommended("A", "B"), "a different recommended must not mark the button");
-for (const r of [undefined, null]) {
-  check(!isRecommended(r, "A"), `recommended ${r} must mark no button`);
-  check(!isRecommended(r, option({ id: "A" }).key), `recommended ${r} must not mark an {id} option`);
-}
-check(!isRecommended(undefined, option({ id: "A" }).key) && !isRecommended("", ""), "an empty key is never recommended");
-// The old bug: {id,label} options with no recommended all matched undefined === undefined.
-const idRow = { options: [{ id: "A", label: "x" }, { id: "B", label: "y" }] };
-check(idRow.options.every((o) => option(o).key !== "" && !isRecommended(idRow.recommended, option(o).key)),
-  "{id,label} options with no recommended: every key set and no button recommended");
+for (const [value, key, want] of [
+  ["A", "A", true], [" A ", "A", true], [2, "2", true], ["A", "B", false],
+  [undefined, "A", false], [null, "A", false], ["", "", false], [undefined, "", false],
+]) check(matchesKey(value, key) === want, `matchesKey(${JSON.stringify(value)}, ${JSON.stringify(key)}) must be ${want}`);
 
-// Tripwires: the page itself must use both helpers, not a copy of the old logic.
+// One table of [row, option, expected button parts]. The first row is the old bug:
+// {id,label} options with no recommended all matched undefined === undefined.
+for (const [row, o, want] of [
+  [{}, { id: "A", label: "x" }, { writable: true, chosen: false, cls: "opt", text: "A" }],
+  [{ recommended: "A" }, { id: "A", label: "x" }, { writable: true, chosen: false, cls: "opt rec", text: "A  (recommended)" }],
+  [{ recommended: "A" }, { key: "B" }, { writable: true, chosen: false, cls: "opt", text: "B" }],
+  [{ answer: "A", recommended: "A" }, { key: "A" }, { writable: true, chosen: true, cls: "opt chosen", text: "A  (recommended)" }],
+  [{ answer: " B" }, { key: "B" }, { writable: true, chosen: true, cls: "opt chosen", text: "B" }],
+  [{ answer: "" , recommended: "" }, { label: "x" }, { writable: false, chosen: false, cls: "opt nokey", text: "(no key)" }],
+  [{}, null, { writable: false, chosen: false, cls: "opt nokey", text: "(no key)" }],
+]) {
+  const got = optionButton(o, row);
+  for (const [k, v] of Object.entries(want)) check(got[k] === v, `optionButton(${JSON.stringify(o)}, ${JSON.stringify(row)}).${k}: want ${JSON.stringify(v)}, got ${JSON.stringify(got[k])}`);
+}
+
+// Tripwires: the page itself must use the helpers, not a copy of the old logic.
 // They match source text on purpose; update them if write() or render() is reworded.
 check(/\.update\(stamp\(patch,/.test(page), "write() must save stamp(patch, now)");
 check(/sections\(docs\.filter\(/.test(page), "render() must take its lists from sections()");
-check(/= option\(o\)/.test(page) && /isRecommended\(a\.recommended, key\)/.test(page), "card() must read options with option() and isRecommended()");
-check(/key === ""\s*\n?\s*\? say\(/.test(page), "card(): a button with an empty key must not write");
+check(/optionButton\(o, a\)/.test(page), "card() must build option buttons with optionButton()");
 
 if (problems.length) {
   console.error("board-template.html self-check FAILED:\n  - " + problems.join("\n  - "));

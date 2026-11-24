@@ -46,15 +46,7 @@ ln -s <clone>/plugins/asks-board/skills/asks-board ~/.claude/skills/asks-board
 
 ## Change it
 
-The source lives here, in the public `ai-utils` repo (EliRobinson/ai-utils). Every change goes through a feature branch and a PR, never a push to `main`:
-
-1. Edit the files in your own worktree, on a branch off `origin/main`.
-2. Run `python3 scripts/validate-plugins.py` and `node plugins/asks-board/skills/asks-board-setup/scripts/check-board-page.mjs`.
-3. Bump the version in `.claude-plugin/plugin.json` and in the marketplace entry.
-4. Run the review gate, then open the PR (the maintainer's rules are in `AGENTS.md`; outside contributors see Contributing in the root README).
-5. After it merges, publish the new board page: fill in `{{OWNER}}` in a copy of the merged `board-template.html` and publish it to your board link.
-
-Option buttons read `{key, label}`. `recommended` must equal one option's `key`. A row written with `{id, label}` still works, but new rows should use `key`.
+The source lives here, in the public `ai-utils` repo (EliRobinson/ai-utils). Every change goes through a feature branch and a PR, never a push to `main`, and the new board page is published only after the PR merges. The steps are in the `asks-board` skill's "Changing this skill or the board page" section; outside contributors also see Contributing in the root README.
 
 ## Limits
 
