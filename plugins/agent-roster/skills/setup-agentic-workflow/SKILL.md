@@ -10,7 +10,7 @@ You set up the owner's agent workflow in the repo you are run in. The workflow:
 - every agent works in its own worktree, on its own feature branch named `<username>/<ticket>/<short-description>`, with one PR per item;
 - nobody pushes to `main`, force pushes or bypasses hooks;
 - an item keeps one branch and one PR until it merges: review fixes are new commits on it, and once pushed it catches up by merging `main` in;
-- PRs merge in the repo's preferred style (merge commit, squash or rebase), recorded in `docs/agents/git-workflow.md`;
+- PRs merge in the repo's merge style (merge commit, squash or rebase), recorded in `docs/agents/git-workflow.md`;
 - the reviewer agents run on the branch before a PR is opened, and a hook checks their record;
 - a PR gets at most two rounds of review (the rule is in `docs/agents/review-gate.md`);
 - no PR merges until the owner types "merge N";
@@ -86,7 +86,10 @@ Ask one question. Show two names and let the owner correct them in the same answ
 - the owner's name for the merge rule and the coordinator prompt: the first word of `git config user.name`, or "the owner" if that is empty;
 - the `<username>` for branch names, from step 1.13 (if it is empty, ask for one), with an example such as `sam/123/fix-login`;
 - the ticketing tool: the one step 1.14 found, or GitHub Issues if none. If the owner names another tool, they also say whether agents reach it through a CLI or an MCP server;
-- the merge style: `merge` (a merge commit), `squash` or `rebase`. Recommend `squash`; the **Merge style** section of `templates/docs-agents/git-workflow.md` says why. If step 1.8 shows exactly one allowed and it is `merge` or `squash`, recommend that one. If it is only `rebase` (every repo set up before agent-roster 1.9.0), still recommend `squash` and say why: agents now catch up by merging `main` in, and GitHub can refuse to rebase-merge such a branch. If the owner picks `merge`, say it drops the linear-history rule. The owner may pick any of the three.
+- the merge style: `merge` (a merge commit), `squash` or `rebase`. Recommend `squash`; the **Merge style** section of `templates/docs-agents/git-workflow.md` says why. If step 1.8 shows exactly one allowed and it is `merge` or `squash`, recommend that one.
+  - If only `rebase` is allowed (every repo set up before agent-roster 1.9.0), recommend `squash`, with the reason from that same section.
+  - If the owner picks `merge`, say it drops the linear-history rule.
+  - The owner may pick any of the three.
 
 Then learn the tool's commands. GitHub Issues needs nothing more: the template already has them. For any other tool, never guess a command:
 
@@ -165,7 +168,9 @@ gh api -X POST repos/{owner}/{repo}/rulesets --input <skill folder>/templates/gi
 gh api -X PATCH repos/{owner}/{repo} -F allow_squash_merge=true -F allow_rebase_merge=false -F allow_merge_commit=false
 ```
 
-If a ruleset named `main` already exists (any repo set up before agent-roster 1.9.0 has one that allows only `rebase`), show it and ask before changing it. On a yes, update it in place with its ID from step 1.8, instead of the POST: `gh api -X PUT repos/{owner}/{repo}/rulesets/<id> --input <file>`. A private repo on a free plan cannot use rulesets; report that rather than work around it.
+If a ruleset named `main` already exists (any repo set up before agent-roster 1.9.0 has one that allows only `rebase`), show it and ask before changing it. On a yes, update it in place with its ID from step 1.8, instead of the POST: `gh api -X PUT repos/{owner}/{repo}/rulesets/<id> --input <file>`.
+
+When this changes the merge style of a repo that already has a coordinator chat, say in the report: that chat still has the old merge step, so it merges the setup PR and every open PR with `gh pr merge N --<new style>`. Once the setup PR merges, start a new coordinator chat from the new `docs/agents/coordinator-prompt.md`. A private repo on a free plan cannot use rulesets; report that rather than work around it.
 
 ### 8. Git hooks
 

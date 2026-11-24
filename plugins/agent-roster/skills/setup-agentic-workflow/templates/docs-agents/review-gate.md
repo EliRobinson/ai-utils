@@ -25,15 +25,19 @@ A PR gets at most two rounds of review. This stops reviews that never end. This 
 
 - A round is one pass of review on the branch. Round 1 runs every reviewer on the branch's diff. Round 2 runs either every reviewer again (after round 1 fixes) or the catch-up set below (after a catch-up that resolved conflicts); both count as round 2. Rerunning one reviewer that failed or was blocked is part of the same round.
 - Round 1 is the full gate. Handle every finding (see below).
-- Round 2 is optional. Run it only if the round 1 fixes changed behaviour, or touched files the reviewers had not seen.
+- Round 2 runs only when it is needed: every reviewer, when the round 1 fixes changed behaviour or touched files the reviewers had not seen; or the catch-up set below, when a catch-up after round 1 resolved conflicts. One round 2 run on the final head can cover both.
 - Fixing a round 2 finding in place does not start a new round.
 - There is no round 3. After round 2:
   - a blocker still open, and any open security-critic finding (a ticket can publish an unfixed hole), goes to the owner as a `decide` ask on the Asks board, and the PR waits. The options: **A (recommended):** fix it, and allow round 3 for that fix only (record `Owner allowed round 3: <when and where>`); **B:** file it as a ticket and open the PR (record `[filed <ticket ID>]`, and say the owner chose this);
   - any other finding still open is filed as a ticket, listed in the record, and the PR goes ahead.
 - New work after round 2 goes in a new PR.
 - Review fixes are new commits on the same branch and PR, so the PR keeps its count.
-- A catch-up merge of `main` is clean when Git reported no conflicts and `git show --remerge-diff --format= <merge>` prints nothing. A clean merge needs no new round, but the full test gate still runs on the new head.
-- Any other catch-up merge counts as resolved conflicts. Run the catch-up set on its remerge diff: the security critic, the correctness critic, and every reviewer whose area the conflicted files touch. That is round 2 if round 2 is unused; if both rounds are used, it is a decision for the owner. Then update the open PR's `## Review` record (`gh pr edit N --body-file <file>`): `Rounds: 2`, and the new findings in the table and the finding lines.
+- A catch-up merge is clean when both hold:
+  - it has exactly two parents, and the second is already on `main` (`git merge-base --is-ancestor <merge>^2 origin/main`);
+  - `git show --remerge-diff --format= <merge>` exits 0 and prints nothing. This needs Git 2.36 or later. If the command fails, the merge is not clean.
+- A clean merge needs no new round, but the full test gate still runs on the new head.
+- Any other merge on the branch is not clean. Round 1 covers one made before round 1. For one made after round 1, run the catch-up set on its remerge diff: the security critic, the correctness critic, and every reviewer whose area the conflicted files touch. That is round 2 if round 2 has not run yet; if it has, it is a decision for the owner. Then update the open PR's `## Review` record (`gh pr edit N --body-file <file>`): `Rounds: 2`, and the new findings in the table and the finding lines.
+- The record names every merge on the branch that is not clean, whichever round reviewed it, in one `Merges reviewed: <sha>, <sha>` line. The coordinator checks it before merging.
 - Only the owner, in their own words in chat, can allow a third round. The record then says so (see below).
 
 ## After the reviews
@@ -67,6 +71,7 @@ Rounds: 1
 ```
 
 - **Rounds** is `1` or `2`: how many rounds of review ran. The table and the finding lines count every round, so the totals match. A third round needs an `Owner allowed round 3: <when and where they said so>` line.
+- **Merges reviewed** is there only when the branch has a merge that is not clean (see the rounds rule). It lists each such merge's sha.
 - **Model** names Opus, Sonnet or Haiku.
 - **Findings** is a whole number; `0` when there are none.
 - **Disposition** sums the finding lines, such as `2 fixed, 1 declined`; `none` when Findings is `0`.

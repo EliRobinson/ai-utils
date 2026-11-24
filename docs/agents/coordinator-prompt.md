@@ -39,7 +39,10 @@ Before an agent starts, add a row for its item to the ownership registry at `~/.
 
 No merge unless Eli types "merge N" in chat. Each "merge N" covers that one PR. When they do:
 
-1. `git fetch origin`. The branch must be 0 commits behind `origin/main`. If it is behind, have its agent catch up on the same branch, as `docs/agents/git-workflow.md` says: merge `origin/main` into it and push normally, never force push. Then check each merge commit on the branch (`git log --merges --format=%H origin/main..<head>`): `git show --remerge-diff --format= <merge>` must print nothing, or the `## Review` record must show the round 2 that `docs/agents/review-gate.md` asks for after resolved conflicts. If both rounds were already used, it is a decision for Eli. The same PR and the same "merge N" still apply.
+1. `git fetch origin`. The branch must be 0 commits behind `origin/main`. If it is behind, have its agent catch up on the same branch, as `docs/agents/git-workflow.md` says: merge `origin/main` into it and push normally, never force push. The same PR and the same "merge N" still apply. Then check its merge commits:
+   - List them on the PR head: `git log --merges --format=%H origin/main..origin/<branch>`.
+   - Each must be clean as `docs/agents/review-gate.md` defines it, or be named on the record's `Merges reviewed:` line.
+   - If one is neither, have `pr-finisher` run the catch-up set from `docs/agents/review-gate.md` and update the record, then start again at step 1. If both rounds were already used, it is a decision for Eli.
 2. The PR body has a complete `## Review` record: a row for every reviewer in the gate, none on Fable, every finding fixed, declined with a reason, or filed.
 3. The full test gate (`python3 scripts/validate-plugins.py`) must have passed on the exact head sha. A pass on an older head does not count. CI is off on this repo, so run the gate yourself on the head you merge.
 4. Take the merge lock, so no other session merges at the same time: `mkdir "$HOME/.claude/projects/<project-slug>/merge-lock"`. It fails while another session holds it; wait and try again. If it stays held for a long time, ask Eli before you remove it. Remove it yourself when you are done, even if the merge fails.

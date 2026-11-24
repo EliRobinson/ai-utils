@@ -105,6 +105,11 @@ GUARDRAILS = SETUP_SKILL / "templates" / "agents-guardrails.md"
 MULTI_AGENT = SETUP_SKILL / "templates" / "docs-agents" / "multi-agent.md"
 GIT_WORKFLOW = SETUP_SKILL / "templates" / "docs-agents" / "git-workflow.md"
 REVIEW_GATE = SETUP_SKILL / "templates" / "docs-agents" / "review-gate.md"
+RULESET = SETUP_SKILL / "templates" / "github-main-ruleset.json"
+SETUP_SKILL_MD = SETUP_SKILL / "SKILL.md"
+PR_FINISHER = AGENT_ROSTER / "agents" / "pr-finisher.md"
+REPO_AGENTS_MD = ROOT / "AGENTS.md"
+REPO_COORDINATOR_PROMPT = ROOT / "docs" / "agents" / "coordinator-prompt.md"
 ASKS_BOARD_SKILL = ROOT / "plugins" / "asks-board" / "skills" / "asks-board" / "SKILL.md"
 PLACEHOLDER = re.compile(r"\{\{([A-Z_]+)\}\}")
 LEADING_COMMENT = re.compile(r"\A<!--(.*?)-->", re.S)
@@ -365,9 +370,6 @@ def check_accessibility_agents() -> None:
     check_retired_a11y_names()
 
 
-REPO_AGENTS_MD = ROOT / "AGENTS.md"
-REPO_COORDINATOR_PROMPT = ROOT / "docs" / "agents" / "coordinator-prompt.md"
-RULESET = SETUP_SKILL / "templates" / "github-main-ruleset.json"
 # The dropped branch rule (#2): a new `-r2` branch and PR when main moves,
 # and "rebase, never merge main in". It must not come back in any doc.
 OLD_BRANCH_RULE = re.compile(
@@ -380,12 +382,15 @@ BRANCH_RULE_LINE = ("- Never force push. Keep one branch and one PR. Catch up wi
 # The key terms each rule file must keep (lowercase). A template and its
 # filled copy share one list.
 GUARDRAIL_TERMS = ["keep one branch and one pr", "never force push", "git merge origin/main"]
-COORDINATOR_TERMS = ["catch up on the same branch", "--remerge-diff"]
+CLEAN_MERGE_CHECK = "git show --remerge-diff --format= <merge>"
+COORDINATOR_TERMS = ["catch up on the same branch", "git log --merges --format=%h origin/main..origin/<branch>",
+                     "merges reviewed:"]
 BRANCH_RULE_TERMS = {
     GUARDRAILS: GUARDRAIL_TERMS,
     REPO_AGENTS_MD: GUARDRAIL_TERMS,
     GIT_WORKFLOW: ["keep the same branch and the same pr", "never force push", "git merge origin/main"],
-    REVIEW_GATE: ["--remerge-diff"],
+    REVIEW_GATE: [CLEAN_MERGE_CHECK, "merges reviewed:"],
+    PR_FINISHER: [CLEAN_MERGE_CHECK],
     COORDINATOR_PROMPT: COORDINATOR_TERMS,
     REPO_COORDINATOR_PROMPT: COORDINATOR_TERMS,
 }
@@ -393,8 +398,6 @@ MERGE_STYLES = ("merge", "squash", "rebase")
 MERGE_STYLE_LINE = re.compile(r"^- \*\*Merge style:\*\* `([a-z]+)`$", re.M)
 # The repo merge flag that turns on each style.
 MERGE_FLAGS = {"merge": "allow_merge_commit", "squash": "allow_squash_merge", "rebase": "allow_rebase_merge"}
-# The style the ruleset template and the setup's PATCH command default to.
-DEFAULT_MERGE_STYLE = "squash"
 
 
 def check_old_branch_rule_gone() -> None:
@@ -416,22 +419,33 @@ def check_branch_rule_stated() -> None:
             fail(f"{rel(agent)}: must carry the branch rule word for word: {BRANCH_RULE_LINE!r}")
 
 
-def check_default_merge_style() -> None:
-    """The ruleset template and the setup's PATCH command both set the default style, and only it."""
+def default_merge_style() -> str | None:
+    """The one style the ruleset template allows: the default setup ships."""
     ruleset = load_json(RULESET) or {}
     methods = [rule.get("parameters", {}).get("allowed_merge_methods")
                for rule in ruleset.get("rules", []) if rule.get("type") == "pull_request"]
-    if methods != [[DEFAULT_MERGE_STYLE]]:
-        fail(f"{rel(RULESET)}: the pull_request rule must allow only {DEFAULT_MERGE_STYLE!r} merges")
-    setup = read_or_fail(SETUP_SKILL / "SKILL.md") or ""
-    patch = [line for line in setup.splitlines() if line.startswith("gh api -X PATCH repos/{owner}/{repo} ")]
-    wanted = {f"-F {flag}={'true' if style == DEFAULT_MERGE_STYLE else 'false'}" for style, flag in MERGE_FLAGS.items()}
+    if len(methods) != 1 or not isinstance(methods[0], list) or len(methods[0]) != 1 \
+            or methods[0][0] not in MERGE_STYLES:
+        fail(f"{rel(RULESET)}: the pull_request rule must allow exactly one of {MERGE_STYLES}")
+        return None
+    return methods[0][0]
+
+
+def check_setup_patch(default: str) -> None:
+    """The setup's PATCH command turns on the default style, and only it."""
+    patch = [line for line in (read_or_fail(SETUP_SKILL_MD) or "").splitlines()
+             if line.startswith("gh api -X PATCH repos/{owner}/{repo} ")]
+    wanted = {f"-F {flag}={'true' if style == default else 'false'}" for style, flag in MERGE_FLAGS.items()}
     if len(patch) != 1 or not all(part in patch[0] for part in wanted):
-        fail(f"{rel(SETUP_SKILL)}/SKILL.md: needs one PATCH command that sets {sorted(wanted)}")
+        fail(f"{rel(SETUP_SKILL_MD)}: needs one PATCH command that sets {sorted(wanted)}")
 
 
-def check_merge_style() -> None:
-    """The coordinator template uses the placeholder; this repo's filled copies name its own style."""
+def check_merge_style(default: str) -> None:
+    """The coordinator template uses the placeholder; this repo's filled copies name its own style.
+
+    docs/agents/git-workflow.md is a symlink to the template, so its Merge style
+    line is both this repo's style and the shipped default: it must match the ruleset.
+    """
     if "--{{MERGE_STYLE}} --match-head-commit" not in (read_or_fail(COORDINATOR_PROMPT) or ""):
         fail(f"{rel(COORDINATOR_PROMPT)}: merge step must use `gh pr merge N --{{{{MERGE_STYLE}}}}`")
     if "merge style: {{MERGE_STYLE}}." not in (read_or_fail(GUARDRAILS) or ""):
@@ -441,6 +455,9 @@ def check_merge_style() -> None:
         fail(f"{rel(GIT_WORKFLOW)}: needs one '- **Merge style:** `merge|squash|rebase`' line")
         return
     style = found[0]
+    if style != default:
+        fail(f"{rel(GIT_WORKFLOW)}: the Merge style line says {style!r}, but the ruleset template "
+             f"allows {default!r}; they must match")
     if f"--{style} --match-head-commit" not in (read_or_fail(REPO_COORDINATOR_PROMPT) or ""):
         fail(f"{rel(REPO_COORDINATOR_PROMPT)}: merge step must use --{style}, the style git-workflow.md sets")
     if f"merge style: {style}." not in (read_or_fail(REPO_AGENTS_MD) or ""):
@@ -451,8 +468,10 @@ def check_branch_rule() -> None:
     """The -r2 rule stays gone; the same-branch rule and the merge style are stated."""
     check_old_branch_rule_gone()
     check_branch_rule_stated()
-    check_default_merge_style()
-    check_merge_style()
+    default = default_merge_style()
+    if default:
+        check_setup_patch(default)
+        check_merge_style(default)
 
 
 VENDORED_SKILL = AGENT_ROSTER / "skills" / "thermo-nuclear-code-quality-review"
