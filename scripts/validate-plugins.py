@@ -355,9 +355,21 @@ def check_a11y_setup_probe() -> None:
 
 
 def repo_docs(suffixes: set) -> list[Path]:
-    """The root README and the docs under plugins/ and docs/, without changelogs, which keep history."""
+    """The root README and the docs under plugins/ and docs/, without changelogs, which keep history.
+
+    Each file comes once: a symlink (docs/agents has some) and its target count as one.
+    """
     paths = [ROOT / "README.md", *ROOT.glob("plugins/**/*"), *ROOT.glob("docs/**/*")]
-    return sorted(p for p in paths if p.is_file() and p.suffix in suffixes and p.name != "CHANGELOG.md")
+    found = sorted(p for p in paths if p.is_file() and p.suffix in suffixes and p.name != "CHANGELOG.md")
+    unique: dict[Path, Path] = {}
+    for path in found:
+        unique.setdefault(path.resolve(), path)
+    return list(unique.values())
+
+
+def rule_docs() -> list[Path]:
+    """AGENTS.md and the repo's .md docs, each file once."""
+    return list({p.resolve(): p for p in [REPO_AGENTS_MD, *repo_docs({".md"})]}.values())
 
 
 def check_retired_a11y_names() -> None:
@@ -408,8 +420,7 @@ MERGE_FLAGS = {"merge": "allow_merge_commit", "squash": "allow_squash_merge", "r
 
 
 def check_old_branch_rule_gone() -> None:
-    paths = {p.resolve(): p for p in [REPO_AGENTS_MD, *repo_docs({".md"})]}  # docs/agents has symlinks
-    for path in paths.values():
+    for path in rule_docs():
         fail_matching_lines(path, path.read_text(encoding="utf-8"), OLD_BRANCH_RULE,
                             "brings back the dropped -r2 / rebase-only branch rule; state the same-branch "
                             "rule in templates/docs-agents/git-workflow.md instead")
@@ -454,17 +465,18 @@ def check_setup_patch(default: str) -> None:
         fail(f"{rel(SETUP_SKILL_MD)}: needs one PATCH command that sets {sorted(wanted)}")
 
 
-def setting_value(name: str, workflow: str):
+def setting_value(name: str, workflow: str) -> str | None:
     """The value of the one `- **<name>:** `x`` line in git-workflow.md, or None."""
     found = re.findall(rf"^- \*\*{re.escape(name)}:\*\* `([^`]*)`$", workflow, re.M)
     return found[0] if len(found) == 1 else None
 
 
-def setting_problems(name: str, allowed: tuple, default: str, workflow: str, agents_md: str) -> list[tuple[Path, str]]:
+def setting_problems(name: str, allowed: tuple[str, ...], default: str, source: str, workflow: str,
+                     agents_md: str) -> list[tuple[Path, str]]:
     """Problems with a setting line in git-workflow.md, and with AGENTS.md naming the same value once.
 
     docs/agents/git-workflow.md is a symlink to the template, so its line is
-    both this repo's setting and the shipped default.
+    both this repo's setting and the shipped default. `source` says where the default comes from.
     """
     value = setting_value(name, workflow)
     if value not in allowed:
@@ -472,17 +484,20 @@ def setting_problems(name: str, allowed: tuple, default: str, workflow: str, age
     out = []
     if value != default:
         out.append((GIT_WORKFLOW, f"the {name} line says {value!r}. This file is the shipped template, "
-                                  f"which must say {default!r}. Set it back to {default!r}."))
+                                  f"which must say {default!r} ({source}). Set it back to {default!r}."))
     named = [n.lower() for n in re.findall(rf"{re.escape(name)}: (\w+)\.", agents_md, re.I)]
     if named != [value]:
         out.append((REPO_AGENTS_MD, f"must say \"{name}: {value}.\" exactly once, the value git-workflow.md sets"))
     return out
 
 
-def fail_setting(name: str, allowed: tuple, default: str) -> None:
-    for path, problem in setting_problems(name, allowed, default, read_or_fail(GIT_WORKFLOW) or "",
-                                          read_or_fail(REPO_AGENTS_MD) or ""):
+def fail_setting(name: str, allowed: tuple[str, ...], default: str, source: str) -> str | None:
+    """Report the setting's problems; return its value, or None when the line is not valid."""
+    workflow = read_or_fail(GIT_WORKFLOW) or ""
+    for path, problem in setting_problems(name, allowed, default, source, workflow, read_or_fail(REPO_AGENTS_MD) or ""):
         fail(f"{rel(path)}: {problem}")
+    value = setting_value(name, workflow)
+    return value if value in allowed else None
 
 
 def check_merge_style(default: str) -> None:
@@ -492,9 +507,8 @@ def check_merge_style(default: str) -> None:
         fail(f"{rel(COORDINATOR_PROMPT)}: merge step must use `gh pr merge N --{{{{MERGE_STYLE}}}}`")
     if "merge style: {{MERGE_STYLE}}." not in (read_or_fail(GUARDRAILS) or ""):
         fail(f"{rel(GUARDRAILS)}: must say \"merge style: {{{{MERGE_STYLE}}}}.\"")
-    fail_setting("Merge style", MERGE_STYLES, default)
-    style = setting_value("Merge style", read_or_fail(GIT_WORKFLOW) or "")
-    if style in MERGE_STYLES and f"--{style} --match-head-commit" not in (read_or_fail(REPO_COORDINATOR_PROMPT) or ""):
+    style = fail_setting("Merge style", MERGE_STYLES, default, "the style the ruleset template allows")
+    if style and f"--{style} --match-head-commit" not in (read_or_fail(REPO_COORDINATOR_PROMPT) or ""):
         fail(f"{rel(REPO_COORDINATOR_PROMPT)}: merge step must use --{style}, the style git-workflow.md sets")
 
 
@@ -534,17 +548,21 @@ MERGE_POLICIES = ("ask", "auto")
 DEFAULT_MERGE_POLICY = "ask"
 READS_MERGE_POLICY = "git show origin/main:docs/agents/git-workflow.md"
 MERGE_ASK_IN_CHAT = "ask for \"merge n\" in this chat only, never on the board"
-MERGE_POLICY_TERMS = {
-    GUARDRAILS: ["merge policy: {{merge_policy}}.", "a request for \"merge n\" goes in the coordinator chat only"],
-    COORDINATOR_PROMPT: [READS_MERGE_POLICY, MERGE_ASK_IN_CHAT],
-    REPO_COORDINATOR_PROMPT: [READS_MERGE_POLICY, MERGE_ASK_IN_CHAT],
+MERGE_IN_CHAT_GUARDRAIL = "a request for \"merge n\" goes in the coordinator chat only"
+MERGE_POLICY_COORDINATOR_TERMS = [READS_MERGE_POLICY, MERGE_ASK_IN_CHAT, "what `auto` never covers"]
+MERGE_POLICY_TERMS = {  # a template and its filled copy share one list
+    GUARDRAILS: ["merge policy: {{merge_policy}}.", MERGE_IN_CHAT_GUARDRAIL],
+    REPO_AGENTS_MD: [MERGE_IN_CHAT_GUARDRAIL],
+    COORDINATOR_PROMPT: MERGE_POLICY_COORDINATOR_TERMS,
+    REPO_COORDINATOR_PROMPT: MERGE_POLICY_COORDINATOR_TERMS,
     GIT_WORKFLOW: [READS_MERGE_POLICY, "what `auto` never covers", "bash(gh pr merge *--admin*)"],
     ROUTE_WORK: ["the one exception is \"merge n\""],
     SETUP_SKILL_MD: ["## change the merge policy", "never add it for them"],
     ASKS_BOARD_SKILL: ["never add a merge ask"],
 }
 # Wording that puts a merge ask on the board: the phrasings before #24, or a line
-# naming the board and "merge N" that does not say never, except or not.
+# naming the board and "merge N" that does not say never, except or not. A word
+# list is a heuristic; the MergeOnBoard test table pins what it lets through.
 MERGE_ON_BOARD = re.compile(
     r'including "merge N" requests|in chat to merge PR'
     r"|^(?!.*\b(never|except|exception|not)\b).*(board.*merge (N|\d+)\b|\bmerge (N|\d+)\b.*board)",
@@ -553,8 +571,8 @@ MERGE_ON_BOARD = re.compile(
 
 def check_merge_policy() -> None:
     check_terms(MERGE_POLICY_TERMS, "merge policy")
-    fail_setting("Merge policy", MERGE_POLICIES, DEFAULT_MERGE_POLICY)
-    for path in {p.resolve(): p for p in [REPO_AGENTS_MD, *repo_docs({".md"})]}.values():  # docs/agents has symlinks
+    fail_setting("Merge policy", MERGE_POLICIES, DEFAULT_MERGE_POLICY, "the safe default")
+    for path in rule_docs():
         fail_matching_lines(path, path.read_text(encoding="utf-8"), MERGE_ON_BOARD,
                             "puts a merge ask on the Asks board; merge asks go in the coordinator chat")
 

@@ -6,7 +6,7 @@ One page for everything your Claude chats need from you.
 - You tick it, press an option, press "Not needed" or leave a note.
 - The page sends a comment to Claude. One chat, the **Board Router**, watches the board and forwards the ping to the chat that asked, by session id. That wakes the chat even if it is closed.
 - The chat acts, closes the row and replies in the thread. A row shows as Closed only when its status is `closed`. Each click clears the chat's old `ackAt`, so a new answer is never hidden.
-- A merge is never an ask. A chat asks you to type "merge N" in the chat itself, because the board cannot merge and a click there is not approval.
+- A merge never goes on the board. A chat asks you to type "merge N" in the chat itself, because the board cannot merge and a click there is not approval.
 
 To get a fixed board page after a change merges, republish `board-template.html` as the `asks-board` skill's "Changing this skill or the board page" section says. Rows an older page left with an `ackAt` but not `closed` then show under "Done waiting for the chat"; the owning chat's next check-in closes them (see "A row needs you" in the `asks-board` skill). Rows of a chat that no longer checks in stay there for now.
 

@@ -62,15 +62,21 @@ This line says who decides that a PR merges: `ask` or `auto`. The setup skill wr
 - `ask` (the default): the coordinator merges PR N only after the owner types "merge N" in chat. It asks for that in chat, never on the Asks board: the board cannot merge, and a click there is not approval.
 - `auto`: the coordinator merges a ready PR on its own, through every one of its merge steps: up to date with `main`, review record complete, test gate and CI passed on the exact head sha, merge lock, `--match-head-commit`. It never forces and never bypasses a hook. It tells the owner the head sha after each merge.
 
-**How the coordinator reads it.** Before each merge it runs `git fetch origin` and reads this line and the `AGENTS.md` bullet as they are on `origin/main` (`git show origin/main:docs/agents/git-workflow.md`; if that prints only a path, the file is a symlink, so read the path it names the same way). It never reads them from a working tree or a PR's branch, so a local edit or the PR being merged cannot change the policy. The policy is `auto` only when both say `auto`. Anything else is `ask`: no line, two lines, another value, or the two files disagreeing.
+**How the coordinator reads it.** Before each merge it runs `git fetch origin` and reads this line and the `AGENTS.md` bullet as they are on `origin/main` (`git show origin/main:docs/agents/git-workflow.md` and `git show origin/main:AGENTS.md`; if either prints only a path, that file is a symlink, so read the path it names the same way). It never reads them from a working tree or a PR's branch, so a local edit or the PR being merged cannot change the policy. The policy is `auto` only when each file has exactly one policy line and both say `auto`. Anything else is `ask`: no line, two lines, another value, or the two files disagreeing. Needing both files is deliberate: one stray edit cannot turn `auto` on.
 
-**What `auto` never covers.** Even under `auto`, the coordinator asks for "merge N" in chat, as under `ask`, for:
+**What `auto` never covers.** Even under `auto`, the coordinator asks for "merge N" in chat, as under `ask`, and says in a few words why (for example "it changes workflow files"), for:
 
-- a PR that changes the workflow itself: any file under `.claude/`, `.github/` or `docs/agents/`, `AGENTS.md`, `CLAUDE.md`, or a hook script (`scripts/*hook*`). So a PR that changes the merge policy always waits for the owner;
-- a PR that its own agents did not open, or that has no row in the ownership registry, such as one from an outside contributor;
-- a draft PR, and a PR the owner said "hold N" about in chat.
+- a PR that changes the workflow or its checks. The coordinator lists the files with `git diff --name-only --no-renames origin/main...<sha>`, on the exact head sha it tests and merges, so both sides of a rename show. These are:
+  - any file under `.claude/`, `.github/` or `docs/agents/`, `AGENTS.md`, `CLAUDE.md`, or a hook script (`scripts/*hook*`);
+  - git hook config: `.husky/`, `.githooks/`, `.pre-commit-config.yaml`, `lefthook.yml`;
+  - the test gate: the files that define the test gate command in the coordinator prompt (such as the `package.json` scripts or the test runner's config);
+  - the target of any of these paths that is a symlink on `origin/main`.
 
-**Auto mode and the permission rule.** Claude Code's auto mode classifier blocks a merge no human has approved (its "Merge Without Review" rule), and an agent's review record does not count as a human. So under `auto` the owner adds a permission rule themselves, in the main checkout's `.claude/settings.local.json`. No agent edits settings for them. Use `owner/name` for this repo:
+  So a PR that changes the merge policy always waits for the owner. If the file list cannot be read, the PR is not covered;
+- a PR its own agents did not open: it has no row in the ownership registry, or `gh pr view N --json isCrossRepository,author` shows a fork or an author other than the owner's `gh` login;
+- a draft PR, and a PR on hold. When the owner says "hold N" in chat, the coordinator writes `hold` in that PR's registry row, so a new coordinator chat sees it too. The hold ends when the owner types "merge N".
+
+**Auto mode and the permission rule.** Claude Code's auto mode classifier blocks a merge no human has approved (its "Merge Without Review" rule), and an agent's review record does not count as a human. So under `auto` the owner adds a permission rule themselves, in the main checkout's `.claude/settings.local.json`. No agent edits settings for them. Add these entries to the `allow` and `deny` lists there, creating the file if it is missing; do not replace what is already in it. Use `owner/name` for this repo:
 
 ```json
 {
@@ -81,11 +87,11 @@ This line says who decides that a PR merges: `ask` or `auto`. The setup skill wr
 }
 ```
 
-The allow rule fits only the coordinator's own merge command, for this repo, with the tested head named. The deny rules keep `--admin` (which skips branch protection) and `--auto` (which merges later, after the checks) blocked under either policy. Do not put the allow rule in `~/.claude/settings.json`: it would also lift the classifier's check in every repo on `ask`. The review gate hook still runs before every merge. If `autoMode.classifyAllShell` is `true`, auto mode ignores the allow rule.
+The allow rule fits only this repo's merge command with the tested head named. It does not limit which agent runs it, so only the coordinator ever runs `gh pr merge`. The deny rules keep `--admin` (which skips branch protection) and `--auto` (which merges later, after the checks) blocked; they are worth adding under `ask` too. Do not put the allow rule in `~/.claude/settings.json`: it would also lift the classifier's check in every repo on `ask`. The review gate hook still runs before every merge. If `autoMode.classifyAllShell` is `true`, auto mode ignores the allow rule.
 
-**When auto mode blocks a merge.** The coordinator stops and tells the owner in chat, in one message: the PR, the rule above, and the file it goes in. The owner either adds the rule and says "retry N", or types "merge N" to approve that one PR. The coordinator never edits settings and never retries the merge another way.
+**When auto mode blocks a merge.** The coordinator stops and tells the owner in chat, in one message: the PR, the rule above, and that the entries go in the main checkout's `.claude/settings.local.json`. The owner either adds them and says "retry N", or types "merge N" to approve that one PR. Either way the coordinator starts the merge steps again from step 1 on the current head. It never edits settings and never retries the merge another way.
 
-**To change the policy,** the owner asks a coordinator in their own words. The `setup-agentic-workflow` skill's "Change the merge policy" section does it. A coordinator started from the agent-roster 1.12.0 prompt or later reads the policy before each merge, so the change applies from the next merge without a restart. An older coordinator chat does not read it: start a new one.
+**To change the policy,** the owner asks a coordinator in their own words. The `setup-agentic-workflow` skill's "Change the merge policy" section does it. When the policy goes back to `ask`, the owner removes the allow rule above (the deny rules can stay). A coordinator started from the agent-roster 1.12.0 prompt or later reads the policy before each merge, so the change applies from the next merge without a restart. An older coordinator chat does not read it: start a new one.
 
 ## What is enforced, and what is a rule
 

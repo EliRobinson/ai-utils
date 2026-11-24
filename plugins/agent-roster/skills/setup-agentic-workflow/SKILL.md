@@ -1,6 +1,6 @@
 ---
 name: setup-agentic-workflow
-description: Use when the user wants to set up their agent workflow in a repo or a new coordinator chat, for example "set up agent workflow", "set up worktrees and the review gate here", "add agent rules to this repo", "onboard this coordinator", "use Spotlight (or Linear, Jira) for tickets", "change the merge policy", "let the coordinator merge on its own", or when starting a new repo that agents will work in. Sets up the worktree and branch rules, the ticketing tool setting, the merge policy (always ask, or auto-merge), the review gate and its reviewer skills, the Asks board link, and the coordinator prompt. In a coordinator chat this is the one job the chat does itself, because the agents and rules it installs may not exist yet.
+description: Use when the user wants to set up their agent workflow in a repo or a new coordinator chat, for example "set up agent workflow", "set up worktrees and the review gate here", "add agent rules to this repo", "onboard this coordinator", "use Spotlight (or Linear, Jira) for tickets", "change the merge policy", "let the coordinator merge on its own", or when starting a new repo that agents will work in. Sets up the worktree and branch rules, the ticketing tool setting, the merge policy (always ask, or the coordinator merges on its own), the review gate and its reviewer skills, the Asks board link, and the coordinator prompt. In a coordinator chat this is the one job the chat does itself, because the agents and rules it installs may not exist yet.
 ---
 
 # Set up the agentic workflow
@@ -91,7 +91,7 @@ Ask one question. Show two names and let the owner correct them in the same answ
   - If only `rebase` is allowed (every repo set up before agent-roster 1.9.0), recommend `squash`, with the reason from that same section.
   - If the owner picks `merge`, say it drops the linear-history rule.
   - The owner may pick any of the three.
-- the merge policy, asked in plain words: "Should I wait for you to type `merge N` before each merge, or merge a PR myself once its review and checks pass? I recommend waiting (`ask`)." The full rule is the **Merge policy** section of `templates/docs-agents/git-workflow.md`.
+- the merge policy, asked in plain words: "Should I wait for you to type `merge N` before each merge (`ask`, what I recommend), or merge a PR myself once its review and checks pass (`auto`)? With `auto` you add one permission rule yourself, and PRs that change the workflow files still wait for you." The full rule is the **Merge policy** section of `templates/docs-agents/git-workflow.md`.
   - `ask`: the coordinator merges PR N only after the owner types "merge N" in chat. It asks in chat, never on the Asks board.
   - `auto`: the coordinator merges a ready PR on its own, through every merge step. PRs that change the workflow files still wait for "merge N", as that section lists.
   - If the owner picks `auto`, say that Claude Code's auto mode blocks a merge no human has approved, so the owner adds a permission rule themselves (step 10 gives it). Until they do, the coordinator stops at each merge and tells them in chat.
@@ -197,7 +197,7 @@ Finish with a short report:
 - the ticketing tool: its name, access (`cli` or `mcp`), and any action left `<not set>`;
 - the PR link (option A);
 - the Asks board: its link, and whether this project has a route;
-- the merge policy. For `auto`, give the owner the permission rule from the **Merge policy** section of `templates/docs-agents/git-workflow.md`, word for word with this repo's `owner/name`, and say it goes in the main checkout's `.claude/settings.local.json`. Never add it for them, and never suggest `~/.claude/settings.json`;
+- the merge policy. For `auto`, give the owner the permission rule from the **Merge policy** section of `templates/docs-agents/git-workflow.md`, word for word with this repo's `owner/name`, and say its entries are added to the `allow` and `deny` lists in the main checkout's `.claude/settings.local.json`, without replacing what is there. Never add it for them, and never suggest `~/.claude/settings.json`. A coordinator chat started before agent-roster 1.12.0 does not read the policy; start a new one;
 - the reviewer skills and the `accessibility-agents` plugin: which are ready and which are missing, and whether page scans can run;
 - `docs/agents/coordinator-prompt.md`: paste it as the first message of a new chat to start a coordinator, after filling in the job. Name that chat exactly as the board's route says (`<Repo name> Coordinator`). When it starts, it sets its `sessionId` on the route and adds a test ask, so the owner can check the ping;
 - for option A: delete the registry row when the setup PR merges;
@@ -211,8 +211,8 @@ When the owner asks, in their own words in this chat, to change the merge policy
 2. If `docs/agents/git-workflow.md` is a symlink into a plugin's shipped template (as in the repo that publishes agent-roster), stop. That line is also the default every other repo gets, so it stays `ask`. Tell the owner, and change nothing.
 3. File a ticket with the title "Change the merge policy to `<value>`", as step 5 does, and work in a new worktree on branch `<username>/<ticket>/merge-policy`, off `origin/main`. The owner's request is their yes to that one ticket.
 4. Change the **Merge policy** line in `docs/agents/git-workflow.md`, and the policy named in the `AGENTS.md` merge bullet ("**Merge policy: <value>.**"). Change nothing else.
-5. Commit, take the branch through the review gate, push and open the PR, as step 9 says for option A. It changes the workflow files, so it waits for the owner's "merge N" under either policy. For a change to `auto`, the coordinator's ask says so: "PR N turns on auto-merge. Type `merge N` to merge it."
-6. Report: the PR link, and for `auto`, the permission rule as step 10 gives it, for the owner to add themselves. The change applies from the next merge after this PR merges; a coordinator chat started before agent-roster 1.12.0 does not read the policy, so start a new one.
+5. Commit, take the branch through the review gate, push and open the PR, as step 9 says for option A. It changes the workflow files, so it waits for the owner's "merge N" under either policy. For a change to `auto`, the coordinator's ask says so: "PR N lets the coordinator merge ready PRs on its own. Type `merge N` to merge it."
+6. Report: the PR link; for `auto`, the permission rule as step 10 gives it, for the owner to add themselves; for `ask`, that the owner removes the allow rule from `.claude/settings.local.json` if they added it (the deny rules can stay). The change applies from the next merge after this PR merges; a coordinator chat started before agent-roster 1.12.0 does not read the policy, so start a new one.
 
 ## Checklist
 
