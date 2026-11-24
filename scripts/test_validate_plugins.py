@@ -359,6 +359,69 @@ class UnitTestRule(unittest.TestCase):
             self.assertEqual(vp.problems, [])
 
 
+A11Y_TOOL = vp.A11Y_PREFIX + "get_specialist"
+WORK_TOOLS = "Read, Edit, Write, Grep, Glob, Bash, Skill"
+READ_TOOLS = "Read, Grep, Glob, Bash"
+
+
+class AgentToolProblems(unittest.TestCase):
+    """agent_tool_problems keeps every agent on a tools: allow-list with no tracker named."""
+
+    PASSING = [
+        ("work agent with file tools", "implementer-engine", {"tools": WORK_TOOLS}),
+        ("read-only agent without file tools", "correctness-critic", {"tools": READ_TOOLS}),
+        ("read-only agent with accessibility tools", "accessibility-critic",
+         {"tools": f"{READ_TOOLS}, {A11Y_TOOL}"}),
+    ]
+    FAILING = [
+        ("no tools line", "lookup", {}, "no `tools:` allow-list"),
+        ("blank tools line", "lookup", {"tools": " "}, "no `tools:` allow-list"),
+        ("deny-list instead of allow-list", "implementer-engine",
+         {"tools": WORK_TOOLS, "disallowedTools": "NotebookEdit"}, "disallowedTools"),
+        ("tracker tool named", "ticket-writer",
+         {"tools": f"{READ_TOOLS}, mcp__tracker__get_ticket"}, "mcp__tracker__get_ticket"),
+        ("whole MCP server named", "implementer-engine", {"tools": f"{WORK_TOOLS}, mcp__tracker__*"},
+         "mcp__tracker__*"),
+        ("read-only agent with Edit", "spec-critic", {"tools": f"{READ_TOOLS}, Edit"}, "holds Edit"),
+        ("read-only agent with Write", "lookup", {"tools": f"{READ_TOOLS}, Write"}, "holds Write"),
+        ("read-only agent with NotebookEdit", "researcher", {"tools": "Read, NotebookEdit"},
+         "holds NotebookEdit"),
+    ]
+
+    def test_allowed_tool_sets_pass(self):
+        for label, name, fields in self.PASSING:
+            with self.subTest(label):
+                self.assertEqual(vp.agent_tool_problems(name, fields), [])
+
+    def test_each_problem_is_named(self):
+        for label, name, fields, needle in self.FAILING:
+            with self.subTest(label):
+                found = vp.agent_tool_problems(name, fields)
+                self.assertTrue(any(needle in p for p in found), found)
+
+
+class TrackerNeutralAgents(unittest.TestCase):
+    def test_repo_agents_and_docs_pass(self):
+        with mock.patch.object(vp, "problems", []):
+            vp.check_tracker_neutral_agents()
+            self.assertEqual(vp.problems, [])
+
+    def test_every_read_only_agent_exists(self):
+        names = {p.stem for p in (vp.AGENT_ROSTER / "agents").glob("*.md")}
+        self.assertEqual(vp.READ_ONLY_AGENTS - names, set())
+
+    def test_agent_without_the_tracker_line_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            agent = root / "plugins" / "agent-roster" / "agents" / "lookup.md"
+            agent.parent.mkdir(parents=True)
+            agent.write_text(f"---\nname: lookup\ntools: {READ_TOOLS}\n---\n\nNo ticket rule here.\n")
+            with mock.patch.multiple(vp, ROOT=root, AGENT_ROSTER=root / "plugins" / "agent-roster",
+                                     TRACKER_POINTERS={}, problems=[]):
+                vp.check_tracker_neutral_agents()
+                self.assertTrue(any("ticketing tool line" in p for p in vp.problems), vp.problems)
+
+
 class SelfChecks(unittest.TestCase):
     def run_without_node(self, env: dict) -> list[str]:
         with tempfile.TemporaryDirectory() as tmp:

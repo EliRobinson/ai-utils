@@ -509,6 +509,68 @@ def check_unit_test_rule() -> None:
     check_terms(UNIT_TEST_RULE_TERMS, "unit-test rule")
 
 
+# Tracker-neutral agents (#25). Every agent keeps a tools: allow-list: with none,
+# or with only disallowedTools, it would take every MCP tool in the session (mail,
+# payments, databases). The setup's tracker copies add the tracker's tools, so no
+# plugin agent names one. The agents below never write files.
+READ_ONLY_AGENTS = {
+    "accessibility-critic", "copy-critic", "correctness-critic", "design-critic", "dry-critic",
+    "security-critic", "spec-critic", "thermonuclear-reviewer", "lookup", "researcher",
+}
+FILE_WRITE_TOOLS = ("Edit", "Write", "NotebookEdit")
+TRACKER_USER_FILE = "~/.claude/agent-roster/issue-tracker.md"
+# Every agent carries this line word for word: where to find the tracker, and who may write.
+TRACKER_RULE_LINE = (
+    "- Before you touch a ticket, read the ticketing tool setting: the repo's `docs/agents/issue-tracker.md`, "
+    f"else `{TRACKER_USER_FILE}`, else the tool is GitHub Issues through `gh issue`. "
+    "Any agent may read tickets with its Search and View commands, and that counts as a read-only command. "
+    "Only `ticket-writer` and `pr-finisher` create, edit, comment on, label or close them."
+)
+SETUP_TRACKER_TERMS = [TRACKER_USER_FILE, "change ticketing tool", "tracker copies",
+                       "~/.claude/agents/agent-roster/", "never a `disallowedTools` list"]
+TRACKER_POINTERS = {
+    SETUP_SKILL_MD: SETUP_TRACKER_TERMS,
+    ROUTE_WORK: [TRACKER_USER_FILE, "## How agents find the tracker", "tracker copy"],
+    AGENT_ROSTER / "README.md": [TRACKER_USER_FILE, "change ticketing tool", "tracker copies"],
+    SETUP_SKILL / "templates" / "docs-agents" / "issue-tracker.md":
+        [TRACKER_USER_FILE, "only `ticket-writer` and `pr-finisher` create", "- **MCP prefix:**"],
+}
+
+
+def agent_tool_problems(name: str, fields: dict) -> list[str]:
+    """What is wrong with one agent's tool fields: no allow-list, a deny-list, a
+    non-accessibility MCP tool, or a file-writing tool on a read-only agent."""
+    tools = [t.strip() for t in fields.get("tools", "").split(",") if t.strip()]
+    found = []
+    if not tools:
+        found.append("has no `tools:` allow-list, so it would take every tool in the session, "
+                     "other MCP servers included")
+    if "disallowedTools" in fields:
+        found.append("sets disallowedTools; keep a `tools:` allow-list and let the setup's tracker copies "
+                     "add the tracker's tools")
+    for tool in tools:
+        if tool.startswith("mcp__") and not tool.startswith(A11Y_PREFIX):
+            found.append(f"names the MCP tool {tool}; agent files name no ticketing tool or other server, "
+                         "the setup's tracker copies add them")
+    if name in READ_ONLY_AGENTS:
+        found += [f"is read-only but holds {tool}" for tool in FILE_WRITE_TOOLS if tool in tools]
+    return found
+
+
+def check_tracker_neutral_agents() -> None:
+    for path in sorted(ROOT.glob("plugins/*/agents/*.md")):
+        text = read_or_fail(path) or ""
+        fields = frontmatter_fields(text)
+        if fields is None:
+            fail(f"{rel(path)}: {NO_FRONTMATTER}")
+            continue
+        for problem in agent_tool_problems(path.stem, fields):
+            fail(f"{rel(path)}: {problem}")
+        if path.parent == AGENT_ROSTER / "agents" and TRACKER_RULE_LINE not in text:
+            fail(f"{rel(path)}: must carry the ticketing tool line word for word: {TRACKER_RULE_LINE!r}")
+    check_terms(TRACKER_POINTERS, "ticketing tool setting")
+
+
 VENDORED_SKILL = AGENT_ROSTER / "skills" / "thermo-nuclear-code-quality-review"
 REMOVED_LINE = "disable-model-invocation: true"  # the last frontmatter key upstream
 PINNED_COMMIT = re.compile(r"^- Commit: `([0-9a-f]{40})`$", re.M)
@@ -741,6 +803,7 @@ def main() -> int:
     check_agent_roster_templates()
     check_branch_rule()
     check_unit_test_rule()
+    check_tracker_neutral_agents()
     check_vendored_thermonuclear()
     check_accessibility_agents()
     check_workflows()
