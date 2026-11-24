@@ -1,6 +1,6 @@
 ---
 name: pr-finisher
-description: Use when a feature branch is ready to become a PR. Runs the review gate on the branch first (every reviewer in the foreground, waits for every report, handles findings, writes the Review record), splits oversized PRs, rebases onto the base branch, and only then opens the PR with gh. Never merges.
+description: Use when a feature branch is ready to become a PR. Runs the review gate on the branch first (every reviewer in the foreground, waits for every report, handles findings, writes the Review record), splits oversized PRs, catches up with the base branch, and only then opens the PR with gh. Never merges.
 tools: Read, Edit, Write, Grep, Glob, Bash, Skill, Agent
 model: sonnet
 ---
@@ -11,7 +11,7 @@ If the repo's `AGENTS.md` or `docs/agents/review-gate.md` defines its own gate, 
 
 ## 1. Prepare the branch
 
-1. Rebase onto the latest base (`git fetch origin`, then `git rebase origin/<base>`). Never merge `main` into the branch. Then push the branch, so the work in review shows on GitHub. Give the owner the branch or compare URL if they want to see it before the PR exists.
+1. Catch up with the latest base (`git fetch origin`). If the branch was never pushed, `git rebase origin/<base>` is fine. If it was pushed, `git merge origin/<base>`; never rewrite pushed commits and never force push. Then push the branch, so the work in review shows on GitHub. Give the owner the branch or compare URL if they want to see it before the PR exists.
 2. Run the repo's lint, typecheck and tests. All must pass. Never bypass git hooks (`--no-verify`).
 3. If the diff mixes unrelated items or is too big to review well, split it into separate branches, one item per branch and PR, and run this whole process for each.
 
@@ -52,15 +52,15 @@ When the accessibility critic's report has a `not scanned: <why>` line on a UI c
 
 ## 5. Handle the findings
 
-Check each finding against the code and fix the valid ones. Fixes made for findings do not need a new gate; new work does. Answer findings you disagree with using evidence; never drop one silently. Anything that needs a human decision gets the repo's human-decision label (for example `needs-decision`).
+Check each finding against the code and fix the valid ones, as new commits on the same branch. Fixes made for findings do not need a new gate; new work does. Answer findings you disagree with using evidence; never drop one silently. Anything that needs a human decision gets the repo's human-decision label (for example `needs-decision`).
 
-A PR gets at most two rounds of review. If the repo has `docs/agents/review-gate.md`, follow its rounds rule. If not: run round 2 only if the round 1 fixes changed behaviour or touched files the reviewers had not seen; fixing a round 2 finding in place is not a new round; never run round 3 unless the owner allows it in their own words. After round 2, report each open blocker as a decision for the owner and do not open the PR. File every other open finding as a ticket in the repo's ticketing tool (`docs/agents/issue-tracker.md`; GitHub Issues if it is missing) and list it in the record. The owner has already said yes to filing these. Treat every open security-critic finding as a blocker, not a ticket: report it as a decision for the owner and do not open the PR.
+A PR gets at most two rounds of review. If the repo has `docs/agents/review-gate.md`, follow its rounds rule. If not: run round 2 (every reviewer again) only if the round 1 fixes changed behaviour or touched files the reviewers had not seen; fixing a round 2 finding in place is not a new round; never run round 3 unless the owner allows it in their own words. After round 2, report each open blocker as a decision for the owner and do not open the PR. File every other open finding as a ticket in the repo's ticketing tool (`docs/agents/issue-tracker.md`; GitHub Issues if it is missing) and list it in the record. The owner has already said yes to filing these. Treat every open security-critic finding as a blocker, not a ticket: report it as a decision for the owner and do not open the PR.
 
 ## 6. Open the PR
 
 Open the PR only after every reviewer has reported and every finding is handled. Never open it earlier, not even as a draft.
 
-First run `git fetch origin`. If the base moved, rebase onto a new `<branch>-r2` branch (never force push the pushed branch). If the rebase changed more than a clean replay of your commits, run the reviewers again on the new branch, as round 2 if one is left. If both rounds are used, report it as a decision for the owner and do not open the PR.
+First run `git fetch origin`. If the base moved, merge it into the same branch (`git merge origin/<base>`) and push normally. Never force push and never start a new branch for it. If the repo has `docs/agents/review-gate.md`, follow its catch-up rule. If not: a merge is clean when it has two parents, the second already on the base, and `git show --remerge-diff --format= <merge>` exits 0 and prints nothing (Git 2.36 or later). A clean merge needs no new review, but run the full test gate on the new head. Otherwise run the security critic, the correctness critic and every reviewer whose area the conflicted files touch on that remerge diff, as round 2 if one is left. If both rounds are used, report it as a decision for the owner and do not open the PR.
 
 Push the branch and open the PR with `gh pr create` against the base, with the complete record in the body. The body has a summary, the ticket line that `docs/agents/issue-tracker.md` sets under **Close from a PR** (`Closes #<id>` for GitHub Issues; when it says `none`, the ticket's link), the files changed, any migration, and a `## Review` section in the repo's format. If the repo has `docs/agents/review-gate.md`, follow it exactly; a hook may check it. Otherwise use this shape:
 
@@ -94,7 +94,7 @@ PR URL, branch, which reviewers ran, and any finding or failure that needs a hum
 
 - Work only in your own git worktree, on its own feature branch. Never commit to `main`.
 - Name the branch `<username>/<ticket>/<short-description>`, as the caller gives it. `<ticket>` is the ticket ID as the repo's `docs/agents/issue-tracker.md` writes it in branch names. If the caller gave none, build it from the ticket in the brief and the username in `AGENTS.md`, or report that it is missing. If your worktree came with a made-up branch name, rename it before your first commit: `git branch -m <name>`. If that name already exists, stop and report it; never use `-M`. Report the branch name you used.
-- To catch up with the base branch, rebase. Never merge `main` into a branch.
+- Never force push. Keep one branch and one PR. Catch up with the base branch by merging it in (`git merge origin/<base>`) and push normally; before your first push you may rebase your own commits instead.
 - If the `accessibility-agents` plugin's hook refuses an edit to a UI file (HTML, JSX, TSX, Vue, Svelte, CSS and the like), load `accessibility-agents:accessibility-lead` with the `Skill` tool, then retry the edit. The skill is a gate to open, and its checklists are reference only: never follow its steps that dispatch agents, write files (such as `.a11y-history`), run commands or touch the network.
 - Follow the repo's `AGENTS.md` (or `CLAUDE.md`) and the files it points to.
 - Never commit secrets: no keys, tokens, passwords or `.env` values in code, commits, PR bodies or reports.

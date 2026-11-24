@@ -2,9 +2,12 @@
 """Validate this repo's plugin marketplace.
 
 Checks the things that silently stop a plugin or skill from loading — a
-mangled frontmatter block, a manifest name that drifted from its marketplace
-entry, a ${CLAUDE_PLUGIN_ROOT} path left behind by a move. It also runs each skill's
-scripts/check-*.mjs self-check when node is installed.
+mangled frontmatter block, a manifest name, version or description that
+drifted from its marketplace entry, a ${CLAUDE_PLUGIN_ROOT} path left behind
+by a move. It also runs each skill's scripts/check-*.mjs self-check when node
+is installed, runs the unit tests in scripts/test_*.py, and checks the GitHub
+Actions workflows (rules in docs/agents/ci.md). It is the whole test gate,
+locally and in CI.
 
 Run from the repo root:
 
@@ -17,14 +20,18 @@ problem it found.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import unittest
 from pathlib import Path
 from typing import NamedTuple
+
+import workflow_rules  # scripts/workflow_rules.py, next to this file
 
 ROOT = Path(__file__).resolve().parent.parent
 MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
@@ -103,6 +110,13 @@ COORDINATOR_PROMPT = AGENT_ROSTER / "coordinator" / "coordinator-prompt.md"
 ROUTE_WORK = AGENT_ROSTER / "skills" / "route-work" / "SKILL.md"
 GUARDRAILS = SETUP_SKILL / "templates" / "agents-guardrails.md"
 MULTI_AGENT = SETUP_SKILL / "templates" / "docs-agents" / "multi-agent.md"
+GIT_WORKFLOW = SETUP_SKILL / "templates" / "docs-agents" / "git-workflow.md"
+REVIEW_GATE = SETUP_SKILL / "templates" / "docs-agents" / "review-gate.md"
+RULESET = SETUP_SKILL / "templates" / "github-main-ruleset.json"
+SETUP_SKILL_MD = SETUP_SKILL / "SKILL.md"
+PR_FINISHER = AGENT_ROSTER / "agents" / "pr-finisher.md"
+REPO_AGENTS_MD = ROOT / "AGENTS.md"
+REPO_COORDINATOR_PROMPT = ROOT / "docs" / "agents" / "coordinator-prompt.md"
 ASKS_BOARD_SKILL = ROOT / "plugins" / "asks-board" / "skills" / "asks-board" / "SKILL.md"
 PLACEHOLDER = re.compile(r"\{\{([A-Z_]+)\}\}")
 LEADING_COMMENT = re.compile(r"\A<!--(.*?)-->", re.S)
@@ -112,8 +126,8 @@ LEADING_COMMENT = re.compile(r"\A<!--(.*?)-->", re.S)
 TOOL_NEUTRAL = [
     COORDINATOR_PROMPT,
     GUARDRAILS,
-    SETUP_SKILL / "templates" / "docs-agents" / "git-workflow.md",
-    SETUP_SKILL / "templates" / "docs-agents" / "review-gate.md",
+    GIT_WORKFLOW,
+    REVIEW_GATE,
     MULTI_AGENT,
 ]
 HARD_CODED_TRACKER = re.compile(r"gh issue|github issue", re.I)
@@ -363,6 +377,110 @@ def check_accessibility_agents() -> None:
     check_retired_a11y_names()
 
 
+# The dropped branch rule (#2): a new `-r2` branch and PR when main moves,
+# and "rebase, never merge main in". It must not come back in any doc.
+OLD_BRANCH_RULE = re.compile(
+    r"-r2\b|never merge `?main`? into|rebase, never merge|clean replay|rebase-only|rebase merges only", re.I
+)
+# Every agent prompt carries the rule that replaced it, word for word.
+BRANCH_RULE_LINE = ("- Never force push. Keep one branch and one PR. Catch up with the base branch by merging it in "
+                    "(`git merge origin/<base>`) and push normally; before your first push you may rebase your own "
+                    "commits instead.")
+# The key terms each rule file must keep (lowercase). A template and its
+# filled copy share one list.
+GUARDRAIL_TERMS = ["keep one branch and one pr", "never force push", "git merge origin/main"]
+CLEAN_MERGE_CHECK = "git show --remerge-diff --format= <merge>"
+COORDINATOR_TERMS = ["catch up on the same branch", "git log --merges --format=%h origin/main..origin/<branch>",
+                     "merges reviewed:"]
+BRANCH_RULE_TERMS = {
+    GUARDRAILS: GUARDRAIL_TERMS,
+    REPO_AGENTS_MD: GUARDRAIL_TERMS,
+    GIT_WORKFLOW: ["keep the same branch and the same pr", "never force push", "git merge origin/main"],
+    REVIEW_GATE: [CLEAN_MERGE_CHECK, "merges reviewed:"],
+    PR_FINISHER: [CLEAN_MERGE_CHECK],
+    COORDINATOR_PROMPT: COORDINATOR_TERMS,
+    REPO_COORDINATOR_PROMPT: COORDINATOR_TERMS,
+}
+MERGE_STYLES = ("merge", "squash", "rebase")
+MERGE_STYLE_LINE = re.compile(r"^- \*\*Merge style:\*\* `([a-z]+)`$", re.M)
+# The repo merge flag that turns on each style.
+MERGE_FLAGS = {"merge": "allow_merge_commit", "squash": "allow_squash_merge", "rebase": "allow_rebase_merge"}
+
+
+def check_old_branch_rule_gone() -> None:
+    paths = {p.resolve(): p for p in [REPO_AGENTS_MD, *repo_docs({".md"})]}  # docs/agents has symlinks
+    for path in paths.values():
+        fail_matching_lines(path, path.read_text(encoding="utf-8"), OLD_BRANCH_RULE,
+                            "brings back the dropped -r2 / rebase-only branch rule; state the same-branch "
+                            "rule in templates/docs-agents/git-workflow.md instead")
+
+
+def check_branch_rule_stated() -> None:
+    for path, terms in BRANCH_RULE_TERMS.items():
+        text = (read_or_fail(path) or "").lower()
+        for term in terms:
+            if term not in text:
+                fail(f"{rel(path)}: must contain {term!r} (any case), part of the same-branch rule")
+    for agent in sorted((AGENT_ROSTER / "agents").glob("*.md")):
+        if BRANCH_RULE_LINE not in (read_or_fail(agent) or ""):
+            fail(f"{rel(agent)}: must carry the branch rule word for word: {BRANCH_RULE_LINE!r}")
+
+
+def default_merge_style() -> str | None:
+    """The one style the ruleset template allows: the default setup ships."""
+    ruleset = load_json(RULESET) or {}
+    methods = [rule.get("parameters", {}).get("allowed_merge_methods")
+               for rule in ruleset.get("rules", []) if rule.get("type") == "pull_request"]
+    if len(methods) != 1 or not isinstance(methods[0], list) or len(methods[0]) != 1 \
+            or methods[0][0] not in MERGE_STYLES:
+        fail(f"{rel(RULESET)}: the pull_request rule must allow exactly one of {MERGE_STYLES}")
+        return None
+    return methods[0][0]
+
+
+def check_setup_patch(default: str) -> None:
+    """The setup's PATCH command turns on the default style, and only it."""
+    patch = [line for line in (read_or_fail(SETUP_SKILL_MD) or "").splitlines()
+             if line.startswith("gh api -X PATCH repos/{owner}/{repo} ")]
+    wanted = {f"-F {flag}={'true' if style == default else 'false'}" for style, flag in MERGE_FLAGS.items()}
+    if len(patch) != 1 or not all(part in patch[0] for part in wanted):
+        fail(f"{rel(SETUP_SKILL_MD)}: needs one PATCH command that sets {sorted(wanted)}")
+
+
+def check_merge_style(default: str) -> None:
+    """The coordinator template uses the placeholder; this repo's filled copies name its own style.
+
+    docs/agents/git-workflow.md is a symlink to the template, so its Merge style
+    line is both this repo's style and the shipped default: it must match the ruleset.
+    """
+    if "--{{MERGE_STYLE}} --match-head-commit" not in (read_or_fail(COORDINATOR_PROMPT) or ""):
+        fail(f"{rel(COORDINATOR_PROMPT)}: merge step must use `gh pr merge N --{{{{MERGE_STYLE}}}}`")
+    if "merge style: {{MERGE_STYLE}}." not in (read_or_fail(GUARDRAILS) or ""):
+        fail(f"{rel(GUARDRAILS)}: must say \"merge style: {{{{MERGE_STYLE}}}}.\"")
+    found = MERGE_STYLE_LINE.findall(read_or_fail(GIT_WORKFLOW) or "")
+    if len(found) != 1 or found[0] not in MERGE_STYLES:
+        fail(f"{rel(GIT_WORKFLOW)}: needs one '- **Merge style:** `merge|squash|rebase`' line")
+        return
+    style = found[0]
+    if style != default:
+        fail(f"{rel(GIT_WORKFLOW)}: the Merge style line says {style!r}, but the ruleset template "
+             f"allows {default!r}; they must match")
+    if f"--{style} --match-head-commit" not in (read_or_fail(REPO_COORDINATOR_PROMPT) or ""):
+        fail(f"{rel(REPO_COORDINATOR_PROMPT)}: merge step must use --{style}, the style git-workflow.md sets")
+    if f"merge style: {style}." not in (read_or_fail(REPO_AGENTS_MD) or ""):
+        fail(f"{rel(REPO_AGENTS_MD)}: must say \"merge style: {style}.\", the style git-workflow.md sets")
+
+
+def check_branch_rule() -> None:
+    """The -r2 rule stays gone; the same-branch rule and the merge style are stated."""
+    check_old_branch_rule_gone()
+    check_branch_rule_stated()
+    default = default_merge_style()
+    if default:
+        check_setup_patch(default)
+        check_merge_style(default)
+
+
 VENDORED_SKILL = AGENT_ROSTER / "skills" / "thermo-nuclear-code-quality-review"
 REMOVED_LINE = "disable-model-invocation: true"  # the last frontmatter key upstream
 PINNED_COMMIT = re.compile(r"^- Commit: `([0-9a-f]{40})`$", re.M)
@@ -427,6 +545,118 @@ def check_vendored_thermonuclear() -> None:
         )
 
 
+WORKFLOWS = ROOT / ".github" / "workflows"
+CI_WORKFLOW = WORKFLOWS / "ci.yml"
+TESTS_DIR = ROOT / "scripts"
+TEST_PATTERN = "test_*.py"
+
+
+def check_workflows() -> None:
+    """The CI workflow exists, and every workflow keeps the hardening rules."""
+    if not CI_WORKFLOW.is_file():
+        fail(f"{rel(CI_WORKFLOW)}: missing; it runs these checks on every PR")
+    for path in sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")]):
+        text = path.read_text(encoding="utf-8")
+        found = workflow_rules.workflow_problems(text)
+        if path == CI_WORKFLOW:
+            found += workflow_rules.ci_job_problems(text)
+        for number, msg in found:
+            fail(f"{rel(path)}:{number}: {msg}" if number else f"{rel(path)}: {msg}")
+
+
+def run_unit_tests() -> None:
+    """Run scripts/test_*.py, so this one command is the whole gate."""
+    where = f"{rel(TESTS_DIR)}/{TEST_PATTERN}"
+    suite = unittest.defaultTestLoader.discover(str(TESTS_DIR), pattern=TEST_PATTERN)
+    result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
+    if result.testsRun == 0:
+        fail(f"{where}: found no unit tests; the gate must run them")
+    elif not result.wasSuccessful():
+        failed = [test.id() for test, _ in (*result.failures, *result.errors)]
+        fail(f"{where}: {len(failed)} unit test(s) failed: {', '.join(failed)}; see the output with "
+             f"`python3 -m unittest discover -s {rel(TESTS_DIR)} -p '{TEST_PATTERN}'`")
+
+
+def run_self_checks() -> None:
+    """Run every skill's scripts/check-*.mjs, so a hook regression fails here.
+
+    Skipped, with a note, when node is not installed; in CI (`CI` set) a
+    missing node fails instead, so CI never skips them.
+    """
+    checks = sorted(ROOT.glob("plugins/*/skills/*/scripts/check-*.mjs"))
+    if not checks:
+        return
+    if shutil.which("node") is None:
+        if os.environ.get("CI"):
+            fail(f"node not found; CI must run the {len(checks)} self-check(s), "
+                 "so add an `actions/setup-node` step to ci.yml")
+            return
+        print(f"note: node not found, skipped {len(checks)} self-check(s)", file=sys.stderr)
+        return
+    for check in checks:
+        try:
+            run = subprocess.run(["node", str(check)], capture_output=True, text=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            fail(f"{check.relative_to(ROOT)}: self-check did not finish in 300 seconds")
+            continue
+        if run.returncode != 0:
+            tail = "\n".join((run.stdout + run.stderr).strip().splitlines()[-15:])
+            fail(f"{check.relative_to(ROOT)}: self-check failed\n{tail}")
+
+
+MARKETPLACE_REL = ".claude-plugin/marketplace.json"
+
+
+def first_difference(a: str, b: str) -> int:
+    """Index of the first character where `a` and `b` differ."""
+    return next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+
+
+def excerpt(text: str, at: int, width: int = 30) -> str:
+    """repr of `text` around index `at`, with ... where it was cut."""
+    start = max(0, at - width)
+    end = at + width
+    return ("..." if start else "") + repr(text[start:end]) + ("..." if end < len(text) else "")
+
+
+def check_manifest(source: str, entry: dict, manifest: dict) -> None:
+    """A plugin.json must have a description, and must agree with its
+    marketplace entry on name and on any version or description the entry sets."""
+    entry_name = entry.get("name", "<unnamed>")
+    if manifest.get("name") != entry_name:
+        fail(
+            f"{source}: plugin.json name {manifest.get('name')!r} does not match "
+            f"its {MARKETPLACE_REL} entry {entry_name!r}; rename one so they match"
+        )
+
+    if "version" in entry and manifest.get("version") != entry["version"]:
+        fail(
+            f"{source}: plugin.json version {manifest.get('version')!r} does not match "
+            f"its {MARKETPLACE_REL} entry {entry['version']!r}; "
+            "decide which is current and copy it to the other file"
+        )
+
+    description = manifest.get("description")
+    if not isinstance(description, str) or not description.strip():
+        fail(f"{source}: plugin.json has no description (it must be a non-empty string)")
+    elif "description" in entry and description != entry["description"]:
+        wanted = entry["description"]
+        if not isinstance(wanted, str):
+            fail(
+                f"{source}: plugin.json description does not match its {MARKETPLACE_REL} "
+                f"entry {wanted!r}, which is not a string"
+            )
+            return
+        at = first_difference(description, wanted)
+        fail(
+            f"{source}: plugin.json description does not match its {MARKETPLACE_REL} "
+            f"entry; they first differ at character {at + 1}. "
+            "Decide which is current and copy it to the other file.\n"
+            f"      plugin.json:      {excerpt(description, at)}\n"
+            f"      marketplace.json: {excerpt(wanted, at)}"
+        )
+
+
 def main() -> int:
     marketplace = load_json(MARKETPLACE)
     if marketplace is None:
@@ -460,18 +690,7 @@ def main() -> int:
         if manifest is None:
             continue
 
-        if manifest.get("name") != entry_name:
-            fail(
-                f"{source}: plugin.json name {manifest.get('name')!r} "
-                f"does not match marketplace entry {entry_name!r}"
-            )
-        if "version" in entry and manifest.get("version") != entry["version"]:
-            fail(
-                f"{source}: plugin.json version {manifest.get('version')!r} "
-                f"does not match marketplace entry {entry['version']!r}"
-            )
-        if not manifest.get("description", "").strip():
-            fail(f"{source}: plugin.json has no description")
+        check_manifest(source, entry, manifest)
 
         skills_dir = plugin_dir / "skills"
         if not skills_dir.is_dir():
@@ -492,33 +711,14 @@ def main() -> int:
         check_plugin_root_refs(plugin_dir)
 
     check_agent_roster_templates()
+    check_branch_rule()
     check_vendored_thermonuclear()
     check_accessibility_agents()
+    check_workflows()
+    run_unit_tests()
     run_self_checks()
     report(skill_count, len(entries))
     return 1 if problems else 0
-
-
-def run_self_checks() -> None:
-    """Run every skill's scripts/check-*.mjs, so a hook regression fails here.
-
-    Skipped, with a note, when node is not installed.
-    """
-    checks = sorted(ROOT.glob("plugins/*/skills/*/scripts/check-*.mjs"))
-    if not checks:
-        return
-    if shutil.which("node") is None:
-        print(f"note: node not found, skipped {len(checks)} self-check(s)", file=sys.stderr)
-        return
-    for check in checks:
-        try:
-            run = subprocess.run(["node", str(check)], capture_output=True, text=True, timeout=300)
-        except subprocess.TimeoutExpired:
-            fail(f"{check.relative_to(ROOT)}: self-check did not finish in 300 seconds")
-            continue
-        if run.returncode != 0:
-            tail = "\n".join((run.stdout + run.stderr).strip().splitlines()[-15:])
-            fail(f"{check.relative_to(ROOT)}: self-check failed\n{tail}")
 
 
 def report(skill_count: int = 0, plugin_count: int = 0) -> None:

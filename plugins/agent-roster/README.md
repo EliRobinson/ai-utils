@@ -35,11 +35,11 @@ skills/thermo-nuclear-code-quality-review/
 | `dry-critic` | duplication, and abstractions to leave alone | opus | Read, Grep, Glob, Bash |
 | `design-critic` | UX on every change, visual design on UI changes (`impeccable` skill) | opus | Read, Grep, Glob, Bash, Skill |
 | `accessibility-critic` | WCAG problems on UI changes (`accessibility-agents` plugin) | sonnet | Read, Grep, Glob, Bash, the read-only `accessibility-agents` MCP tools |
-| `pr-finisher` | runs the review gate, splits big PRs, rebases, opens the PR | sonnet | Read, Edit, Write, Grep, Glob, Bash, Skill, Agent |
+| `pr-finisher` | runs the review gate, splits big PRs, catches up with the base branch, opens the PR | sonnet | Read, Edit, Write, Grep, Glob, Bash, Skill, Agent |
 
 The critics never edit files. The critics that use a skill have `Skill` only to load it: `agent-roster:thermo-nuclear-code-quality-review`, `marketing-skills:copy-editing` and `impeccable`. `accessibility-critic` loads no skill; it uses the `accessibility-agents` plugin's read-only MCP tools: its scans, its checks and `get_specialist` for the specialists' checklists. `mechanical-editor` has `Skill` only to open the `accessibility-agents` edit gate (see "What the plugin adds to every session"). `pr-finisher` runs every critic on every PR and writes the `## Review` record that the `setup-agentic-workflow` review-gate hook checks.
 
-Every agent prompt carries the same rules: own worktree and feature branch; rebase, never merge `main` in; follow the repo's `AGENTS.md`; never commit secrets; never touch production data or provider settings.
+Every agent prompt carries the same rules: own worktree and feature branch; one branch and one PR per item, catch up by merging the base branch in once pushed, never force push; follow the repo's `AGENTS.md`; never commit secrets; never touch production data or provider settings.
 
 ## Skills the agents need
 
@@ -166,7 +166,7 @@ Then it installs:
 - the hook wiring, merged into `.claude/settings.json`;
 - the ownership registry, outside the repo.
 
-It asks before changing GitHub settings (a `main` ruleset and rebase-only merges), and recommends git hooks if the repo has none.
+It asks before changing GitHub settings. That covers a `main` ruleset and the merge style you pick (merge commit, squash or rebase). It recommends git hooks if the repo has none.
 
 The guardrails include the unit-test rule: unit tests are DRY (case tables and shared fixtures, not copied test bodies) and each checks one behaviour. The implementers write tests that way; `correctness-critic` flags a test that checks several behaviours, and `dry-critic` flags copied test bodies.
 
