@@ -9,6 +9,7 @@ validate-plugins.py runs these itself. To run only them, from the repo root:
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import tempfile
 import unittest
@@ -247,6 +248,48 @@ class CheckWorkflows(unittest.TestCase):
 
     def test_validate_job_required_only_in_ci(self):
         self.assertEqual(self.run_check({"ci.yml": GOOD, "x.yml": NO_VALIDATE}), [])
+
+
+class CheckManifest(unittest.TestCase):
+    ENTRY = {"name": "p", "version": "1.0.0", "description": "Does a thing."}
+
+    def run_check(self, entry: dict, manifest: dict) -> list[str]:
+        with mock.patch.object(vp, "problems", []):
+            vp.check_manifest("./plugins/p", entry["name"], entry, manifest)
+            return list(vp.problems)
+
+    def test_matching_manifest_passes(self):
+        self.assertEqual(self.run_check(self.ENTRY, dict(self.ENTRY)), [])
+
+    def test_different_description_fails(self):
+        out = self.run_check(self.ENTRY, {**self.ENTRY, "description": "Does another thing."})
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("description does not match its marketplace entry", out[0])
+
+    def test_whitespace_difference_fails(self):
+        out = self.run_check(self.ENTRY, {**self.ENTRY, "description": "Does a thing. "})
+        self.assertTrue(any("description does not match" in p for p in out), out)
+
+    def test_missing_manifest_description_fails(self):
+        manifest = {k: v for k, v in self.ENTRY.items() if k != "description"}
+        out = self.run_check(self.ENTRY, manifest)
+        self.assertTrue(any("description does not match" in p for p in out), out)
+        self.assertTrue(any("has no description" in p for p in out), out)
+
+    def test_entry_without_description_skips_the_match(self):
+        entry = {k: v for k, v in self.ENTRY.items() if k != "description"}
+        self.assertEqual(self.run_check(entry, dict(self.ENTRY)), [])
+
+    def test_different_version_fails(self):
+        out = self.run_check(self.ENTRY, {**self.ENTRY, "version": "1.0.1"})
+        self.assertTrue(any("version '1.0.1' does not match" in p for p in out), out)
+
+    def test_repo_marketplace_descriptions_match(self):
+        marketplace = json.loads((HERE.parent / ".claude-plugin" / "marketplace.json").read_text())
+        for entry in marketplace["plugins"]:
+            manifest_path = HERE.parent / entry["source"] / ".claude-plugin" / "plugin.json"
+            manifest = json.loads(manifest_path.read_text())
+            self.assertEqual(self.run_check(entry, manifest), [], entry["name"])
 
 
 class SelfChecks(unittest.TestCase):

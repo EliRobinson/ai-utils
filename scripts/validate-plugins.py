@@ -604,6 +604,28 @@ def run_self_checks() -> None:
             fail(f"{check.relative_to(ROOT)}: self-check failed\n{tail}")
 
 
+def check_manifest(source: str, entry_name: str, entry: dict, manifest: dict) -> None:
+    """A plugin.json must agree with its marketplace entry on name, version and
+    description, and must have a description."""
+    if manifest.get("name") != entry_name:
+        fail(
+            f"{source}: plugin.json name {manifest.get('name')!r} "
+            f"does not match marketplace entry {entry_name!r}"
+        )
+    if "version" in entry and manifest.get("version") != entry["version"]:
+        fail(
+            f"{source}: plugin.json version {manifest.get('version')!r} "
+            f"does not match marketplace entry {entry['version']!r}"
+        )
+    if "description" in entry and manifest.get("description") != entry["description"]:
+        fail(
+            f"{source}: plugin.json description does not match its marketplace entry; "
+            "copy one to the other so both say the same"
+        )
+    if not manifest.get("description", "").strip():
+        fail(f"{source}: plugin.json has no description")
+
+
 def main() -> int:
     marketplace = load_json(MARKETPLACE)
     if marketplace is None:
@@ -637,23 +659,7 @@ def main() -> int:
         if manifest is None:
             continue
 
-        if manifest.get("name") != entry_name:
-            fail(
-                f"{source}: plugin.json name {manifest.get('name')!r} "
-                f"does not match marketplace entry {entry_name!r}"
-            )
-        if "version" in entry and manifest.get("version") != entry["version"]:
-            fail(
-                f"{source}: plugin.json version {manifest.get('version')!r} "
-                f"does not match marketplace entry {entry['version']!r}"
-            )
-        if "description" in entry and manifest.get("description") != entry["description"]:
-            fail(
-                f"{source}: plugin.json description does not match its marketplace entry; "
-                "copy one to the other so both say the same"
-            )
-        if not manifest.get("description", "").strip():
-            fail(f"{source}: plugin.json has no description")
+        check_manifest(source, entry_name, entry, manifest)
 
         skills_dir = plugin_dir / "skills"
         if not skills_dir.is_dir():
