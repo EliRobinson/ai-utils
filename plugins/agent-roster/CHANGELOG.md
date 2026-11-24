@@ -11,7 +11,7 @@
 
 **Changes:**
 
-- **Unit tests are DRY and check one behaviour each.** The guardrails gain two bullets: cases that share one test body go in a table that drives a parametrized test, with shared fixtures, so each case runs and fails on its own; and each unit test checks one behaviour, named after it. A case that needs its own branch gets its own test.
+- **Unit tests are DRY and check one behaviour each.** The guardrails gain two bullets for this. They cover the tests a change adds or touches; existing tests that break the rule become a follow-up ticket.
 - `implementer-engine` and `implementer-ui` write tests the way the repo's `AGENTS.md` says, and fall back to the same rule when it says nothing. `implementer-ui` gains a step to add tests.
 - `correctness-critic` flags a unit test that checks several behaviours. `dry-critic` flags copied test bodies. `route-work`'s table says so.
 - `validate-plugins.py` checks that the guardrails template, this repo's `AGENTS.md`, both implementers and both critics keep the rule.

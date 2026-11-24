@@ -5,11 +5,11 @@ No PR is opened until every reviewer below has run on the branch's diff and ever
 | Reviewer (record name) | Agent in `.claude/agents/` | Covers |
 | --- | --- | --- |
 | Thermonuclear | `thermonuclear-reviewer` | maintainability, abstractions, file size (loads the `agent-roster:thermo-nuclear-code-quality-review` skill, which ships in the agent-roster plugin) |
-| Correctness critic | `correctness-critic` | edge cases, error paths, concurrency, test strength |
+| Correctness critic | `correctness-critic` | edge cases, error paths, concurrency, test strength and shape |
 | Spec critic | `spec-critic` | `CONTEXT.md` and ADRs, docs and agent rules |
 | Security critic | `security-critic` | auth, input, injection, secrets, dependencies, CI and the repo's security rules |
 | Copy critic | `copy-critic` | every user-facing string (needs the `marketing-skills:copy-editing` skill) |
-| DRY critic | `dry-critic` | duplication, and abstractions to leave alone |
+| DRY critic | `dry-critic` | duplication (test code too), and abstractions to leave alone |
 | Design critic | `design-critic` | UX on every change, and visual design when the diff changes UI (needs the `impeccable` skill) |
 | Accessibility critic | `accessibility-critic` | WCAG problems when the diff changes UI (needs the `accessibility-agents` plugin) |
 
