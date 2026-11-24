@@ -65,6 +65,9 @@ h2 { font-family: var(--display); font-weight: 600; font-size: 1.05rem; margin: 
 .opt.rec { border-color: var(--accent); background: var(--accent-soft); }
 .opt.chosen { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .opt small { color: inherit; opacity: 0.8; }
+.opt.nokey { border-style: dashed; color: var(--muted); cursor: default; }
+.opt.nokey small { opacity: 1; }
+.body > .hint { margin: 0; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .btn { font: inherit; font-size: 0.9rem; border: 1px solid var(--line); background: transparent; color: var(--accent); padding: 4px 10px; border-radius: 6px; cursor: pointer; font-weight: 700; }
 .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
@@ -143,6 +146,38 @@ details > summary::-webkit-details-marker { display: none; }
   function stamp(patch, now) {
     return Object.assign({ updatedAt: now }, patch, { ackAt: null });
   }
+  // One option's key and label, each on one line (a line break could add a fake line to
+  // the ping text). Rows use {key, label}; a row written with {id, label} still works, and
+  // an empty key falls back to id. A bare string is its own key. key is "" when there is
+  // no usable key or id: the button must not write then.
+  // An object or list is not text, so it counts as missing.
+  function oneLine(v) {
+    if (v == null || typeof v === "object") return "";
+    return String(v).replace(/[\r\n\v\f\u0085\u2028\u2029]+/g, " ").trim();
+  }
+  function option(o) {
+    if (o == null) return { key: "", label: "" };
+    if (typeof o !== "object") return { key: oneLine(o), label: "" };
+    return { key: oneLine(o.key) || oneLine(o.id), label: oneLine(o.label) };
+  }
+  // A row value (answer, recommended) names this key. The empty key matches nothing, so a
+  // row with no answer or no recommended marks no button.
+  function matchesKey(value, key) {
+    return key !== "" && value != null && oneLine(value) === key;
+  }
+  // Everything one option button shows and does. A button that is not writable writes
+  // nothing when clicked. Chosen wins over recommended for the style.
+  function optionButton(o, row) {
+    const { key, label } = option(o);
+    const chosen = matchesKey(row.answer, key);
+    const rec = matchesKey(row.recommended, key);
+    const writable = key !== "";
+    return {
+      key, label, chosen, writable,
+      cls: "opt" + (!writable ? " nokey" : chosen ? " chosen" : rec ? " rec" : ""),
+      text: (key || "(no key)") + (rec ? "  (recommended)" : ""),
+    };
+  }
   // END pure
 
   function thumbs(list, onRemove) {
@@ -172,7 +207,16 @@ details > summary::-webkit-details-marker { display: none; }
   }
   try { tab = localStorage.getItem("asks.tab"); } catch (e) {}
 
-  function say(t) { $("status").textContent = t; }
+  // The same text twice is cleared first, so a screen reader announces it again.
+  const REANNOUNCE_MS = 100;
+  let sayTimer = 0;
+  function say(t) {
+    const s = $("status");
+    clearTimeout(sayTimer);
+    if (s.textContent !== t) { s.textContent = t; return; }
+    s.textContent = "";
+    sayTimer = setTimeout(() => { s.textContent = t; }, REANNOUNCE_MS);
+  }
   function ago(iso) {
     if (!iso) return "";
     const s = (Date.now() - Date.parse(iso)) / 1000;
@@ -337,17 +381,20 @@ details > summary::-webkit-details-marker { display: none; }
     if (Array.isArray(a.images) && a.images.length && where !== "closed") body.append(thumbs(a.images));
     if (Array.isArray(a.options) && a.options.length && where !== "closed") {
       const opts = el("div", { class: "options" });
+      let noKey = false;
       for (const o of a.options) {
-        const key = typeof o === "string" ? o : o.key;
-        const label = typeof o === "string" ? "" : o.label || "";
-        const cls = "opt" + (a.answer === key ? " chosen" : key === a.recommended ? " rec" : "");
+        const b = optionButton(o, a);
+        if (!b.writable) noKey = true;
         opts.append(el("button", {
-          class: cls, type: "button",
-          onclick: (ev) => act(ev, d, { status: "answered", answer: key }, "Sent “" + key + "”.",
-            "{{OWNER}} chose option " + key + (label ? ": " + label : "") + "."),
-        }, [el("b", { text: key + (key === a.recommended ? "  (recommended)" : "") }), label ? el("small", { text: label }) : null]));
+          class: b.cls, type: "button", "aria-pressed": String(b.chosen),
+          onclick: (ev) => b.writable
+            ? act(ev, d, { status: "answered", answer: b.key }, "Sent “" + b.key + "”.",
+              "{{OWNER}} chose option " + b.key + (b.label ? ": " + b.label : "") + ".")
+            : say("This option has no key, so nothing was sent."),
+        }, [el("b", { text: b.text }), b.label ? el("small", { text: b.label }) : null]));
       }
       body.append(opts);
+      if (noKey) body.append(el("p", { class: "hint", text: "An option marked (no key) can't be sent. Add a note to tell the chat." }));
     }
     if (a.note || (Array.isArray(a.noteImages) && a.noteImages.length)) {
       const n = el("div", { class: "note" }, [el("strong", { text: "Your note: " }), a.note || ""]);

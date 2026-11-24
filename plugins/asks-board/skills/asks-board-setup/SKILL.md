@@ -28,7 +28,8 @@ What the page does (keep this when you change it):
 - Collection `asks` with fields project, from, kind (do | decide | approve), title, detail, options [{key,label}], recommended, images [{id, caption}], status (open | done | answered | dismissed | closed), answer, note, noteImages [{id}], noteAt, noteAckAt, ackAt, threadId, createdAt, updatedAt.
 - Project tabs, three sections: To do (status open), Done waiting for the chat (status done/answered/dismissed), Closed (status closed only). `ackAt` never moves a row between sections.
 - Every click writes `ackAt: null` with its change, so the chat sees the click as new. It never touches `noteAckAt`. `sections()` and `stamp()` hold this logic; `scripts/check-board-page.mjs` tests them.
-- Each card: done checkbox, option buttons (recommended one marked), "Not needed", "Add a note" with image paste or upload, "Show details".
+- Each card: done checkbox, option buttons, "Not needed", "Add a note" with image paste or upload, "Show details".
+- Option buttons: an option's key is its `key`, else its `id` (for rows written with `{id, label}`); a bare string is its own key. Line breaks in a key or label become spaces, and a key that is an object counts as missing. Only the button whose key equals `answer` is chosen (`aria-pressed`), and only the one whose key equals `recommended` is marked; a row with neither marks none. An option with no key shows "(no key)" with a dashed border, writes nothing when clicked and says so, and the card says to add a note instead. `optionButton()` holds this logic; `scripts/check-board-page.mjs` tests it.
 - The ping: on each click it starts `comments.anchorFor(card)` inside the click (it needs the user's gesture), saves the row, then calls `comments.sendToClaude` into the row's `threadId` (or a new thread, saving the id). The text is three lines: `[asks-board] project=<p> | from=<chat> | ask=<id>`, what the user did, and a line telling the platform's automatic reply and the comments chat to reply only "Received.". The router and coordinators never reply to that line; a coordinator gets only the router's message. A failed ping never blocks the save.
 
 ## Step 3. Write the config file and the skill
@@ -40,7 +41,7 @@ What the page does (keep this when you change it):
    ```
 2. Install the `asks-board` skill. Either:
    - install the plugin: `/plugin marketplace add EliRobinson/ai-utils`, then `/plugin install asks-board@ai-utils`; or
-   - if this computer has a clone of `ai-utils` and the user will edit the skill: `ln -s <clone>/plugins/asks-board/skills/asks-board ~/.claude/skills/asks-board`.
+   - if the user will edit the skill and has a local clone of the public `ai-utils` repo (EliRobinson/ai-utils): `ln -s <clone>/plugins/asks-board/skills/asks-board ~/.claude/skills/asks-board`, where `<clone>` is that clone's path. Changes still go through a PR, as the `asks-board` skill's "Changing this skill or the board page" section says.
    Use one, not both, or the skill loads twice.
 
 ## Step 4. Pick and start the router

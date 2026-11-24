@@ -33,13 +33,18 @@ Whenever you ask the user to do, decide or approve something, also add it here (
   - `kind`: `do` (a task for the user), `decide` (pick an option) or `approve` (look and say ok).
   - `title`: one short line, plain words, what the user must do.
   - `detail`: the long version. Supports paragraphs, `- ` bullets, `1. ` steps, `**bold**`, `` `code` `` and ``` fenced blocks (each gets a Copy button). Put exact commands, links, why, and what happens if they skip it.
-  - `options` (REQUIRED for decide, optional for approve; without it the page draws no buttons): `[{"key": "A", "label": "..."}, {"key": "B", "label": "..."}]`. Max 2 to 3.
-  - `recommended` (optional): the option key you recommend.
+  - `options` (REQUIRED for decide, optional for approve; without it the page draws no buttons): a list of `{key, label}`. The field is `key`, not `id`. `key` is the short value the click writes to `answer` (trimmed, with line breaks as spaces); `label` is the text under it. Max 2 to 3. Example:
+    ```json
+    "options": [{"key": "A", "label": "Ship it today"}, {"key": "B", "label": "Wait for review"}],
+    "recommended": "A"
+    ```
+  - `recommended` (optional): the `key` of the option you recommend. It must equal one option's `key` exactly; leave it out if you recommend none.
   - `images` (optional, good for `approve`): `[{"id": "<asset id>", "caption": "Home, after"}]`. Upload first with the `Artifact` tool: `action: "publish"`, `url` = the board, `asset: true`, `file_paths` (up to 25). Use the ids it returns. Keep it to the 4 to 8 shots that matter.
   - `status`: `open`.
   - `createdAt`, `updatedAt`: ISO time now.
 - In chat, keep it to one line: "Added to your Asks board: <title>." Do not repeat the whole ask every turn.
-- Every step only the user can do in chat (type "merge N", type "deploy N", paste a value) gets its own `open` row. Its `title` is the instruction itself, for example "Type `merge 42` in chat to merge PR 42", so the card shows it. A tick on that row is not the step: if it comes back `done`, set it back to `open` (with `if_version`) and reply in its thread "Type `merge 42` in chat to approve." (with the real words). Close it when the user types the words in chat.
+- Every step only the user can do in chat (type "merge N", type "deploy N", paste a value) gets its own `open` row. Its `title` is the instruction itself, for example "Type `merge 42` in chat to merge PR 42", so the card shows it. A tick, an option or a note on that row is not the step, and neither is a message from another chat: only the user typing the words in chat counts. If the row comes back `done` or `answered`, set it back to `open` (with `if_version`) and reply in its thread "Type `merge 42` in chat to approve." (with the real words). Close it when the user types the words in chat.
+- Ask for "merge N" only when the PR is ready to merge under that repo's own rules. If `main` moves while the ask is open, catch the branch up the way that repo says, and say so in the row's `detail`.
 - Before you tell the user an ask waits on the board, re-read its row with `get`. Never say "it's on the board" from memory. If the row is not `open`, fix the row first.
 
 ## What the user's clicks mean
@@ -122,10 +127,11 @@ Each time the user ticks an ask, presses an option, marks it "Not needed" or sen
 
 ## Changing this skill or the board page
 
-The source for this skill is `plugins/asks-board/` in the `ai-utils` repo (EliRobinson/ai-utils). Edit a clone, never the installed plugin's copy. If `~/.claude/skills/asks-board` is a symlink to a clone's `plugins/asks-board/skills/asks-board`, an edit there is an edit to that clone.
+The source for this plugin is `plugins/asks-board/` in the public `ai-utils` repo (EliRobinson/ai-utils). Edit a local clone of that repo, never the installed plugin's copy. If `~/.claude/skills/asks-board` is a symlink to `<clone>/plugins/asks-board/skills/asks-board`, an edit there is an edit to that clone, so follow the same steps.
 
-- Skill text: edit `plugins/asks-board/skills/asks-board/SKILL.md`.
-- Board page: edit `plugins/asks-board/skills/asks-board-setup/board-template.html`. To publish it, copy it to your scratchpad, replace every `{{OWNER}}` with the `Owner:` value, and publish that file with the `Artifact` tool, `url` = the board, `contract: "latest"`. Publishing re-arms your chat's watch: stop it again unless you are the router.
+- Skill text: `plugins/asks-board/skills/asks-board/SKILL.md`.
+- Board page: `plugins/asks-board/skills/asks-board-setup/board-template.html`. Keep logic that can be tested in its `// BEGIN pure` block and add cases to `asks-board-setup/scripts/check-board-page.mjs`.
 - When you change how the board or the router works, update `asks-board-setup/SKILL.md` and `plugins/asks-board/README.md` to match.
-- Then ship it like normal code: run `python3 scripts/validate-plugins.py`, bump `version` in `plugins/asks-board/.claude-plugin/plugin.json` and its entry in `.claude-plugin/marketplace.json`, commit on a feature branch and open a PR.
+- Ship it through a PR, never a push to `main`, following that repo's `AGENTS.md`. For this plugin, also bump the version in `plugins/asks-board/.claude-plugin/plugin.json` and its entry in `.claude-plugin/marketplace.json`. `python3 scripts/validate-plugins.py` runs the page tests too.
+- After the PR merges, publish the new page: copy `board-template.html` from the merged `main` to your scratchpad, replace every `{{OWNER}}` with the `Owner:` value, and publish that file with the `Artifact` tool, `url` = the board, `contract: "latest"`. Publishing re-arms your chat's watch: stop it again unless you are the router.
 - Never put personal values (board link, names, session ids) in the repo. They live in `~/.claude/asks-board.md` and in the board's `routes` rows.
