@@ -2,6 +2,23 @@
 
 1.8.0 is the first version published in this public repo. Earlier entries are kept for reference.
 
+## 1.13.0
+
+**Upgrade steps:**
+
+1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
+2. Run `setup-agentic-workflow` once and say "change ticketing tool". It asks which ticketing tool you use and writes `~/.claude/agent-roster/issue-tracker.md`. If you reach your tracker through an MCP server, it also writes tracker copies of the agents to `~/.claude/agents/agent-roster/`. Rerun it this way after each later agent-roster update, so the copies match the new agents.
+3. Rerun `setup-agentic-workflow` in each repo set up before 1.13.0 and merge its setup PR. It refreshes `docs/agents/issue-tracker.md`, `docs/agents/review-gate.md`, the hook scripts and the reviewer copies in `.claude/agents/`. Repos that keep hash-pinned verbatim copies of these files must refresh the copies and their hash list in a later change of their own.
+
+**Changes:**
+
+- **Agents can read the owner's ticketing tool.** Each agent reads the ticketing tool setting before it touches a ticket: the repo's `docs/agents/issue-tracker.md`, else the owner's `~/.claude/agent-roster/issue-tracker.md`, else GitHub Issues through `gh`. Every agent may read tickets; only `ticket-writer` and `pr-finisher` create, edit, comment on, label or close them. Every agent's rules carry this line, and the implementers read the ticket itself, not only the brief.
+- **Tracker copies, not inherited tools.** An agent reaches an MCP tool only if its `tools:` list names it, and the plugin's lists name no tracker. For an MCP tracker the setup writes a copy of each agent with only the tracker's Search and View tools added (every tracker tool for `ticket-writer` and `pr-finisher`). The agents keep their `tools:` allow-lists rather than switching to `disallowedTools`: with no allow-list, an agent takes every MCP tool in the session (mail, payments, databases), and the read-only critics read untrusted diffs. The critics, `lookup` and `researcher` still cannot edit or write files.
+- **Setup asks once for the ticketing tool**, its access and MCP tool prefix, and whether the repo needs its own file. "change ticketing tool" reruns only that part, and refreshes the copies. The issue-tracker template gains an **MCP prefix** line and the who-may-write rule.
+- `route-work` and `pr-finisher` call a tracker copy, like a repo copy, by its plain name. `route-work` has a new section, "How agents find the tracker", and asks the owner to rerun the setup when a copy is older than the installed plugin.
+- No agent file, skill or template names an in-house tracker. The ticket ID example is now `PROJ-42`.
+- `validate-plugins.py` checks that every agent keeps a `tools:` allow-list with no `disallowedTools`, that no agent names an MCP tool outside `accessibility-agents`, that the read-only agents hold no file-writing tool, and that every agent, the setup skill, `route-work` and the README point to the ticketing tool setting.
+
 ## 1.11.0
 
 **Upgrade steps:**
