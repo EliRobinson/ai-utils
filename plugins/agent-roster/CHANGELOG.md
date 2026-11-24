@@ -2,6 +2,13 @@
 
 1.8.0 is the first version published in this public repo. Earlier entries are kept for reference.
 
+## 1.10.1
+
+- **Wording fixes in the coordinator prompt and the guardrails template**, from the copy review. No rule changes.
+- Coordinator prompt: the owner line drops the "ASD-STE100" label and reads "what you did, whether it worked, what they do now".
+- Guardrails: a write in the main checkout "can silently destroy" another agent's work. "If `main` moves after you push" now uses the present tense. The reviewer rule is two sentences: run every reviewer before you open the PR, and use Opus, Sonnet or Haiku, never Fable. Follow-up work says "Do not leave a TODO comment". "Add tests and docs with every behavior change" replaces "Ship paired tests and paired docs". The coordinator rule leads with "A coordinator chat routes work. It never does the work."
+- Existing repos get the new wording when you rerun `setup-agentic-workflow`.
+
 ## 1.8.0
 
 **Upgrade steps, in this order:**
