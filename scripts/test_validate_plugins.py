@@ -251,6 +251,8 @@ class CheckWorkflows(unittest.TestCase):
 
 class CheckManifest(unittest.TestCase):
     ENTRY = {"name": "p", "version": "1.0.0", "description": "Does a thing."}
+    ENTRY_NO_DESCRIPTION = {"name": "p", "version": "1.0.0"}
+    NO_DESCRIPTION = ["./plugins/p: plugin.json has no description (it must be a non-empty string)"]
 
     def run_check(self, entry: dict, manifest: dict) -> list[str]:
         with mock.patch.object(vp, "problems", []):
@@ -260,44 +262,63 @@ class CheckManifest(unittest.TestCase):
     def test_matching_manifest_passes(self):
         self.assertEqual(self.run_check(self.ENTRY, dict(self.ENTRY)), [])
 
-    def test_different_description_fails(self):
+    def test_different_description_fails_and_points_at_the_difference(self):
         out = self.run_check(self.ENTRY, {**self.ENTRY, "description": "Does another thing."})
-        self.assertEqual(out, [
-            "./plugins/p: plugin.json description 'Does another thing.' does not match "
-            "marketplace entry 'Does a thing.'; decide which is current and copy it to the other file"
-        ])
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("description does not match its .claude-plugin/marketplace.json entry", out[0])
+        self.assertIn("first differ at character 7", out[0])
+        self.assertIn("plugin.json:      'Does another thing.'", out[0])
+        self.assertIn("marketplace.json: 'Does a thing.'", out[0])
 
     def test_whitespace_difference_fails_and_shows_it(self):
         out = self.run_check(self.ENTRY, {**self.ENTRY, "description": "Does a thing. "})
         self.assertEqual(len(out), 1, out)
+        self.assertIn("first differ at character 14", out[0])
         self.assertIn("'Does a thing. '", out[0])
 
+    def test_long_description_is_cut_around_the_difference(self):
+        long = "x" * 200 + "a" + "y" * 200
+        out = self.run_check({**self.ENTRY, "description": long},
+                             {**self.ENTRY, "description": long.replace("a", "b")})
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("first differ at character 201", out[0])
+        self.assertIn("...'" + "x" * 30 + "b" + "y" * 29 + "'...", out[0])
+        self.assertLess(len(out[0]), 400)
+
     def test_missing_manifest_description_reported_once(self):
-        manifest = {k: v for k, v in self.ENTRY.items() if k != "description"}
-        self.assertEqual(self.run_check(self.ENTRY, manifest),
-                         ["./plugins/p: plugin.json has no description"])
+        self.assertEqual(self.run_check(self.ENTRY, self.ENTRY_NO_DESCRIPTION), self.NO_DESCRIPTION)
 
     def test_blank_manifest_description_reported_once(self):
         out = self.run_check(self.ENTRY, {**self.ENTRY, "description": "  "})
-        self.assertEqual(out, ["./plugins/p: plugin.json has no description"])
+        self.assertEqual(out, self.NO_DESCRIPTION)
 
     def test_non_string_description_reported_not_crashed(self):
         for value in (None, 42, ["Does a thing."]):
             out = self.run_check(self.ENTRY, {**self.ENTRY, "description": value})
-            self.assertEqual(out, ["./plugins/p: plugin.json has no description"], value)
+            self.assertEqual(out, self.NO_DESCRIPTION, value)
+
+    def test_non_string_entry_description_fails(self):
+        out = self.run_check({**self.ENTRY, "description": None}, dict(self.ENTRY))
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("entry None, which is not a string", out[0])
 
     def test_entry_without_description_skips_the_match(self):
-        entry = {k: v for k, v in self.ENTRY.items() if k != "description"}
-        self.assertEqual(self.run_check(entry, dict(self.ENTRY)), [])
+        self.assertEqual(self.run_check(self.ENTRY_NO_DESCRIPTION, dict(self.ENTRY)), [])
 
     def test_different_version_fails(self):
         out = self.run_check(self.ENTRY, {**self.ENTRY, "version": "1.0.1"})
-        self.assertEqual(len(out), 1, out)
-        self.assertIn("version '1.0.1' does not match marketplace entry '1.0.0'", out[0])
+        self.assertEqual(out, [
+            "./plugins/p: plugin.json version '1.0.1' does not match its "
+            ".claude-plugin/marketplace.json entry '1.0.0'; "
+            "decide which is current and copy it to the other file"
+        ])
 
     def test_different_name_fails(self):
         out = self.run_check(self.ENTRY, {**self.ENTRY, "name": "q"})
-        self.assertEqual(out, ["./plugins/p: plugin.json name 'q' does not match marketplace entry 'p'"])
+        self.assertEqual(out, [
+            "./plugins/p: plugin.json name 'q' does not match its "
+            ".claude-plugin/marketplace.json entry 'p'; rename one so they match"
+        ])
 
 
 class SelfChecks(unittest.TestCase):

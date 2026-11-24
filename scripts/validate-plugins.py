@@ -604,27 +604,57 @@ def run_self_checks() -> None:
             fail(f"{check.relative_to(ROOT)}: self-check failed\n{tail}")
 
 
+MARKETPLACE_REL = ".claude-plugin/marketplace.json"
+
+
+def first_difference(a: str, b: str) -> int:
+    """Index of the first character where `a` and `b` differ."""
+    return next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+
+
+def excerpt(text: str, at: int, width: int = 30) -> str:
+    """repr of `text` around index `at`, with ... where it was cut."""
+    start = max(0, at - width)
+    end = at + width
+    return ("..." if start else "") + repr(text[start:end]) + ("..." if end < len(text) else "")
+
+
 def check_manifest(source: str, entry: dict, manifest: dict) -> None:
     """A plugin.json must have a description, and must agree with its
     marketplace entry on name and on any version or description the entry sets."""
     entry_name = entry.get("name", "<unnamed>")
     if manifest.get("name") != entry_name:
         fail(
-            f"{source}: plugin.json name {manifest.get('name')!r} "
-            f"does not match marketplace entry {entry_name!r}"
+            f"{source}: plugin.json name {manifest.get('name')!r} does not match "
+            f"its {MARKETPLACE_REL} entry {entry_name!r}; rename one so they match"
         )
+
+    if "version" in entry and manifest.get("version") != entry["version"]:
+        fail(
+            f"{source}: plugin.json version {manifest.get('version')!r} does not match "
+            f"its {MARKETPLACE_REL} entry {entry['version']!r}; "
+            "decide which is current and copy it to the other file"
+        )
+
     description = manifest.get("description")
-    has_description = isinstance(description, str) and bool(description.strip())
-    if not has_description:
-        fail(f"{source}: plugin.json has no description")
-    # A missing description is reported once, above, not again as a mismatch.
-    for field in ("version", "description") if has_description else ("version",):
-        if field in entry and manifest.get(field) != entry[field]:
+    if not isinstance(description, str) or not description.strip():
+        fail(f"{source}: plugin.json has no description (it must be a non-empty string)")
+    elif "description" in entry and description != entry["description"]:
+        wanted = entry["description"]
+        if not isinstance(wanted, str):
             fail(
-                f"{source}: plugin.json {field} {manifest.get(field)!r} "
-                f"does not match marketplace entry {entry[field]!r}; "
-                "decide which is current and copy it to the other file"
+                f"{source}: plugin.json description does not match its {MARKETPLACE_REL} "
+                f"entry {wanted!r}, which is not a string"
             )
+            return
+        at = first_difference(description, wanted)
+        fail(
+            f"{source}: plugin.json description does not match its {MARKETPLACE_REL} "
+            f"entry; they first differ at character {at + 1}. "
+            "Decide which is current and copy it to the other file.\n"
+            f"      plugin.json:      {excerpt(description, at)}\n"
+            f"      marketplace.json: {excerpt(wanted, at)}"
+        )
 
 
 def main() -> int:
