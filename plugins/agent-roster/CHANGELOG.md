@@ -7,6 +7,29 @@
 - **The review gate refuses merges it could not check.** `review-gate-hook.mjs` now refuses `gh api graphql` with the query from a file, stdin or a variable (`-F query=@file`, `--input`, `-f query="$Q"`), `curl` writes to a PR's `pulls/N/merge` or to `pulls`, and `curl` to GitHub's GraphQL API. Inline `gh api graphql -f query='...'` reads and `curl` reads of `pulls` still pass. `check-agent-hooks.mjs` has a case for each, and `review-gate.md` names them.
 - **More bypasses closed.** A quoted `eval "gh pr merge 5"` is now read and checked, and `eval` or `sh -c` scripts built at run time, or piped into a shell, are refused when the command names a PR write. `-R owner/name.git`, `--repo https://github.com/owner/name` and other spellings of this repo are checked as this repo instead of passing as another one. New `check-agent-hooks.mjs` cases cover each, plus GraphQL queries from `$(...)` and backticks.
 
+## 1.9.0
+
+**Upgrade steps, in this order:**
+
+1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
+2. Rerun `setup-agentic-workflow` in each repo set up before 1.9.0. Answer its new merge-style question; it recommends `squash`. On a yes, it updates the `main` ruleset and the repo's merge settings to that style. It also replaces the old branch rule in `AGENTS.md`, `docs/agents/git-workflow.md`, `docs/agents/review-gate.md` and `docs/agents/coordinator-prompt.md`, and refreshes `.claude/agents/` and `scripts/check-agent-hooks.mjs`.
+3. If you said yes to the new merge settings, GitHub now refuses `--rebase` merges. The coordinator chat you already run still has the old merge step: tell it to merge the setup PR and every open PR, `-r2` ones included, with `gh pr merge N --<new style>`. Open `-r2` branches can finish that way; do not start new ones.
+4. Once the setup PR merges, start a new coordinator chat from the new `docs/agents/coordinator-prompt.md`. Restarting Claude Code is not enough: the old chat keeps its first message.
+5. Until the setup PR merges, do not let agents catch up a pushed branch by merging `main` in. The repo's own `AGENTS.md` still forbids it.
+
+**Changes:**
+
+- **No more `-r2` branches.** An item keeps one branch and one PR until it merges, and review fixes are new commits on that branch. When `main` moves after a push, the agent merges `origin/main` into the same branch and pushes normally. `gh pr update-branch` works too, never with `--rebase`; the agent then runs `git pull --ff-only` before its next commit. Rebasing your own commits is fine before the first push. Never force push. The guardrails template, `git-workflow.md`, the coordinator prompt, `pr-finisher`, every agent's rules line, `route-work`, the setup skill and the README say so.
+- **Review after a catch-up.** In `review-gate.md`, a catch-up merge is clean when its second parent is already on `main` and `git show --remerge-diff` exits 0 and prints nothing. A clean merge needs no new round, only the test gate on the new head. After resolved conflicts, the security critic, the correctness critic and the reviewers whose areas the conflicted files touch review the remerge diff. That is round 2, or a decision for the owner if both rounds are used. The definition of a round now covers this partial round 2. The record names each merge that is not clean in a `Merges reviewed:` line, and the coordinator checks every merge commit on the branch against it before merging.
+- **PRs merge in the repo's merge style.** `git-workflow.md` has a `## Merge style` section with one **Merge style** line: `merge`, `squash` or `rebase`. It also says how to find the style when the line is missing. New placeholder `{{MERGE_STYLE}}` in the coordinator prompt (merge step 5) and the guardrails.
+- **Setup asks for the merge style.** It asks with the names question and writes the answer to all three files. It sets the ruleset and repo merge settings to that style, and can update an existing `main` ruleset in place. `squash` is the new default: the ruleset template now allows squash merges. ai-utils moves to squash merges too.
+- `check-agent-hooks.mjs` checks that `git merge origin/main` is allowed in a worktree and refused in the main checkout.
+- `validate-plugins.py` checks four things:
+  - the `-r2` or rebase-only rule does not come back in any doc;
+  - each rule file keeps the same-branch rule, and every agent carries its rules line word for word;
+  - the ruleset template and the setup's PATCH command allow only `squash`;
+  - this repo's `AGENTS.md` and coordinator prompt name the merge style its `git-workflow.md` sets.
+
 ## 1.8.0
 
 **Upgrade steps, in this order:**

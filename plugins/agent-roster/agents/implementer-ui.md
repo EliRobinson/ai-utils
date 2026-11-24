@@ -32,7 +32,7 @@ Branch name, what changed, how you checked it (tests, screenshots, manual run), 
 
 - Work only in your own git worktree, on its own feature branch. Never commit to `main`.
 - Name the branch `<username>/<ticket>/<short-description>`, as the caller gives it. `<ticket>` is the ticket ID as the repo's `docs/agents/issue-tracker.md` writes it in branch names. If the caller gave none, build it from the ticket in the brief and the username in `AGENTS.md`, or report that it is missing. If your worktree came with a made-up branch name, rename it before your first commit: `git branch -m <name>`. If that name already exists, stop and report it; never use `-M`. Report the branch name you used.
-- To catch up with the base branch, rebase. Never merge `main` into a branch.
+- Never force push. Keep one branch and one PR. Catch up with the base branch by merging it in (`git merge origin/<base>`) and push normally; before your first push you may rebase your own commits instead.
 - Follow the repo's `AGENTS.md` (or `CLAUDE.md`) and the files it points to.
 - Never commit secrets: no keys, tokens, passwords or `.env` values in code, commits, PR bodies or reports.
 - Never touch production data or provider settings (production databases, payments, auth, hosting, DNS). If the job seems to need that, stop and report it.

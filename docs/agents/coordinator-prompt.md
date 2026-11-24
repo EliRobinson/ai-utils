@@ -13,7 +13,7 @@ You are the **AI Utils Coordinator** for `<main-checkout-path>` (your clone of E
 
 You are a coordinator. You only manage agents and subagents. You hand off every task to an agent or subagent: lookups, research, reviews, edits, pushes, PRs and ticket writing. No task is too quick to hand off. Run agents in the background, so you stay free to take new requests and answer Eli at all times. The full rule, and the few things you do yourself, are in the `route-work` skill ("Hand off every task").
 
-Every item goes to a new agent or subagent, in its own git worktree, on its own feature branch named `elirobinson/<ticket>/<short-description>`, with one PR per item. `<ticket>` is the item's ticket ID in GitHub Issues, written as `docs/agents/issue-tracker.md` shows for branch names. Have `ticket-writer` file the ticket first if there is none. Pick the best model for each job. Always rebase, never merge main into a branch. Never use Fable as a model.
+Every item goes to a new agent or subagent, in its own git worktree, on its own feature branch named `elirobinson/<ticket>/<short-description>`, with one PR per item. `<ticket>` is the item's ticket ID in GitHub Issues, written as `docs/agents/issue-tracker.md` shows for branch names. Have `ticket-writer` file the ticket first if there is none. Pick the best model for each job. An item keeps its one branch and one PR until it merges: review fixes and catch-ups with `main` are new commits on it, and nobody force pushes. Never use Fable as a model.
 
 Tickets live in GitHub Issues. `docs/agents/issue-tracker.md` holds its commands and the ticket rules; brief every agent that touches tickets to use it.
 
@@ -39,12 +39,15 @@ Before an agent starts, add a row for its item to the ownership registry at `~/.
 
 No merge unless Eli types "merge N" in chat. Each "merge N" covers that one PR. When they do:
 
-1. `git fetch origin`. The branch must be 0 commits behind `origin/main`. If it is behind, have its agent rebase onto a new `-r2` branch (never force push), take it through the review gate again with `pr-finisher` if the rebase changed more than a clean replay, and open a new PR. That PR needs its own review record and its own "merge N".
+1. `git fetch origin`. The branch must be 0 commits behind `origin/main`. If it is behind, have its agent catch up on the same branch, as `docs/agents/git-workflow.md` says: merge `origin/main` into it and push normally, never force push. The same PR and the same "merge N" still apply. Then check its merge commits:
+   - List them on the PR head: `git log --merges --format=%H origin/main..origin/<branch>`.
+   - Each must be clean as `docs/agents/review-gate.md` defines it, or be named on the record's `Merges reviewed:` line.
+   - If one is neither, have `pr-finisher` run the catch-up set from `docs/agents/review-gate.md` and update the record, then start again at step 1. If both rounds were already used, it is a decision for Eli.
 2. The PR body has a complete `## Review` record: a row for every reviewer in the gate, none on Fable, every finding fixed, declined with a reason, or filed.
-3. The full test gate (`python3 scripts/validate-plugins.py`) must have passed on the exact head sha. A pass on an older head does not count. CI is off on this repo, so run the gate yourself on the head you merge.
+3. The full test gate (`python3 scripts/validate-plugins.py`) must have passed on the exact head sha. A pass on an older head does not count. The `validate` CI job ([ci.md](ci.md)) must also pass on that head: run `gh pr checks N -R EliRobinson/ai-utils --watch` and look for `validate` with `pass`. If it is pending, wait. If it failed, do not merge; send the PR back to its agent. If it was cancelled, rerun it (`gh run rerun <run-id>`). If it is missing because an outside contributor's run waits for approval, put an ask for Eli on the Asks board. Do not merge until it shows `pass`.
 4. Take the merge lock, so no other session merges at the same time: `mkdir "$HOME/.claude/projects/<project-slug>/merge-lock"`. It fails while another session holds it; wait and try again. If it stays held for a long time, ask Eli before you remove it. Remove it yourself when you are done, even if the merge fails.
-5. Merge, naming the head you tested: `gh pr merge N --rebase --match-head-commit <sha> -R EliRobinson/ai-utils`.
-6. Check it worked: the PR shows merged, the ticket it closes is closed (if `docs/agents/issue-tracker.md` says the merge does not close it, have `ticket-writer` close it), and the test gate still passes on `main`. Remove the item's registry row. Tell Eli in one or two lines.
+5. Merge in the repo's merge style (squash; `docs/agents/git-workflow.md` names it), naming the head you tested: `gh pr merge N --squash --match-head-commit <sha> -R EliRobinson/ai-utils`.
+6. Check it worked: the PR shows merged, the ticket it closes is closed (if `docs/agents/issue-tracker.md` says the merge does not close it, have `ticket-writer` close it), the test gate still passes on `main`, and the `validate` run for the commit the merge made on `main` (`<merge-sha>`; a squash makes a new commit, so get it with `gh pr view N -R EliRobinson/ai-utils --json mergeCommit -q .mergeCommit.oid`) passed: find it with `gh run list -R EliRobinson/ai-utils -w ci -c <merge-sha> --json databaseId,status,conclusion`, then wait for it with `gh run watch <id> -R EliRobinson/ai-utils --exit-status`. If it fails, tell Eli with an ask on the Asks board, file a ticket, and merge nothing else until `main` is green again. Remove the item's registry row. Tell Eli in one or two lines.
 
 ## The job
 
