@@ -295,7 +295,9 @@ export function programOf(words) {
       i++;
       while (words[i] && words[i].text.startsWith("-") && words[i].text !== "--") {
         const flag = words[i].text.split("=")[0];
-        if ((wrapper.rewrites ?? []).includes(flag)) dynamic = true;
+        const rewrites = wrapper.rewrites ?? [];
+        // -S'...' glued to its value counts as -S.
+        if (rewrites.includes(flag) || (/^-[a-zA-Z]./.test(flag) && rewrites.includes(flag.slice(0, 2)))) dynamic = true;
         i += (wrapper.values ?? []).includes(words[i].text) ? 2 : 1;
       }
       if (words[i]?.text === "--") i++;
@@ -304,7 +306,8 @@ export function programOf(words) {
     }
     break;
   }
-  if (i >= words.length) return null;
+  // env -S 'gh pr merge 5' runs its value: a program the caller cannot read.
+  if (i >= words.length) return dynamic ? { env, program: { text: "", dynamic: true }, args: [], wrappers } : null;
   const program = dynamic ? { ...words[i], dynamic: true } : words[i];
   return { env, program, args: words.slice(i + 1), wrappers };
 }
@@ -312,10 +315,12 @@ export function programOf(words) {
 export const nameOf = (call) => (call.program.dynamic ? null : path.basename(call.program.text));
 
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "mksh", "fish"]);
-// Shell options that take a separate value: bash -o pipefail, -O extglob, +o.
-const SHELL_VALUE_FLAGS = new Set(["-o", "+o", "-O", "+O", "--rcfile", "--init-file"]);
+// Shell options that take a separate value: bash -o pipefail, -O extglob,
+// +o, and -euo pipefail (a cluster with o or O takes the next word).
+const SHELL_VALUE_FLAGS = new Set(["--rcfile", "--init-file"]);
 // A script file that is really stdin or a pipe.
 const STDIN_FILE = /^(?:-|\/dev\/stdin|\/dev\/fd\/\d+|\/proc\/self\/fd\/\d+)$/;
+const readsStdin = (word) => !word || word.dynamic || STDIN_FILE.test(word.text);
 const OPAQUE = { script: null };
 
 // What a command runs as a nested script, or null when it runs none (or
@@ -340,20 +345,27 @@ export function nestedScript(call) {
   if (name === "eval") {
     return args.some((w) => w.dynamic) ? OPAQUE : { script: args.map((w) => w.text).join(" "), sameShell: true };
   }
-  if (name === "source" || name === ".") {
-    return !args[0] || args[0].dynamic || STDIN_FILE.test(args[0].text) ? OPAQUE : null;
-  }
+  if (name === "source" || name === ".") return readsStdin(args[0]) ? OPAQUE : null;
+  // Like the shell: read the options, then the first other word is the
+  // script (with -c) or the script file. -s, or no word, reads stdin.
+  let command = false;
+  let stdin = false;
   for (let i = 0; i < args.length; i++) {
     const { text, dynamic } = args[i];
     if (dynamic) return OPAQUE;
-    if (text === "--command" || (/^-[a-zA-Z]+$/.test(text) && text.includes("c"))) {
-      const script = args[i + 1];
-      return script && !script.dynamic ? { script: script.text, sameShell: false } : OPAQUE;
+    if (text === "--command") command = true;
+    else if (SHELL_VALUE_FLAGS.has(text)) i++;
+    else if (/^[-+][a-zA-Z]+$/.test(text)) {
+      if (text[0] === "-" && text.includes("c")) command = true;
+      if (text[0] === "-" && text.includes("s")) stdin = true;
+      if (text.includes("o") || text.includes("O")) i++;
+    } else if (text.startsWith("--") && text !== "--") {
+      // --login, --norc: no value
+    } else {
+      const word = text === "--" ? args[i + 1] : args[i];
+      if (command) return word && !word.dynamic ? { script: word.text, sameShell: false } : OPAQUE;
+      return stdin || readsStdin(word) ? OPAQUE : null;
     }
-    if (SHELL_VALUE_FLAGS.has(text)) i++;
-    else if (/^-[a-zA-Z]+$/.test(text) && text.includes("s")) return OPAQUE;
-    else if (text === "--") return !args[i + 1] || args[i + 1].dynamic || STDIN_FILE.test(args[i + 1].text) ? OPAQUE : null;
-    else if (!/^[-+]/.test(text)) return STDIN_FILE.test(text) ? OPAQUE : null;
   }
   return OPAQUE; // no script and no file: the shell reads stdin
 }

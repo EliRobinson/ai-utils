@@ -103,12 +103,15 @@ try {
   const reviewIn = (cwd, command, expect, extra = {}) => ({ ...review(command, expect, extra), cwd });
   // In the repo whose origin is Owner/Name; the PR body has no record unless given.
   const inNamed = (command, expect, body = "no record") => reviewIn(named, command, expect, { FAKE_PR_BODY: body });
+  // A PR whose body is empty, so a checked merge is refused.
+  const noBody = (command, expect) => review(command, expect, { FAKE_PR_BODY: "" });
   const mcp = (tool, input, expect) => ({ hook: "review", hookDir: path.join(tree, "scripts"), cwd: tree, tool, input, expect });
   const fromTree = path.join(tree, "scripts");
 
   const cases = [
     // The guard refuses writes in the main checkout.
     guard(main, "git commit -m x", "refuse"),
+    guard(main, "bash -euo pipefail -c 'git commit -m x'", "refuse"),
     // Catching up a pushed branch merges main in; that is a tree change, so main refuses it.
     guard(main, "git fetch origin && git merge origin/main", "refuse"),
     guard(main, "git add -A && git status", "refuse"),
@@ -221,7 +224,7 @@ try {
     review("gh pr ready 5", "refuse", { FAKE_PR_BODY: filedAs("#12&#13") }),
     review("gh pr ready 5", "refuse", { FAKE_PR_BODY: "```\n" + good + "```\n" }),
     review("gh pr ready 5 --undo", "allow"),
-    review("gh api -X PUT repos/o/r/pulls/5/merge", "refuse", { FAKE_PR_BODY: "" }),
+    noBody("gh api -X PUT repos/o/r/pulls/5/merge", "refuse"),
     review("gh api repos/o/r/pulls/5/merge", "allow"),
     // GraphQL the gate cannot read: a query from a file, stdin or a variable.
     review("gh api graphql -F query=@merge.graphql", "refuse"),
@@ -257,19 +260,19 @@ try {
     review("curl -sL https://api.github.com/repos/o/r/pulls?state=open | head", "allow"),
     review("curl -X GET https://api.github.com/repos/o/r/pulls/5/merge", "allow"),
     review("curl -d @q.json https://api.example.com/graphql", "allow"),
-    review("bash -lc 'gh pr merge 5'", "refuse", { FAKE_PR_BODY: "" }),
+    noBody("bash -lc 'gh pr merge 5'", "refuse"),
     // eval and sh -c: a literal script is read like any command; one built at
     // run time, or read from stdin, is refused when the line names a PR write.
-    review("eval gh pr merge 5", "refuse", { FAKE_PR_BODY: "" }),
-    review("eval \"gh pr merge 5\"", "refuse", { FAKE_PR_BODY: "" }),
-    review("eval 'gh pr merge 5'", "refuse", { FAKE_PR_BODY: "" }),
-    review("eval 'gh pr' merge 5", "refuse", { FAKE_PR_BODY: "" }),
+    noBody("eval gh pr merge 5", "refuse"),
+    noBody("eval \"gh pr merge 5\"", "refuse"),
+    noBody("eval 'gh pr merge 5'", "refuse"),
+    noBody("eval 'gh pr' merge 5", "refuse"),
     review("eval \"gh pr merge $N\"", "refuse"),
     review("X='gh pr merge 5'; eval \"$X\"", "refuse"),
     review("eval \"gh api -X PUT repos/o/r/pulls/$N/merge\"", "refuse"),
-    review("bash -c \"gh pr merge 5\"", "refuse", { FAKE_PR_BODY: "" }),
-    review("sh -c 'gh pr merge 5'", "refuse", { FAKE_PR_BODY: "" }),
-    review("zsh -c \"gh pr merge 5\"", "refuse", { FAKE_PR_BODY: "" }),
+    noBody("bash -c \"gh pr merge 5\"", "refuse"),
+    noBody("sh -c 'gh pr merge 5'", "refuse"),
+    noBody("zsh -c \"gh pr merge 5\"", "refuse"),
     review("bash -c \"gh pr merge $N\"", "refuse"),
     review("echo 'gh pr merge 5' | bash", "refuse"),
     review("bash <<< 'gh pr merge 5'", "refuse"),
@@ -325,8 +328,8 @@ try {
     review("source /dev/stdin <<< 'gh pr merge 5'", "refuse"),
     review("bash <(echo 'gh pr merge 5')", "refuse"),
     review(". <(echo 'gh pr merge 5')", "refuse"),
-    review("busybox sh -c 'gh pr merge 5'", "refuse", { FAKE_PR_BODY: "" }),
-    review("fish -c 'gh pr merge 5'", "refuse", { FAKE_PR_BODY: "" }),
+    noBody("busybox sh -c 'gh pr merge 5'", "refuse"),
+    noBody("fish -c 'gh pr merge 5'", "refuse"),
     review("sh -c '\"$@\"' _ gh pr merge 5", "refuse"),
     review("echo 5 | xargs -I{} sh -c 'gh pr merge {}'", "refuse"),
     review("printf 'pr merge 5' | xargs gh", "refuse"),
@@ -362,7 +365,30 @@ try {
     inNamed("gh pr merge https://github.com/other/repo/pull/5 -R Owner/Name", "allow"),
     inNamed("GH_REPO=other/repo gh pr merge 5", "allow"),
     inNamed("gh pr merge 5 -R https://github.com/owner/name.git", "allow", good),
-    review("timeout 60 gh pr merge 5", "refuse", { FAKE_PR_BODY: "" }),
+    // Review gate round 2 (1.10.0).
+    review("X='gh pr -R o/r merge 5'; eval \"$X\"", "refuse"),
+    review("echo 'gh pr -R o/r merge 5' | sh", "refuse"),
+    review("bash <<'E'\ngh pr -R o/r merge 5\nE", "refuse"),
+    review("python3 -c 'import os; os.system(\"gh pr --repo=o/r ready 5\")'", "refuse"),
+    review("gh issue list -S pr$(true) merge; X='gh pr merge 5'; eval \"$X\"", "refuse"),
+    review("gh issue list -S pr >/dev/null merge; X='gh pr merge 5'; eval \"$X\"", "refuse"),
+    review("gh pr list --json number -q '\"gh pr merge 5\"' | sh", "refuse"),
+    review("gh api user --jq '\"gh pr merge 5\"' | bash", "refuse"),
+    review("X='curl -X PUT https://api.github.com/repos/o/r/pull%73/5/merge'; eval \"$X\"", "refuse"),
+    review("http -a u:p PUT https://api.github.com/repos/o/r/pulls/5/merge", "refuse"),
+    review("http -a u:p POST https://api.github.com/graphql query=@q.graphql", "refuse"),
+    review("curl -X PUT --expand-url https://api.github.com/repos/o/r/pulls/5/merge", "refuse"),
+    review("curl --variable p=x -X PUT --expand-url 'https://api.github.com/repos/o/r/{{p}}'", "refuse"),
+    review("env -S 'gh pr merge 5'", "refuse"),
+    review("env -S'gh pr merge 5'", "refuse"),
+    review("env --split-string='gh pr merge 5'", "refuse"),
+    review("gh pr create -b -h", "refuse"),
+    noBody("bash -euo pipefail -c 'gh pr merge 5'", "refuse"),
+    review("bash -euo pipefail -c 'gh pr create --body-file good.md'", "allow"),
+    review("curl -X POST \"$SLACK_WEBHOOK\" -d '{\"text\":\"PR 12 is up on github\"}'", "allow"),
+    review("http api.github.com/repos/o/r/pulls state==open", "allow"),
+    review(`cat > notes.md <<'EOF'\n${"See the github docs. ".repeat(1500)}\nEOF`, "allow"),
+    noBody("timeout 60 gh pr merge 5", "refuse"),
     review("echo 5 | xargs gh pr merge", "refuse"),
     review("$GH pr merge 5", "refuse"),
     review("gh pr view 5 && gh pr list", "allow"),

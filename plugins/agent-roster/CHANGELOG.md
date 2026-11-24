@@ -13,15 +13,15 @@
 
 - **The review gate refuses PR writes it cannot read.** `review-gate-hook.mjs` now refuses:
   - `gh api graphql` with the query from a file, stdin or a variable (`-F query=@file`, `--input`, `-f query="$Q"`);
-  - `curl`, `wget`, `http` and `xh` writes to a PR's `pulls/N/merge`, to `pulls` or to `merges`, and their calls to GitHub's GraphQL API. It reads the last `-X`, resolves `../` and `%`-encoding, and refuses a write to a URL in a variable or a curl glob when the line names a PR or GitHub path;
+  - `curl`, `wget`, `http` and `xh` writes to a PR's `pulls/N/merge`, to `pulls` or to `merges`, and their calls to GitHub's GraphQL API. It reads the last `-X`, `--url` and `--expand-url`, resolves `../` and `%`-encoding, and refuses a write to a GitHub URL in a variable or a glob;
   - `gh api` writes to `merges`, and a `gh api` write whose endpoint is a variable;
-  - a `gh` subcommand or `gh pr` action that is a variable or a brace expansion, and a PR command handed to another program as text (`python3 -c`, `alias`).
+  - a `gh` subcommand or `gh pr` action that is a variable or a brace expansion, a PR command handed to another program as text (`python3 -c`, `alias`), and `gh pr create -b -h` (a body of `-h` is not a help flag).
 
   Inline `gh api graphql -f query='...'`, `gh api` reads and HTTP reads still pass.
-- **Hidden scripts.** The gate reads a quoted `eval "gh pr merge 5"`. It cannot read an `eval` or `sh -c` script built at run time, a script a shell reads from stdin, a pipe or `<(...)` (`| bash`, `bash -s`, `bash /dev/stdin`, `source`), or a program in a variable. It refuses such a line only when the line names a PR write that it did not read in a plain `gh` or HTTP call, so `eval "$(ssh-agent -s)" && gh pr merge 5` is checked like the merge alone. The shell reader in `agent-hook-shell.mjs` now decides which scripts it can read, in one place. The main-checkout guard shares it, and it also follows a `cd` inside a literal `eval`.
+- **Hidden scripts.** The gate reads a quoted `eval "gh pr merge 5"`. It cannot read an `eval` or `sh -c` script built at run time, a script a shell reads from stdin, a pipe or `<(...)` (`| bash`, `bash -s`, `bash /dev/stdin`, `source`), a program in a variable or an `env -S` string, or an HTTP write to a URL it cannot read. It refuses such a line only when the line names a PR write (flags between `pr` and the action included) that it did not read in a plain `gh` or HTTP call, so `eval "$(ssh-agent -s)" && gh pr merge 5` is checked like the merge alone, and a webhook in a variable passes. The shell reader in `agent-hook-shell.mjs` now decides which scripts it can read, in one place, and reads `bash -euo pipefail -c '...'`. The main-checkout guard shares it, and it also follows a `cd` inside a literal `eval`.
 - **Repo spellings.** `-R owner/name.git`, `--repo https://github.com/owner/name` and other spellings of this repo are checked as this repo, not passed as another one. `-R` and `--repo` follow gh: the last one wins. A PR URL names its repo, and `GH_REPO=` and `GH_HOST=` prefixes are honoured.
-- **Refusals say what to do.** Each refusal about how a command is written starts with "Refused by the review gate", says what it cannot read and what to run instead, and says that a Review record does not change it. A line over 20,000 characters that mentions `gh`, a PR or GitHub is refused unread.
-- `check-agent-hooks.mjs` has a case for each form above (256 cases).
+- **Refusals say what to do.** Each refusal about how a command is written starts with "Refused by the review gate", says what it cannot read and what to run instead, and says that a Review record does not change it. A line over 20,000 characters that names a PR write, `gh`, or an HTTP client next to GitHub is refused unwalked.
+- `check-agent-hooks.mjs` has a case for each form above (279 cases).
 
 ## 1.9.0
 
