@@ -1,6 +1,6 @@
 {
   "name": "asks-board",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "One claude.ai artifact board for everything your Claude chats need from you. Chats add asks; your clicks ping the asking chat through one Board Router chat. Includes the daily-use skill and a setup skill with the board page template.",
   "author": {
     "name": "Eli Robinson"

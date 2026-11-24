@@ -1,6 +1,6 @@
 {
   "name": "agent-roster",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "optionalDependencies": [
     { "name": "accessibility-agents", "marketplace": "community-access", "version": "=7.1.0" }
   ],

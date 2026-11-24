@@ -37,7 +37,7 @@ cd ../<repo>-<task>
 - Once the PR exists, `gh pr update-branch <N>` does the same merge on GitHub. Never add `--rebase`: it rewrites the pushed branch. There is nothing to push afterwards. Before your next commit, run `git pull --ff-only origin <branch>` in your worktree, or that push is refused. If it cannot fast-forward because you have commits you have not pushed, run `git merge origin/<branch>` and push normally. If `gh pr update-branch` reports conflicts, catch up with `git merge origin/main` as above.
 - [review-gate.md](review-gate.md) says when a catch-up needs review.
 - Review before you open the PR, drafts included: see [review-gate.md](review-gate.md).
-- Only the coordinator merges, and only after the owner types "merge N" in chat. It follows the merge steps in [coordinator-prompt.md](coordinator-prompt.md#merging): up to date with `main`, review record complete, test gate passed on the exact head, merge lock, then `gh pr merge N --<style> --match-head-commit <sha>` in the merge style below.
+- Only the coordinator merges, and only as the merge policy below allows. It follows the merge steps in [coordinator-prompt.md](coordinator-prompt.md#merging): up to date with `main`, review record complete, test gate passed on the exact head, merge lock, then `gh pr merge N --<style> --match-head-commit <sha>` in the merge style below.
 
 ## Merge style
 
@@ -52,6 +52,27 @@ If the line is missing or not one of the three, find the style with the steps be
 1. Check what the GitHub repo allows: `gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed`.
 2. If only one is allowed, use it.
 3. If more than one is allowed, ask the owner which one.
+
+## Merge policy
+
+- **Merge policy:** `ask`
+
+This line says who decides that a PR merges. The setup skill writes it, and the coordinator reads it before each merge.
+
+- `ask` (the default): the coordinator merges PR N only after the owner types "merge N" in chat. It asks for that in chat, never on the Asks board: the board cannot merge, and a click there is not approval.
+- `auto`: the coordinator merges a PR on its own once it is ready: up to date with `main`, review record complete, test gate and CI passed on the exact head sha. It still takes the merge lock, names the head with `--match-head-commit`, never forces and never bypasses a hook. It tells the owner after each merge.
+
+If the line is missing or is not one of the two, the policy is `ask`.
+
+With `auto`, Claude Code's auto mode refuses the merge until the owner adds a permission rule. Auto mode's classifier blocks "merging a PR no human has approved" by default, and an agent's review record does not count as a human. The owner adds this rule themselves; no agent edits settings for them. Put it in the main checkout's `.claude/settings.local.json` for this repo only, or in `~/.claude/settings.json` for every repo:
+
+```json
+{ "permissions": { "allow": ["Bash(gh pr merge *)"] } }
+```
+
+The rule lets `gh pr merge` run without the classifier. The review gate hook still runs before it and still refuses a PR without a complete record. If `autoMode.classifyAllShell` is `true`, auto mode ignores the rule, and the merge needs the owner's "merge N" again.
+
+**To change the policy,** ask a coordinator to "change the merge policy to `ask`" (or `auto`). It runs the `setup-agentic-workflow` skill, whose "Change the merge policy" section changes this line and the merge bullet in `AGENTS.md` in one PR. A running coordinator reads this line before each merge, so the change applies from the next merge.
 
 ## What is enforced, and what is a rule
 

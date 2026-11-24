@@ -2,6 +2,24 @@
 
 1.8.0 is the first version published in this public repo. Earlier entries are kept for reference.
 
+## 1.12.0
+
+**Upgrade steps:**
+
+1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils` and `claude plugin update asks-board@ai-utils`, then restart Claude Code.
+2. Rerun `setup-agentic-workflow` in each repo set up before 1.12.0 and merge its setup PR. It asks for the merge policy, adds the **Merge policy** line to `docs/agents/git-workflow.md`, changes the two `AGENTS.md` bullets on the Asks board and merging, and writes a new `docs/agents/coordinator-prompt.md`. Start a new coordinator chat from that prompt once it merges.
+3. If you pick `auto` and use auto mode, add the permission rule from the README ("The merge policy") yourself. Until you do, auto mode blocks the coordinator's merges.
+
+**Changes:**
+
+- **Merge asks go in chat, never on the Asks board.** The board cannot merge, and a click there is not approval, so a merge row only added a step. The guardrails, the coordinator prompt, `route-work`, `multi-agent.md` and the README say so. The `asks-board` skill (1.0.9) says it too.
+- **A merge policy per repo: `ask` or `auto`.** `ask` is the default and today's rule: merge PR N only after the owner types "merge N" in chat. With `auto`, the coordinator merges a ready PR on its own: review record complete, test gate and CI passed on the exact head sha, under the merge lock, with `--match-head-commit`. The policy is one line in `docs/agents/git-workflow.md`, and the coordinator reads it before each merge.
+- **The setup asks for the policy**, writes it into `git-workflow.md` and `AGENTS.md`, and for `auto` gives the owner the permission rule to add: `Bash(gh pr merge *)` in `permissions.allow`. Auto mode's classifier blocks a merge no human has approved by default. The setup never edits settings itself.
+- **Change it later** with the setup skill's new "Change the merge policy" section: one ticket, one PR, two lines.
+- The review gate hook does not read the policy, and no hook change was needed: it already checks the `## Review` record on every merge, under either policy.
+- The coordinator's merge steps also check the PR's CI checks on the exact head, where the repo has CI.
+- `validate-plugins.py` checks the Merge policy line, that `AGENTS.md` names the same policy, and that no file puts a merge ask on the board.
+
 ## 1.11.0
 
 **Upgrade steps:**

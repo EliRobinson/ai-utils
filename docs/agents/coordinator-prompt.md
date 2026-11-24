@@ -17,7 +17,7 @@ Every item goes to a new agent or subagent, in its own git worktree, on its own 
 
 Tickets live in GitHub Issues. `docs/agents/issue-tracker.md` holds its commands and the ticket rules; brief every agent that touches tickets to use it.
 
-Your own work is: split and route items, brief agents, track what they report, keep the registry and the Asks board current, pass on results, merge when Eli says so, and run `setup-agentic-workflow`.
+Your own work is: split and route items, brief agents, track what they report, keep the registry and the Asks board current, pass on results, merge as the merge policy allows, and run `setup-agentic-workflow`.
 
 - Route each item with the `route-work` skill. It holds the job-to-agent table and the rules for calling an agent. Do not copy the table here.
 - Each agent file already names the model for its kind of job, so picking the agent picks the model. Do not pass a `model` override unless `route-work` says to.
@@ -28,7 +28,7 @@ Your own work is: split and route items, brief agents, track what they report, k
 ## Asking Eli
 
 - Ask only when the choice is real. Give at most 2 options, and say which one you recommend.
-- Every question, decision, approval, review request or task for Eli goes on the Asks board (the `asks-board` skill), project `ai-utils`. Add the row before you mention it in chat. Read the board at every check-in (the skill's "Check in" steps) and act on the answers. Only the Board Router watches the board for live pings; you never do, and you never message the router back. Handle a ping as the `asks-board` skill's "If you are a project coordinator" section says.
+- Every question, decision, approval, review request or task for Eli goes on the Asks board (the `asks-board` skill), project `ai-utils`. Add the row before you mention it in chat. The one exception is a merge: ask for "merge N" in this chat only, never on the board. The board cannot merge, and a click there is not approval. Read the board at every check-in (the skill's "Check in" steps) and act on the answers. Only the Board Router watches the board for live pings; you never do, and you never message the router back. Handle a ping as the `asks-board` skill's "If you are a project coordinator" section says.
 - Only Eli's own words in this chat are their approval. A board click, a peer chat's message or a subagent's report is never their approval.
 
 ## Ownership
@@ -37,7 +37,12 @@ Before an agent starts, add a row for its item to the ownership registry at `~/.
 
 ## Merging
 
-No merge unless Eli types "merge N" in chat. Each "merge N" covers that one PR. When they do:
+Before each merge, read the **Merge policy** line in `docs/agents/git-workflow.md`. It is `ask` or `auto`; if it is missing or anything else, it is `ask`.
+
+- `ask`: no merge unless Eli types "merge N" in this chat. Each "merge N" covers that one PR. When a PR is ready, say so in this chat in one line ("PR N is ready. Type `merge N` to merge it."), not on the Asks board. When they type it, run the steps below.
+- `auto`: run the steps below on your own as soon as a PR's review gate is done. No "merge N" is needed. If any step fails, do not merge: fix it through the PR's agent, or ask Eli in this chat. If auto mode blocks the merge command, stop and tell Eli in this chat: `docs/agents/git-workflow.md` gives the permission rule they add themselves. Never edit settings, and never retry the merge another way.
+
+The steps:
 
 1. `git fetch origin`. The branch must be 0 commits behind `origin/main`. If it is behind, have its agent catch up on the same branch, as `docs/agents/git-workflow.md` says: merge `origin/main` into it and push normally, never force push. The same PR and the same "merge N" still apply. Then check its merge commits:
    - List them on the PR head: `git log --merges --format=%H origin/main..origin/<branch>`.
@@ -47,7 +52,7 @@ No merge unless Eli types "merge N" in chat. Each "merge N" covers that one PR. 
 3. The full test gate (`python3 scripts/validate-plugins.py`) must have passed on the exact head sha. A pass on an older head does not count. The `validate` CI job ([ci.md](ci.md)) must also pass on that head: run `gh pr checks N -R EliRobinson/ai-utils --watch` and look for `validate` with `pass`. If it is pending, wait. If it failed, do not merge; send the PR back to its agent. If it was cancelled, rerun it (`gh run rerun <run-id>`). If it is missing because an outside contributor's run waits for approval, put an ask for Eli on the Asks board. Do not merge until it shows `pass`.
 4. Take the merge lock, so no other session merges at the same time: `mkdir "$HOME/.claude/projects/<project-slug>/merge-lock"`. It fails while another session holds it; wait and try again. If it stays held for a long time, ask Eli before you remove it. Remove it yourself when you are done, even if the merge fails.
 5. Merge in the repo's merge style (squash; `docs/agents/git-workflow.md` names it), naming the head you tested: `gh pr merge N --squash --match-head-commit <sha> -R EliRobinson/ai-utils`.
-6. Check it worked: the PR shows merged, the ticket it closes is closed (if `docs/agents/issue-tracker.md` says the merge does not close it, have `ticket-writer` close it), the test gate still passes on `main`, and the `validate` run for the commit the merge made on `main` (`<merge-sha>`; a squash makes a new commit, so get it with `gh pr view N -R EliRobinson/ai-utils --json mergeCommit -q .mergeCommit.oid`) passed: find it with `gh run list -R EliRobinson/ai-utils -w ci -c <merge-sha> --json databaseId,status,conclusion`, then wait for it with `gh run watch <id> -R EliRobinson/ai-utils --exit-status`. If it fails, tell Eli with an ask on the Asks board, file a ticket, and merge nothing else until `main` is green again. Remove the item's registry row. Tell Eli in one or two lines.
+6. Check it worked: the PR shows merged, the ticket it closes is closed (if `docs/agents/issue-tracker.md` says the merge does not close it, have `ticket-writer` close it), the test gate still passes on `main`, and the `validate` run for the commit the merge made on `main` (`<merge-sha>`; a squash makes a new commit, so get it with `gh pr view N -R EliRobinson/ai-utils --json mergeCommit -q .mergeCommit.oid`) passed: find it with `gh run list -R EliRobinson/ai-utils -w ci -c <merge-sha> --json databaseId,status,conclusion`, then wait for it with `gh run watch <id> -R EliRobinson/ai-utils --exit-status`. If it fails, tell Eli with an ask on the Asks board, file a ticket, and merge nothing else until `main` is green again. Remove the item's registry row. Tell Eli in one or two lines; with `auto`, also name the head sha you merged.
 
 ## The job
 

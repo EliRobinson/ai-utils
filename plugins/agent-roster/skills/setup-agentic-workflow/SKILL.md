@@ -1,6 +1,6 @@
 ---
 name: setup-agentic-workflow
-description: Use when the user wants to set up their agent workflow in a repo or a new coordinator chat, for example "set up agent workflow", "set up worktrees and the review gate here", "add agent rules to this repo", "onboard this coordinator", "use Spotlight (or Linear, Jira) for tickets", or when starting a new repo that agents will work in. Sets up the worktree and branch rules, the ticketing tool setting, the review gate and its reviewer skills, the Asks board link, and the coordinator prompt. In a coordinator chat this is the one job the chat does itself, because the agents and rules it installs may not exist yet.
+description: Use when the user wants to set up their agent workflow in a repo or a new coordinator chat, for example "set up agent workflow", "set up worktrees and the review gate here", "add agent rules to this repo", "onboard this coordinator", "use Spotlight (or Linear, Jira) for tickets", "change the merge policy", "let the coordinator merge on its own", or when starting a new repo that agents will work in. Sets up the worktree and branch rules, the ticketing tool setting, the merge policy (always ask, or auto-merge), the review gate and its reviewer skills, the Asks board link, and the coordinator prompt. In a coordinator chat this is the one job the chat does itself, because the agents and rules it installs may not exist yet.
 ---
 
 # Set up the agentic workflow
@@ -13,9 +13,9 @@ You set up the owner's agent workflow in the repo you are run in. The workflow:
 - PRs merge in the repo's merge style (merge commit, squash or rebase), recorded in `docs/agents/git-workflow.md`;
 - the reviewer agents run on the branch before a PR is opened, and a hook checks their record;
 - a PR gets at most two rounds of review (the rule is in `docs/agents/review-gate.md`);
-- no PR merges until the owner types "merge N";
+- the merge policy says who decides a merge: `ask` (no PR merges until the owner types "merge N" in chat) or `auto` (the coordinator merges a ready PR on its own), recorded in `docs/agents/git-workflow.md`;
 - a coordinator chat routes work: it hands off every task, runs agents in the background, and stays free to talk;
-- every ask for the owner (question, decision, approval, review, task) goes on the owner's Asks board;
+- every ask for the owner (question, decision, approval, review, task) goes on the owner's Asks board, except "merge N", which the coordinator asks for in chat;
 - only the Board Router watches the board for live pings; a coordinator never does (it reads the board at every check-in), never messages the router back, and handles a ping as the `asks-board` skill's "If you are a project coordinator" section says;
 - the reviewers have the skills and plugins they need (copy editing, design, accessibility);
 - an ownership registry outside the repo keeps concurrent sessions apart;
@@ -91,6 +91,10 @@ Ask one question. Show two names and let the owner correct them in the same answ
   - If only `rebase` is allowed (every repo set up before agent-roster 1.9.0), recommend `squash`, with the reason from that same section.
   - If the owner picks `merge`, say it drops the linear-history rule.
   - The owner may pick any of the three.
+- the merge policy: `ask` or `auto`. Recommend `ask`.
+  - `ask`: the coordinator merges PR N only after the owner types "merge N" in chat. It asks in chat, never on the Asks board.
+  - `auto`: the coordinator merges a ready PR on its own, once the review record is complete and the test gate and CI pass on the exact head sha. It still takes the merge lock and never forces or bypasses a hook.
+  - If the owner picks `auto`, say that Claude Code's auto mode blocks a merge no human has approved, so the owner must add a permission rule themselves (step 10 gives it). Without it, the coordinator stops at each merge and asks in chat.
 
 Then learn the tool's commands. GitHub Issues needs nothing more: the template already has them. For any other tool, never guess a command:
 
@@ -134,14 +138,14 @@ For each file below: if it is missing, create it. If it exists and is identical,
 2. **Self-check.** Run `node scripts/check-agent-hooks.mjs` in the repo. Every case must pass. It builds a throwaway repo with a worktree and checks that the guard refuses `git commit` in the main checkout and allows it in a worktree and with the escape, and that the review gate refuses a merge without a valid record. If a case fails, stop and report it. Do not wire a hook that fails its check.
 3. **Settings.** Run `node <skill folder>/scripts/merge-settings.mjs <repo>`. It prints the merged `.claude/settings.json` and writes nothing. Show what it adds and ask. On a yes, run it again with `--write`. It keeps every existing setting and hook, but rewrites the file with 2-space indent.
 4. **Reviewer agents.** Copy every reviewer file listed under "Where your files are" into `.claude/agents/`. Keep their models. Never set one to Fable. On an upgrade, if `.claude/agents/spec-security-copy-critic.md` exists, it is the old combined reviewer that `spec-critic`, `security-critic` and `copy-critic` replace: ask, and on a yes delete it. Update `scripts/review-gate-hook.mjs`, `docs/agents/review-gate.md` and the `AGENTS.md` guardrails bullet in the same change, so the hook and the record name the same reviewers. The newer hook also needs a `Rounds:` line in every record: tell the owner that open PRs need one added before they can leave draft or merge.
-5. **Docs.** Copy `templates/docs-agents/git-workflow.md`, `review-gate.md` and `multi-agent.md` into `docs/agents/`. Replace `{{REGISTRY_PATH}}` with the registry path. In `git-workflow.md`, set the **Merge style** line to the style from step 3. If the repo already has a file on that topic under another name, merge into it instead. If an older copy of one of these files differs from the template, show the diff and replace the old rules (such as a new branch and PR whenever `main` moves) rather than keeping both.
+5. **Docs.** Copy `templates/docs-agents/git-workflow.md`, `review-gate.md` and `multi-agent.md` into `docs/agents/`. Replace `{{REGISTRY_PATH}}` with the registry path. In `git-workflow.md`, set the **Merge style** line to the style from step 3, and the **Merge policy** line to the policy from step 3. If the repo already has a file on that topic under another name, merge into it instead. If an older copy of one of these files differs from the template, show the diff and replace the old rules (such as a new branch and PR whenever `main` moves) rather than keeping both.
    - **The ticketing tool setting.** Copy `templates/docs-agents/issue-tracker.md` to `docs/agents/issue-tracker.md`, and replace `{{GITHUB_REPO}}` with `owner/name`. For GitHub Issues that is all. For another tool, fill the `## Setting` lines and the `## Commands` table with what step 3 learned: **Tool**, **Access** (`cli` or `mcp`), **Ticket ID**, **In branch names** (letters, digits and `-` only), **Link**, and **Close from a PR** (`none` unless the tool closes a ticket from a line in the PR body). Put the commands in the column that **Access** names, and `<not set>` in the other column and for any action nobody could name. Keep the rest of the file as it is. The file must then name no `gh issue` command.
    - If `docs/agents/issue-tracker.md` already exists without a `## Setting` section, show the diff and propose replacing it with the filled template, keeping any section of its own that the template lacks.
 6. **Coordinator prompt.** Fill `coordinator/coordinator-prompt.md` and write it to `docs/agents/coordinator-prompt.md`:
    - `{{CHAT_NAME}}`: "<Repo name> Coordinator"; `{{PROJECT}}`: the project slug from step 1.15 (or the one the owner chose in step 4); `{{REPO_PATH}}`: the main checkout; `{{GITHUB_REPO}}`: `owner/name`; `{{OWNER}}`: the name from step 3; `{{BRANCH_USER}}`: the branch username from step 3; `{{REGISTRY_PATH}}`: the registry; `{{MERGE_LOCK}}`: `merge-lock` in the registry's folder; `{{TEST_GATE}}`: the command from step 1.7, or `<your full test command>` if you could not tell; `{{TICKETING_TOOL}}`: the **Tool** line of `docs/agents/issue-tracker.md`; `{{MERGE_STYLE}}`: the merge style from step 3.
    - Leave `{{JOB}}` as a line for the owner to fill: `<Describe this coordinator's job: the goal, what is known, what done looks like, and what to do once it is done.>`
    - Drop the HTML comment at the top.
-7. **AGENTS.md.** Fill `templates/agents-guardrails.md` (`{{OWNER}}`, `{{BRANCH_USER}}`, `{{REGISTRY_PATH}}`, `{{TICKETING_TOOL}}`, `{{MERGE_STYLE}}`).
+7. **AGENTS.md.** Fill `templates/agents-guardrails.md` (`{{OWNER}}`, `{{BRANCH_USER}}`, `{{REGISTRY_PATH}}`, `{{TICKETING_TOOL}}`, `{{MERGE_STYLE}}`, `{{MERGE_POLICY}}`).
    - No `AGENTS.md`: create one with a one-line description of the repo, the guardrails block, and a `## Topics` list linking the five docs.
    - An `AGENTS.md` exists: add the block under its guardrails heading, or as a new `## Guardrails` section near the top. Drop bullets it already states. Replace any bullet the new block contradicts, such as an older rule that forbids merging `main` into a branch or opens a new branch when `main` moves. Show the diff. Where it names GitHub issues as the tracker but the tool is another one, propose a change to name the configured tool.
    - Keep the root file short. If it is long, suggest the `optimize-agents-md` skill rather than restructuring it yourself.
@@ -193,15 +197,32 @@ Finish with a short report:
 - the ticketing tool: its name, access (`cli` or `mcp`), and any action left `<not set>`;
 - the PR link (option A);
 - the Asks board: its link, and whether this project has a route;
+- the merge policy. For `auto`, give the owner the permission rule to add themselves, word for word, and say where: the main checkout's `.claude/settings.local.json` (this repo only) or `~/.claude/settings.json` (every repo). Never add it for them:
+
+  ```json
+  { "permissions": { "allow": ["Bash(gh pr merge *)"] } }
+  ```
+
+  Say why: auto mode's classifier blocks a merge no human has approved, and this narrow rule runs `gh pr merge` without the classifier. The review gate hook still checks every merge. If `autoMode.classifyAllShell` is `true` in their settings, auto mode ignores the rule.
 - the reviewer skills and the `accessibility-agents` plugin: which are ready and which are missing, and whether page scans can run;
 - `docs/agents/coordinator-prompt.md`: paste it as the first message of a new chat to start a coordinator, after filling in the job. Name that chat exactly as the board's route says (`<Repo name> Coordinator`). When it starts, it sets its `sessionId` on the route and adds a test ask, so the owner can check the ping;
 - for option A: delete the registry row when the setup PR merges;
 - what the owner must do by hand: anything from steps 2 and 4 they said no to (the commands are in the agent-roster README, under "Skills the agents need"), repo settings if they chose B, git hooks, the test gate in the coordinator prompt if you could not tell it, and restarting Claude Code so the new hooks load.
 
+## Change the merge policy
+
+When the owner asks to change the merge policy in a repo this skill already set up ("change the merge policy to `auto`", "always ask me before a merge"), do only this, not the steps above:
+
+1. Read the **Merge policy** line in `docs/agents/git-workflow.md`. If it already has the value the owner asked for, say so and stop. If the file has no such line, the repo was set up before agent-roster 1.12.0: run the full setup instead.
+2. File a ticket with the title "Change the merge policy to `<value>`", as step 5 does, and work in a new worktree on branch `<username>/<ticket>/merge-policy`, off `origin/main`. The owner's request is their yes to that one ticket.
+3. Change the **Merge policy** line in `docs/agents/git-workflow.md`, and the policy named in the `AGENTS.md` merge bullet ("**Merge policy: <value>.**"). If `docs/agents/git-workflow.md` is a symlink, change its target. Change nothing else.
+4. Commit, take the branch through the review gate, push and open the PR, as step 9 says for option A. It merges under the policy in force before it: after the owner's "merge N" for `ask`, or by the coordinator on its own for `auto`.
+5. Report: the PR link, and for `auto`, the permission rule from step 10, for the owner to add themselves. A running coordinator reads the line before each merge, so it needs no restart.
+
 ## Checklist
 
 - [ ] Looked before changing anything, and told the owner what exists
-- [ ] Asked for the owner name, branch username, ticketing tool, merge style and where to work
+- [ ] Asked for the owner name, branch username, ticketing tool, merge style, merge policy and where to work
 - [ ] Missing installs asked in one batch before any other question, then a reload and a second run
 - [ ] Asks board and project route ready (no route written over), or listed as missing
 - [ ] Reviewer skills and the `accessibility-agents` plugin ready, or listed as missing
@@ -214,6 +235,7 @@ Finish with a short report:
 - [ ] `docs/agents/` git-workflow, review-gate, multi-agent, issue-tracker and coordinator-prompt; with another tool, none of them files tickets with `gh issue`
 - [ ] Guardrails in `AGENTS.md`; `CLAUDE.md` points at it
 - [ ] Merge style written in `git-workflow.md`, the coordinator prompt and `AGENTS.md`
+- [ ] Merge policy written in `git-workflow.md` and `AGENTS.md`; for `auto`, the permission rule given to the owner, not added
 - [ ] Repo settings applied only after a yes
 - [ ] Git hooks recommended if missing
 - [ ] Reviewers ran before the PR was opened, and it is not merged (A), or commit done before restart (B)

@@ -359,6 +359,54 @@ class UnitTestRule(unittest.TestCase):
             self.assertEqual(vp.problems, [])
 
 
+ASK_LINE = "- **Merge policy:** `ask`"
+ASK_AGENTS = "- **Merge policy: ask.** It is set in git-workflow.md."
+
+
+class MergePolicy(unittest.TestCase):
+    # (case, git-workflow.md text, AGENTS.md text, expected problems)
+    CASES = [
+        ("ask line and matching AGENTS.md pass", f"x\n{ASK_LINE}\ny", ASK_AGENTS, []),
+        ("missing line fails", "no policy here", ASK_AGENTS,
+         ["needs one '- **Merge policy:** `ask|auto`' line"]),
+        ("two lines fail", f"{ASK_LINE}\n{ASK_LINE}", ASK_AGENTS,
+         ["needs one '- **Merge policy:** `ask|auto`' line"]),
+        ("unknown value fails", "- **Merge policy:** `sometimes`", ASK_AGENTS,
+         ["needs one '- **Merge policy:** `ask|auto`' line"]),
+        ("auto as the shipped default fails", "- **Merge policy:** `auto`", "- **Merge policy: auto.**",
+         ["the Merge policy line says 'auto', but the shipped default is 'ask'"]),
+        ("AGENTS.md naming another policy fails", ASK_LINE, "- **Merge policy: auto.**",
+         ['AGENTS.md must say "Merge policy: ask.", the policy git-workflow.md sets']),
+    ]
+
+    def test_merge_policy_line(self):
+        for case, workflow, agents_md, expected in self.CASES:
+            with self.subTest(case):
+                self.assertEqual(vp.merge_policy_problems(workflow, agents_md), expected)
+
+
+class MergeOnBoard(unittest.TestCase):
+    # (line, whether it puts a merge ask on the board)
+    CASES = [
+        ('every task, including "merge N" requests and hosting choices', True),
+        ('"Type `merge 42` in chat to merge PR 42"', True),
+        ('The one exception is "merge N": ask for it in chat only', False),
+        ('"PR 42 is ready. Type `merge 42` to merge it."', False),
+    ]
+
+    def test_merge_on_board_pattern(self):
+        for line, flagged in self.CASES:
+            with self.subTest(line):
+                self.assertEqual(bool(vp.MERGE_ON_BOARD.search(line)), flagged)
+
+
+class MergePolicyRule(unittest.TestCase):
+    def test_repo_files_carry_the_rule(self):
+        with mock.patch.object(vp, "problems", []):
+            vp.check_merge_policy()
+            self.assertEqual(vp.problems, [])
+
+
 class SelfChecks(unittest.TestCase):
     def run_without_node(self, env: dict) -> list[str]:
         with tempfile.TemporaryDirectory() as tmp:

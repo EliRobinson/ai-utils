@@ -115,6 +115,6 @@ It cannot stop:
 - a script built at run time whose text never names the PR write in plain words (`printf 'gh p%s merge' r`, base64);
 - an HTTP client other than `curl`, `wget`, `http` and `xh`, or a GitHub Enterprise host without `github` in its name.
 
-It does not check which model each reviewer ran on, only that none ran on Fable. The owner's "merge N" is the last check.
+It does not check which model each reviewer ran on, only that none ran on Fable. Under the `ask` merge policy, the owner's "merge N" is the last check. Under `auto`, the coordinator's checks in its merge steps are the last check, so the record must be true.
 
 Check it with `node scripts/check-agent-hooks.mjs`.

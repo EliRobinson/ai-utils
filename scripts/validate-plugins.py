@@ -509,6 +509,51 @@ def check_unit_test_rule() -> None:
     check_terms(UNIT_TEST_RULE_TERMS, "unit-test rule")
 
 
+# The merge policy (#24): `ask` or `auto`, one line in git-workflow.md. A merge
+# is never an Asks board row: the board cannot merge, and a click is not approval.
+MERGE_POLICIES = ("ask", "auto")
+DEFAULT_MERGE_POLICY = "ask"
+MERGE_POLICY_LINE = re.compile(r"^- \*\*Merge policy:\*\* `([^`]*)`$", re.M)
+READS_MERGE_POLICY = "read the **merge policy** line in `docs/agents/git-workflow.md`"
+MERGE_ASK_IN_CHAT = "ask for \"merge n\" in this chat only, never on the board"
+MERGE_POLICY_TERMS = {
+    GUARDRAILS: ["merge policy: {{merge_policy}}.", "a request for \"merge n\" goes in the coordinator chat only"],
+    COORDINATOR_PROMPT: [READS_MERGE_POLICY, MERGE_ASK_IN_CHAT],
+    REPO_COORDINATOR_PROMPT: [READS_MERGE_POLICY, MERGE_ASK_IN_CHAT],
+    ROUTE_WORK: ["the one exception is \"merge n\""],
+    SETUP_SKILL_MD: ["## change the merge policy", "bash(gh pr merge *)"],
+    ASKS_BOARD_SKILL: ["never add a merge ask"],
+}
+# Wording that puts a merge ask on the board, as these files said before #24.
+MERGE_ON_BOARD = re.compile(r'including "merge N" requests|in chat to merge PR', re.I)
+
+
+def merge_policy_problems(workflow: str, agents_md: str) -> list[str]:
+    """Problems with the Merge policy line, and with AGENTS.md naming the same policy.
+
+    docs/agents/git-workflow.md is a symlink to the template, so its line is
+    both this repo's policy and the shipped default, which must be `ask`.
+    """
+    found = MERGE_POLICY_LINE.findall(workflow)
+    if len(found) != 1 or found[0] not in MERGE_POLICIES:
+        return ["needs one '- **Merge policy:** `ask|auto`' line"]
+    policy = found[0]
+    out = []
+    if policy != DEFAULT_MERGE_POLICY:
+        out.append(f"the Merge policy line says {policy!r}, but the shipped default is {DEFAULT_MERGE_POLICY!r}")
+    if f"merge policy: {policy}." not in agents_md.lower():
+        out.append(f"AGENTS.md must say \"Merge policy: {policy}.\", the policy git-workflow.md sets")
+    return out
+
+
+def check_merge_policy() -> None:
+    check_terms(MERGE_POLICY_TERMS, "merge policy")
+    for problem in merge_policy_problems(read_or_fail(GIT_WORKFLOW) or "", read_or_fail(REPO_AGENTS_MD) or ""):
+        fail(f"{rel(GIT_WORKFLOW)}: {problem}")
+    for path in (ROUTE_WORK, AGENT_ROSTER / "README.md", ASKS_BOARD_SKILL, GUARDRAILS, REPO_AGENTS_MD):
+        fail_matching_lines(path, read_or_fail(path) or "", MERGE_ON_BOARD,
+                            "puts a merge ask on the Asks board; merge asks go in the coordinator chat")
+
 VENDORED_SKILL = AGENT_ROSTER / "skills" / "thermo-nuclear-code-quality-review"
 REMOVED_LINE = "disable-model-invocation: true"  # the last frontmatter key upstream
 PINNED_COMMIT = re.compile(r"^- Commit: `([0-9a-f]{40})`$", re.M)
@@ -741,6 +786,7 @@ def main() -> int:
     check_agent_roster_templates()
     check_branch_rule()
     check_unit_test_rule()
+    check_merge_policy()
     check_vendored_thermonuclear()
     check_accessibility_agents()
     check_workflows()
