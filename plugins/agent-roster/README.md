@@ -134,7 +134,7 @@ From a coordinator chat, use the Agent tool with `subagent_type: "agent-roster:<
 - One item = one agent = one worktree = one branch = one PR.
 - Name each branch `<username>/<ticket>/<short-description>`, with the ticket ID from the repo's ticketing tool, and give the name in the brief.
 - A PR gets at most two rounds of review (see `pr-finisher`, or the repo's `docs/agents/review-gate.md`).
-- Every question to the owner goes on the Asks board (use the `asks-board` skill): every question, decision, approval, review request and task, including "merge N" requests and hosting choices. Never end a chat reply with an ask that is not also a board row. Subagents never write to the board; they report the ask to their coordinator, who adds it.
+- Every question to the owner goes on the Asks board (use the `asks-board` skill): every question, decision, approval, review request and task, hosting choices included. Never end a chat reply with an ask that is not also a board row. The one exception is "merge N": the coordinator asks for it in chat only, because the board cannot merge and a click there is not approval. Subagents never write to the board; they report the ask to their coordinator, who adds it.
 - Only the Board Router watches the board for live pings; a coordinator never does (it reads the board at every check-in), and never messages the router back. Handle a ping as the `asks-board` skill's "If you are a project coordinator" section says.
 - Never use Fable.
 
@@ -142,7 +142,7 @@ The `route-work` skill holds the full routing table and these rules for the coor
 
 ## Set up a repo
 
-Run the `setup-agentic-workflow` skill in a repo or a new coordinator chat ("set up agent workflow in this repo"). It looks first, and never overwrites a file without showing the diff. It asks for the owner's name, the branch username, the ticketing tool and where to work, then one question for all missing installs, then about GitHub settings and git hooks. Setting up a new Asks board adds a few more questions.
+Run the `setup-agentic-workflow` skill in a repo or a new coordinator chat ("set up agent workflow in this repo"). It looks first, and never overwrites a file without showing the diff. It asks for the owner's name, the branch username, the ticketing tool, the merge style and the merge policy, and where to work, then one question for all missing installs, then about GitHub settings and git hooks. Setting up a new Asks board adds a few more questions.
 
 First it gets the companions ready:
 
@@ -165,6 +165,8 @@ Then it installs:
 - `scripts/check-agent-hooks.mjs`, a self-check it runs after install;
 - the hook wiring, merged into `.claude/settings.json`;
 - the ownership registry, outside the repo.
+
+It writes the merge policy you pick into `docs/agents/git-workflow.md` and `AGENTS.md` (see "The merge policy" below).
 
 It asks before changing GitHub settings. That covers a `main` ruleset and the merge style you pick (merge commit, squash or rebase). It recommends git hooks if the repo has none.
 
@@ -207,9 +209,22 @@ A worked example, for a repo whose tickets live in Spotlight, reached through it
 
 When Spotlight gets an MCP server, fill the `mcp` column from its tool list and change the **Access** line from `cli` to `mcp`.
 
+## The merge policy
+
+Each repo picks who decides that a PR merges. The setting is this line in `docs/agents/git-workflow.md`, and the `AGENTS.md` merge bullet names the same value:
+
+```markdown
+- **Merge policy:** `ask`
+```
+
+- `ask` (the default): the coordinator merges PR N only after the owner types "merge N" in chat. It asks for that in chat, never on the Asks board: the board cannot merge, and a click there is not approval.
+- `auto`: the coordinator merges a ready PR on its own, through every merge step (review record, test gate and CI on the exact head sha, merge lock, `--match-head-commit`). PRs that change the workflow files, PRs its agents did not open, drafts and PRs on hold still wait for "merge N".
+
+The full rule is the **Merge policy** section of [`git-workflow.md`](skills/setup-agentic-workflow/templates/docs-agents/git-workflow.md#merge-policy): how the coordinator reads the policy (from `origin/main` only; anything unclear is `ask`), what `auto` never covers, and the permission rule the owner adds for Claude Code's auto mode, which otherwise blocks a merge no human has approved. The setup never edits settings. To change the policy later, ask a coordinator; the `setup-agentic-workflow` skill's "Change the merge policy" section does it.
+
 ## Start a coordinator chat
 
-A coordinator is the main chat the owner talks to, not a subagent, so it starts from a prompt rather than an agent file. Paste `coordinator/coordinator-prompt.md` as the first message of a new chat, with its placeholders filled (`setup-agentic-workflow` fills them for a repo). It holds the start-up steps, the working rule (hand off every task, tickets in the configured tool), asking the owner (every ask on the Asks board, and a pointer to the `asks-board` skill for Board Router pings), the ownership registry, and the merge steps. The routing table stays in `route-work`, which the prompt links to.
+A coordinator is the main chat the owner talks to, not a subagent, so it starts from a prompt rather than an agent file. Paste `coordinator/coordinator-prompt.md` as the first message of a new chat, with its placeholders filled (`setup-agentic-workflow` fills them for a repo). It holds the start-up steps, the working rule (hand off every task, tickets in the configured tool), asking the owner (every ask on the Asks board except "merge N", which goes in chat, and a pointer to the `asks-board` skill for Board Router pings), the ownership registry, and the merge steps, which read the merge policy before each merge. The routing table stays in `route-work`, which the prompt links to.
 
 ## Override per repo
 

@@ -29,7 +29,7 @@ scripts/                         validate-plugins.py (the test gate), workflow_r
 
 ## Contributing
 
-`AGENTS.md` is the maintainer's agent workflow: one worktree and PR per item, the review gate, and no merge until Eli says "merge N".
+`AGENTS.md` is the maintainer's agent workflow: one worktree and PR per item, the review gate, and no merge unless the merge policy allows it (here `ask`: Eli says "merge N").
 
 Outside contributors: fork the repo, use any branch name, run `python3 scripts/validate-plugins.py`, and open a PR. The maintainer runs the review gate. If you use Claude Code in a clone, note that `.claude/settings.json` loads two hooks: one refuses tree-changing git in the main checkout, so work in a worktree (`git worktree add ../ai-utils-<task> -b <branch> origin/main`), and one refuses `gh pr create` unless the PR body has a `## Review` record. Open the PR from the GitHub web page instead; do not write a record for reviews that did not run.
 
