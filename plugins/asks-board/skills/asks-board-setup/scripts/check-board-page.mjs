@@ -20,6 +20,16 @@ const each = (behaviour, table, run) => {
     if (msg) problems.push(behaviour + " " + show(c) + ": " + msg);
   }
 };
+// each() for async cases: [name, input, want] rows; run(input) may return a promise.
+const eachAsync = async (behaviour, table, run) => {
+  const done = [];
+  for (const [name, input, want] of table) {
+    let got;
+    try { got = await run(input); } catch (e) { got = "threw " + e.message; }
+    done.push([name, got, want]);
+  }
+  each(behaviour, done, (_, got, want) => expect(got, want));
+};
 // A case passes when got equals want; else the message says what it got.
 const expect = (got, want) => (same(got, want) ? null : `want ${show(want)}, got ${show(got)}`);
 
@@ -342,19 +352,18 @@ each("tripwire: a busy row takes no second click", [[]], () => {
   const a = body("act");
   return a.indexOf("if (busy.has(d.id)) return;") === a.indexOf("{") + 6 ? null : "act() does not check busy first";
 });
-each("tripwire: the anchor wait always ends and redraws", [[]], () =>
-  (/anchor\.then\(\(\) => \{ anchoring--; requestRender\(true\); \}\)/.test(body("act")) &&
-    /within\(anchorP, ANCHOR_WAIT_MS, null\)/.test(body("act")) ? null : "missing"));
-// One click, one ping (#32): each of these must hold in act(), card(), lockCard() and composer().
-each("tripwire: one click, one ping:", [
+// The anchor wait, and one click, one ping (#32): each of these must hold in the named function.
+each("tripwire: click handling:", [
+  ["the anchor wait always ends and redraws", "act", /anchor\.then\(\(\) => \{ anchoring--; requestRender\(true\); \}\)/],
+  ["the anchor wait has a time limit", "act", /within\(anchorP, ANCHOR_WAIT_MS, null\)/],
   ["act() checks a click that changes nothing before it anchors, saves or pings", "act",
     /if \(changesNothing\(row\.data, send\.patch\)\) \{[^}]*flash\(d\.id, SAME_TEXT, "info", where\);\s*requestRender\(true\);\s*return;\s*\}\s*const node/],
   ["act() runs the save and the ping inside holdRow, each with a time limit", "act",
     /holdRow\(busy, d\.id, async \(\) => \{[\s\S]*await Promise\.all\(\[\s*within\(write\(d\.id, send\.patch\), CLICK_WAIT_MS, SLOW_SAVE\),\s*send\.ping \? within\(ping\(d, anchor, send\.ping\), CLICK_WAIT_MS, false\) : false,/],
   ["act() never takes a row out of busy itself", "act", /^(?![\s\S]*busy\.(?:delete|add)\()/],
-  ["act() disables the card's controls when the click starts", "act", /holdRow\([\s\S]*lockCard\(node, true\);[\s\S]*await/],
+  ["act() disables the card's controls when the click starts", "act", /holdRow\([\s\S]*lockCard\(node\);[\s\S]*await/],
   ["act() reads the row as saved once the save ends", "act", /if \(now\) now\.data = Object\.assign\(\{\}, now\.data, send\.patch\);/],
-  ["card() disables a busy row's controls when it redraws", "card", /if \(busy\.has\(d\.id\)\) lockCard\(item, false\);\s*return item;/],
+  ["card() disables a busy row's controls when it redraws", "card", /if \(busy\.has\(d\.id\)\) lockCard\(item\);\s*return item;/],
   ["card() marks the tick as a lockable control", "card", /ctl\("input", "chk", d, \{ "data-lock": ""/],
   ["card() marks each option as a lockable control", "card", /ctl\("button", "opt" \+ i, d, \{ "data-lock": ""/],
   ["card() marks Not needed as a lockable control", "card", /ctl\("button", "dis", d, \{ "data-lock": ""/],
@@ -362,9 +371,12 @@ each("tripwire: one click, one ping:", [
   ["lockCard() disables every data-lock control that is not disabled already", "lockCard",
     /for \(const c of node\.querySelectorAll\("\[data-lock\]"\)\) if \(!c\.disabled\) \{ c\.disabled = true; c\.classList\.add\("locked"\); \}/],
   ["act() enables the card's controls as soon as the click ends, before any redraw", "act", /\.then\(\(\) => \{ unlockCard\(d\.id\); requestRender\(false\); \}\)/],
-  ["unlockCard() enables only what lockCard disabled", "unlockCard", /document\.querySelectorAll\("\.locked"\)[\s\S]*c\.disabled = false;[\s\S]*removeAttribute\("aria-busy"\)/],
+  ["unlockCard() clears the card's aria-busy", "unlockCard", /card\.removeAttribute\("aria-busy"\)/],
+  ["unlockCard() enables only what lockCard disabled", "unlockCard", /for \(const c of card\.querySelectorAll\("\.locked"\)\) \{ c\.disabled = false;/],
+  ["unlockCard() lets the card's note Send button wait no longer", "unlockCard", /if \(send && send\.sync\) send\.sync\(\);/],
+  ["a note's Send button is disabled while its card saves", "composer", /sendBtn\.disabled = b\.disabled \|\| busy\.has\(d\.id\);/],
   ["a note sent while its row saves is kept, not lost", "composer",
-    /if \(busy\.has\(d\.id\)\) \{ flash\(d\.id, NOTE_WAIT, "error", where\); requestRender\(true\); return; \}[\s\S]*closeNote\(d\);/],
+    /if \(busy\.has\(d\.id\)\) \{ flash\(d\.id, NOTE_WAIT, "info", where\); requestRender\(true\); return; \}[\s\S]*closeNote\(d\);/],
 ], (_, fn, re) => (re.test(body(fn)) ? null : "missing in " + fn + "()"));
 each("tripwire: ping() sends nothing when the header would not match the row", [[]], () =>
   (/if \(!comments \|\| !pingable\(d\)\) return false;/.test(body("ping")) ? null : "missing"));
@@ -397,40 +409,30 @@ const later = () => { let res, rej; const p = new Promise((a, b) => { res = a; r
 const tick = () => new Promise((r) => setTimeout(r, 0));
 // Settle the work as a case says, wait a tick, and say whether the row is still busy.
 const heldAfter = async (settle) => {
-  try {
-    const busy = new Set(), save = later(), ping = later();
-    const run = holdRow(busy, "a", () => Promise.all([save.p, ping.p]));
-    if (run) run.catch(() => {});
-    settle(save, ping);
-    await tick();
-    return busy.has("a");
-  } catch (e) { return "threw " + e.message; }
+  const busy = new Set(), save = later(), ping = later();
+  const run = holdRow(busy, "a", () => Promise.all([save.p, ping.p]));
+  if (run) run.catch(() => {});
+  settle(save, ping);
+  await tick();
+  return busy.has("a");
 };
-const HOLDS = [];
-for (const [name, settle, want] of [
+await eachAsync("holdRow:", [
   ["stays busy after only the save ends", (save) => save.res(null), true],
   ["stays busy after only the ping ends", (save, ping) => ping.res(true), true],
   ["out of busy once both end", (save, ping) => { save.res(null); ping.res(true); }, false],
   ["out of busy when the work fails", (save, ping) => { save.rej(new Error("x")); ping.res(true); }, false],
-]) HOLDS.push([name, await heldAfter(settle), want]);
-each("holdRow:", HOLDS, (_, got, want) => expect(got, want));
+], heldAfter);
 each("holdRow: a busy row runs nothing and returns null", [[]], () => {
   let ran = false;
   const got = holdRow(new Set(["a"]), "a", () => { ran = true; });
   return expect([got, ran], [null, false]);
 });
 
-// within: a save or ping that never answers still ends its click. [case, promise, result].
-const WITHIN = [];
-for (const [name, p, want] of [
+// within: a save or ping that never answers still ends its click.
+await eachAsync("within:", [
   ["gives the result when it comes in time", Promise.resolve("done"), "done"],
   ["gives the fallback when it never comes", new Promise(() => {}), "late"],
-]) {
-  let got;
-  try { got = await within(p, 5, "late"); } catch (e) { got = "threw " + e.message; }
-  WITHIN.push([name, got, want]);
-}
-each("within:", WITHIN, (_, got, want) => expect(got, want));
+], (p) => within(p, 5, "late"));
 
 // Every function and const in the pure block is used by a case above, not only listed.
 const self = readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
