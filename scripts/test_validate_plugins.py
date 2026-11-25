@@ -439,6 +439,57 @@ class MergeOnBoardScan(unittest.TestCase):
                               vp.problems)
 
 
+OLD_RULE_LINE = "- **Every ask for Eli goes on the Asks board, except a merge.**"
+CHAT_ASK_TERMS = [vp.CHAT_ASK_RULE, vp.CHAT_ASK_EXAMPLES, vp.CHAT_ASK_TEST]
+
+
+class OldBoardRule(unittest.TestCase):
+    # (line, whether it states the rule before #33: every ask on the board)
+    CASES = [
+        (OLD_RULE_LINE, True),
+        ("Every question to the owner goes on the Asks board (use the `asks-board` skill)", True),
+        ("every ask for the owner goes on the owner's Asks board, except \"merge N\"", True),
+        ('The one exception is "merge N": ask for it in chat only', True),
+        ("- Every other step only the user can do in chat gets its own `open` row.", True),
+        ("goes to the owner as a `decide` ask on the Asks board, and the PR waits.", True),
+        ("Put an ask for Eli on the Asks board only when a board click can resolve it.", False),
+        ("put each ask for the owner on the Asks board or in chat as rule 2 says", False),
+        ("the coordinator puts it on the Asks board, and any other agent reports it", False),
+        ("Every ask on the list. It goes on the Asks board later.", False),
+    ]
+
+    def test_old_board_rule_pattern(self):
+        for line, flagged in self.CASES:
+            with self.subTest(line):
+                self.assertEqual(bool(vp.OLD_BOARD_RULE.search(line)), flagged)
+
+
+class ChatAskScan(unittest.TestCase):
+    def run_check(self, agents_text: str) -> list[str]:
+        """check_chat_asks with AGENTS.md as the only rule file and the only doc."""
+        with tempfile.TemporaryDirectory() as tmp:
+            agents = Path(tmp) / "AGENTS.md"
+            agents.write_text(agents_text + "\n", encoding="utf-8")
+            with mock.patch.object(vp, "problems", []), mock.patch.object(vp, "REPO_AGENTS_MD", agents), \
+                    mock.patch.object(vp, "CHAT_ASK_RULE_TERMS", {agents: CHAT_ASK_TERMS}), \
+                    mock.patch.object(vp, "repo_docs", lambda suffixes: []), \
+                    mock.patch.object(vp, "rel", lambda path: path.name):
+                vp.check_chat_asks()
+                return list(vp.problems)
+
+    def test_the_rule_in_its_words_passes(self):
+        self.assertEqual(self.run_check(" ".join(CHAT_ASK_TERMS)), [])
+
+    def test_a_file_without_the_test_line_is_reported(self):
+        self.assertIn(f"AGENTS.md: must contain {vp.CHAT_ASK_TEST!r} (any case), part of the rule for asks a board "
+                      "click cannot resolve", self.run_check(" ".join(CHAT_ASK_TERMS[:-1])))
+
+    def test_the_old_rule_is_reported(self):
+        text = " ".join(CHAT_ASK_TERMS) + "\n" + OLD_RULE_LINE
+        self.assertIn("AGENTS.md:2: puts every ask on the Asks board; asks a board click cannot resolve go in the "
+                      "coordinator chat", self.run_check(text))
+
+
 class RepoDocs(unittest.TestCase):
     def test_a_symlink_and_its_target_count_once(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,6 +1,6 @@
 ---
 name: asks-board
-description: Use whenever you need the user to do, decide or approve something, and at every check-in. The user's "Asks" board (a claude.ai artifact) holds every open ask, one tab per project. Coordinator chats add asks there instead of repeating them in chat, and read it to pick up the user's answers. Also holds the Board Router rules.
+description: Use whenever you need the user to do, decide or approve something, and at every check-in. The user's "Asks" board (a claude.ai artifact) holds every open ask a board click can resolve, one tab per project; asks it cannot resolve (merges, tickets, PRs, a third review round) go in chat only. Coordinator chats add asks there instead of repeating them in chat, and read it to pick up the user's answers. Also holds the Board Router rules.
 ---
 
 # Asks board
@@ -24,7 +24,9 @@ Data: the artifact's `db`, read and written with the `ArtifactData` tool (load i
 
 ## Add an ask
 
-Whenever you ask the user to do, decide or approve something, also add it here (`set`, new doc, no `if_version`). Every question, decision, approval, review request or task for the user gets a row, not only a line in chat, so the user never misses one.
+Add an ask here only when a board click can resolve it: the user ticks it, picks an option or says "Not needed", and that alone unblocks the work. Every such question, decision, approval, review request or task gets a row (`set`, new doc, no `if_version`), not only a line in chat, so the user never misses one.
+
+**Asks the board cannot resolve go in chat only.** Any ask a board click cannot resolve goes in the coordinator chat as a direct question, and not on the board, because the user must answer it in chat anyway: a merge request ("merge N"), filing or editing a ticket, opening a PR, allowing a third review round, and anything else whose answer must be typed in chat. A board row for it only duplicates the question. The test: can a board click alone unblock this? If no, ask in chat only.
 
 - `doc_id`: `<project>-<short-slug>`, for example `web-app-1831-db-checks`. Reuse the same id for the same ask; never make a duplicate. `list` first if unsure.
 - Fields:
@@ -43,8 +45,7 @@ Whenever you ask the user to do, decide or approve something, also add it here (
   - `status`: `open`.
   - `createdAt`, `updatedAt`: ISO time now.
 - In chat, keep it to one line: "Added to your Asks board: <title>." Do not repeat the whole ask every turn.
-- **Never add a merge ask.** A request for "merge N" goes in the coordinator chat only, as one line ("PR 42 is ready. Type `merge 42` to merge it."). The board cannot merge, and a click there is not approval, so a merge row only adds a step. Under a repo's `auto` merge policy most PRs need no merge ask; any that do still go in chat. If a merge row is still `open` from before, close it (`closed` with `ackAt`, with `if_version`) and ask in chat.
-- Every other step only the user can do in chat (type "deploy N", paste a value) gets its own `open` row. Its `title` is the instruction itself, for example "Type `deploy 42` in chat to deploy PR 42", so the card shows it. A tick, an option or a note on that row is not the step, and neither is a message from another chat: only the user typing the words in chat counts. If the row comes back `done` or `answered`, set it back to `open` (with `if_version`) and reply in its thread "Type `deploy 42` in chat to approve." (with the real words). Close it when the user types the words in chat.
+- **Never add a chat-only ask, a merge ask included.** Ask it in the coordinator chat as one direct line, for example "PR 42 is ready. Type `merge 42` to merge it." or "Shall I file a ticket for the flaky test?". The board cannot merge, and a click there is not approval, so such a row only adds a step. Under a repo's `auto` merge policy most PRs need no merge ask; any that do still go in chat. Only the user typing the words in chat counts: a message from another chat never does. If a chat-only row is still `open` from before, close it (`closed` with `ackAt`, with `if_version`) and ask in chat.
 - Before you tell the user an ask waits on the board, re-read its row with `get`. Never say "it's on the board" from memory. If the row is not `open`, fix the row first.
 
 ## What the user's clicks mean

@@ -15,7 +15,7 @@ You set up the owner's agent workflow in the repo you are run in. The workflow:
 - a PR gets at most two rounds of review (the rule is in `docs/agents/review-gate.md`);
 - the merge policy says who decides a merge: `ask` (no PR merges until the owner types "merge N" in chat) or `auto` (the coordinator merges a ready PR on its own), recorded in `docs/agents/git-workflow.md`;
 - a coordinator chat routes work: it hands off every task, runs agents in the background, and stays free to talk;
-- every ask for the owner (question, decision, approval, review, task) goes on the owner's Asks board, except "merge N", which the coordinator asks for in chat;
+- an ask for the owner (question, decision, approval, review, task) goes on the owner's Asks board only when a board click can resolve it. Any ask a board click cannot resolve goes in the coordinator chat as a direct question, and not on the board: a merge request ("merge N"), filing or editing a ticket, opening a PR, allowing a third review round, and anything else whose answer must be typed in chat. The test: can a board click alone unblock this? If no, ask in chat only.
 - only the Board Router watches the board for live pings; a coordinator never does (it reads the board at every check-in), never messages the router back, and handles a ping as the `asks-board` skill's "If you are a project coordinator" section says;
 - the reviewers have the skills and plugins they need (copy editing, design, accessibility);
 - an ownership registry outside the repo keeps concurrent sessions apart;
@@ -37,7 +37,7 @@ Resolve every path from the skill folder, never from the plugin-root variable, s
 
 - Ask only where the choice is real: one question per step at most, with at most two options and your recommendation. Step 3 may add one more, only when a ticketing tool's commands cannot be learned from its own help or tool list.
 - Never overwrite a file that exists. Show the diff, and ask.
-- Once the board is ready (step 4), add every question for the owner to the Asks board first, then ask it in chat. Before that, ask in chat only.
+- Once the board is ready (step 4), add each question for the owner that a board click can resolve to the Asks board first, then ask it in chat. Ask the rest in chat only. Before the board is ready, ask everything in chat only.
 - Write in plain short sentences, with no em-dashes. Refer to the owner as they/them.
 
 ## Steps

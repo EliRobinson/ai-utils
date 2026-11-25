@@ -118,6 +118,8 @@ PR_FINISHER = AGENT_ROSTER / "agents" / "pr-finisher.md"
 REPO_AGENTS_MD = ROOT / "AGENTS.md"
 REPO_COORDINATOR_PROMPT = ROOT / "docs" / "agents" / "coordinator-prompt.md"
 ASKS_BOARD_SKILL = ROOT / "plugins" / "asks-board" / "skills" / "asks-board" / "SKILL.md"
+ASKS_BOARD_README = ROOT / "plugins" / "asks-board" / "README.md"
+REPO_MULTI_AGENT = ROOT / "docs" / "agents" / "multi-agent.md"
 PLACEHOLDER = re.compile(r"\{\{([A-Z_]+)\}\}")
 LEADING_COMMENT = re.compile(r"\A<!--(.*?)-->", re.S)
 # Files the setup installs that must name no ticketing tool: the tool is a
@@ -547,18 +549,14 @@ def check_unit_test_rule() -> None:
 MERGE_POLICIES = ("ask", "auto")
 DEFAULT_MERGE_POLICY = "ask"
 READS_MERGE_POLICY = "git show origin/main:docs/agents/git-workflow.md"
-MERGE_ASK_IN_CHAT = "ask for \"merge n\" in this chat only, never on the board"
-MERGE_IN_CHAT_GUARDRAIL = "a request for \"merge n\" goes in the coordinator chat only"
-MERGE_POLICY_COORDINATOR_TERMS = [READS_MERGE_POLICY, MERGE_ASK_IN_CHAT, "what `auto` never covers"]
+MERGE_POLICY_COORDINATOR_TERMS = [READS_MERGE_POLICY, "what `auto` never covers"]
 MERGE_POLICY_TERMS = {  # a template and its filled copy share one list
-    GUARDRAILS: ["merge policy: {{merge_policy}}.", MERGE_IN_CHAT_GUARDRAIL],
-    REPO_AGENTS_MD: [MERGE_IN_CHAT_GUARDRAIL],
+    GUARDRAILS: ["merge policy: {{merge_policy}}."],
     COORDINATOR_PROMPT: MERGE_POLICY_COORDINATOR_TERMS,
     REPO_COORDINATOR_PROMPT: MERGE_POLICY_COORDINATOR_TERMS,
     GIT_WORKFLOW: [READS_MERGE_POLICY, "what `auto` never covers", "bash(gh pr merge *--admin*)"],
-    ROUTE_WORK: ["the one exception is \"merge n\""],
     SETUP_SKILL_MD: ["## change the merge policy", "never add it for them"],
-    ASKS_BOARD_SKILL: ["never add a merge ask"],
+    ASKS_BOARD_SKILL: ["never add a chat-only ask, a merge ask included"],
 }
 # Wording that puts a merge ask on the board: the phrasings before #24, or a line
 # naming the board and "merge N" that does not say never, except or not. A word
@@ -575,6 +573,34 @@ def check_merge_policy() -> None:
     for path in rule_docs():
         fail_matching_lines(path, path.read_text(encoding="utf-8"), MERGE_ON_BOARD,
                             "puts a merge ask on the Asks board; merge asks go in the coordinator chat")
+
+
+# Which asks go on the Asks board (#33): only an ask a board click can resolve.
+# Any other ask, a merge included, goes in the coordinator chat. Every file that
+# states the rule says it in these same words.
+CHAT_ASK_RULE = "any ask a board click cannot resolve goes in the coordinator chat as a direct question, and not on the board"
+CHAT_ASK_EXAMPLES = 'a merge request ("merge n"), filing or editing a ticket, opening a pr, allowing a third review round'
+CHAT_ASK_TEST = "can a board click alone unblock this? if no, ask in chat only."
+CHAT_ASK_RULE_TERMS = {
+    path: [CHAT_ASK_RULE, CHAT_ASK_EXAMPLES, CHAT_ASK_TEST]
+    for path in (GUARDRAILS, REPO_AGENTS_MD, COORDINATOR_PROMPT, REPO_COORDINATOR_PROMPT, ROUTE_WORK,
+                 MULTI_AGENT, REPO_MULTI_AGENT, SETUP_SKILL_MD, AGENT_ROSTER / "README.md",
+                 ASKS_BOARD_SKILL, ASKS_BOARD_README)
+}
+# The rule before #33: every ask on the board, a merge the one exception.
+OLD_BOARD_RULE = re.compile(
+    r"\bevery (ask|question)\b[^.]*\bgoes on the (owner's )?asks board"
+    r"|the one exception is \"merge n\"|every other step only the user can do in chat"
+    r"|as a `decide` ask on the asks board",
+    re.I)
+
+
+def check_chat_asks() -> None:
+    check_terms(CHAT_ASK_RULE_TERMS, "rule for asks a board click cannot resolve")
+    for path in rule_docs():
+        fail_matching_lines(path, path.read_text(encoding="utf-8"), OLD_BOARD_RULE,
+                            "puts every ask on the Asks board; asks a board click cannot resolve go in the "
+                            "coordinator chat")
 
 
 VENDORED_SKILL = AGENT_ROSTER / "skills" / "thermo-nuclear-code-quality-review"
@@ -810,6 +836,7 @@ def main() -> int:
     check_branch_rule()
     check_unit_test_rule()
     check_merge_policy()
+    check_chat_asks()
     check_vendored_thermonuclear()
     check_accessibility_agents()
     check_workflows()

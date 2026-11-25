@@ -2,6 +2,21 @@
 
 1.8.0 is the first version published in this public repo. Earlier entries are kept for reference.
 
+## 1.13.0
+
+**Upgrade steps:**
+
+1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils` and `claude plugin update asks-board@ai-utils` (1.2.0), then restart Claude Code.
+2. Rerun `setup-agentic-workflow` in each repo set up before 1.13.0 and merge its setup PR. It rewrites the Asks board bullet in `AGENTS.md`, the "Asking" section of `docs/agents/coordinator-prompt.md`, and `docs/agents/multi-agent.md`, `review-gate.md` and `issue-tracker.md`.
+3. Start a new coordinator chat from the new prompt, or tell the open one the new rule.
+4. Close any `open` board row the board cannot resolve (a merge, a ticket, a PR, a third review round) and ask it in chat instead.
+
+**Changes:**
+
+- **Asks a board click cannot resolve go in chat, not on the Asks board.** Any ask a board click cannot resolve goes in the coordinator chat as a direct question, and not on the board: a merge request ("merge N"), filing or editing a ticket, opening a PR, allowing a third review round, and anything else whose answer must be typed in chat. A board row for it only duplicates the question. Only an ask the owner can settle with a tick, an option or "Not needed" goes on the board. The test: can a board click alone unblock this? If no, ask in chat only. The guardrails, the coordinator prompt, `route-work`, `multi-agent.md`, the setup skill, the READMEs and the `asks-board` skill (1.2.0) say it in the same words. This widens the 1.12.0 rule, which made only merge asks chat-only.
+- **The round 3 ask goes in chat.** After round 2, an open blocker or security finding goes to the owner as a direct question in the coordinator chat (`review-gate.md`), since a click cannot allow a third round or file a ticket. A ticket yes is asked in chat too (`issue-tracker.md`).
+- **The validator checks the rule.** `validate-plugins.py` checks that each file that states the rule keeps its words and its test line, and that no doc still puts every ask on the board.
+
 ## 1.12.0
 
 **Upgrade steps:**
