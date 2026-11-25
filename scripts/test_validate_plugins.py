@@ -414,6 +414,7 @@ class RepoChecks(unittest.TestCase):
         ("agent tool policy", lambda: vp.check_agent_tool_policy(vp.load_agents())),
         ("agent rule lines", lambda: vp.check_agent_rule_lines(vp.load_agents())),
         ("ticketing tool setting", vp.check_tracker_setting),
+        ("merge policy", vp.check_merge_policy),
     ]
 
     def test_repo_passes(self):
@@ -451,6 +452,90 @@ class TrackerSetting(unittest.TestCase):
                     mock.patch.object(vp, "rel", lambda p: p):
                 vp.check_tracker_setting()
                 self.assertTrue(any("must equal" in p for p in vp.problems), vp.problems)
+
+
+ASK_LINE = "- **Merge policy:** `ask`"
+ASK_AGENTS = "- **Merge policy: ask.** It is set in git-workflow.md."
+SQUASH_LINE = "- **Merge style:** `squash`"
+SQUASH_AGENTS = "- **PRs merge in the repo's merge style: squash.**"
+BAD_POLICY = [(vp.GIT_WORKFLOW, "needs exactly one '- **Merge policy:** `ask|auto`' line")]
+BAD_POLICY_AGENTS = [(vp.REPO_AGENTS_MD, 'must say "Merge policy: ask." exactly once, the value git-workflow.md sets')]
+POLICY = ("Merge policy", vp.MERGE_POLICIES, "ask", "the safe default")
+STYLE = ("Merge style", vp.MERGE_STYLES, "squash", "the style the ruleset template allows")
+MERGE_ROW = 'Add a board row: type "merge N" once the PR is ready'
+
+
+class WorkflowSetting(unittest.TestCase):
+    # (case, setting, git-workflow.md text, AGENTS.md text, expected problems)
+    CASES = [
+        ("policy line and matching AGENTS.md pass", POLICY, f"x\n{ASK_LINE}\ny", ASK_AGENTS, []),
+        ("missing policy line fails", POLICY, "no policy here", ASK_AGENTS, BAD_POLICY),
+        ("two policy lines fail", POLICY, f"{ASK_LINE}\n{ASK_LINE}", ASK_AGENTS, BAD_POLICY),
+        ("unknown policy fails", POLICY, "- **Merge policy:** `sometimes`", ASK_AGENTS, BAD_POLICY),
+        ("a line with trailing text is not a policy line", POLICY, f"{ASK_LINE}\n{ASK_LINE} or auto", ASK_AGENTS, []),
+        ("auto as the shipped default fails", POLICY, "- **Merge policy:** `auto`", "- **Merge policy: auto.**",
+         [(vp.GIT_WORKFLOW, "the Merge policy line says 'auto'. This file is the shipped template, "
+                            "which must say 'ask' (the safe default). Set it back to 'ask'.")]),
+        ("AGENTS.md naming another policy fails", POLICY, ASK_LINE, "- **Merge policy: auto.**", BAD_POLICY_AGENTS),
+        ("AGENTS.md naming two policies fails", POLICY, ASK_LINE, ASK_AGENTS + "\n- **Merge policy: auto.**",
+         BAD_POLICY_AGENTS),
+        ("empty AGENTS.md fails", POLICY, ASK_LINE, "", BAD_POLICY_AGENTS),
+        ("style line and matching AGENTS.md pass", STYLE, SQUASH_LINE, SQUASH_AGENTS, []),
+        ("style other than the ruleset's fails", STYLE, "- **Merge style:** `rebase`",
+         "- **PRs merge in the repo's merge style: rebase.**",
+         [(vp.GIT_WORKFLOW, "the Merge style line says 'rebase'. This file is the shipped template, "
+                            "which must say 'squash' (the style the ruleset template allows). Set it back to 'squash'.")]),
+    ]
+
+    def test_setting_problems(self):
+        for case, (name, allowed, default, source), workflow, agents_md, expected in self.CASES:
+            with self.subTest(case):
+                self.assertEqual(vp.setting_problems(name, allowed, default, source, workflow, agents_md), expected)
+
+
+class MergeOnBoard(unittest.TestCase):
+    # (line, whether it puts a merge ask on the board)
+    CASES = [
+        ('every task, including "merge N" requests and hosting choices', True),
+        ('"Type `merge 42` in chat to merge PR 42"', True),
+        (MERGE_ROW, True),
+        ('The one exception is "merge N": ask for it in chat only', False),
+        ('"PR 42 is ready. Type `merge 42` to merge it."', False),
+        ('ask for "merge N" in this chat only, never on the board', False),
+        # a known limit: a line with never, except or not is let through
+        ('Add a board row for merge 42; do not skip it', False),
+    ]
+
+    def test_merge_on_board_pattern(self):
+        for line, flagged in self.CASES:
+            with self.subTest(line):
+                self.assertEqual(bool(vp.MERGE_ON_BOARD.search(line)), flagged)
+
+
+class MergeOnBoardScan(unittest.TestCase):
+    def test_doc_with_a_merge_row_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "doc.md"
+            doc.write_text(MERGE_ROW + "\n", encoding="utf-8")
+            agents = Path(tmp) / "AGENTS.md"
+            agents.write_text(ASK_AGENTS + "\n", encoding="utf-8")
+            with mock.patch.object(vp, "problems", []), mock.patch.object(vp, "REPO_AGENTS_MD", agents), \
+                    mock.patch.object(vp, "repo_docs", lambda suffixes: [doc]), \
+                    mock.patch.object(vp, "rel", lambda path: path.name):
+                vp.check_merge_policy()
+                self.assertIn("doc.md:1: puts a merge ask on the Asks board; merge asks go in the coordinator chat",
+                              vp.problems)
+
+
+class RepoDocs(unittest.TestCase):
+    def test_a_symlink_and_its_target_count_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            docs = Path(tmp) / "docs"
+            docs.mkdir()
+            (docs / "a.md").write_text("x\n", encoding="utf-8")
+            (docs / "b.md").symlink_to("a.md")
+            with mock.patch.object(vp, "ROOT", Path(tmp)):
+                self.assertEqual(vp.repo_docs({".md"}), [docs / "a.md"])
 
 
 class SelfChecks(unittest.TestCase):
