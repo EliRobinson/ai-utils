@@ -94,6 +94,7 @@ h3.group-head { font-size: 0.9375rem; font-weight: 700; color: var(--muted); mar
 .tick { display: grid; place-items: start center; padding-top: 2px; min-height: 44px; cursor: pointer; }
 .check { width: 22px; height: 22px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .check:disabled { cursor: default; }
+.card[aria-busy="true"] :is(.check, .opt, .btn):disabled { cursor: progress; }
 .main { display: grid; gap: 10px; min-width: 0; }
 .head { display: grid; gap: 4px; }
 .meta { color: var(--muted); font-size: 0.875rem; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: center; }
@@ -344,6 +345,25 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
       };
     },
   };
+  // A click that sets the status and answer the row already has (a second click on the
+  // chosen answer) changes nothing, so it saves and pings nothing. A click that sets no
+  // status (a note) always counts.
+  function changesNothing(row, patch) {
+    if (!("status" in patch) || String(row.status || "open") !== patch.status) return false;
+    if (!("answer" in patch)) return true;
+    return patch.answer == null ? oneLine(row.answer) === "" : matchesKey(row.answer, patch.answer);
+  }
+  const SAME_TEXT = "No change, so nothing was sent.";
+  // Runs one click's work with its row in busy, and takes the row out only when all of the
+  // work has ended, failed or not. A row already in busy runs nothing (returns null).
+  function holdRow(busy, id, work) {
+    if (busy.has(id)) return null;
+    busy.add(id);
+    return (async () => { try { return await work(); } finally { busy.delete(id); } })();
+  }
+  // The controls that set a row's status or answer (tick, options, Not needed), by focus
+  // key. They are disabled while the row saves, so one click sends one ping.
+  const SAVE_LOCKED = /^(?:chk|dis|opt\d+):/;
   // What the page says once a click is saved, and whether the ping reached the chat.
   function resultText(said, pinged, sent) {
     if (!pinged) return said;
@@ -467,10 +487,11 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
   const composers = new Map();
   // Row id -> { text, tone, from, until }: the result line next to the clicked card.
   const flashes = new Map();
-  // Row id -> the number of its latest click, so an older click's result never shows last.
-  const clicks = new Map();
-  // Rows with a click whose anchorFor has not settled: a second click on them does nothing.
+  // Rows with a click whose save or ping has not ended: a second click on them does nothing.
   const busy = new Set();
+  // The control a click disabled while it had focus, so the redraw after the save puts
+  // focus back (see focusToKeep).
+  let held = null;
   const FLASH_MS = 15000, ERROR_MS = 60000, LOAD_MS = 10000, ANCHOR_WAIT_MS = 2000, IDLE_MS = 30000;
   // Redraws go through requestRender (see drawNow). anchoring: clicks whose anchorFor has
   // not settled. dirty: a redraw was put off; flush() draws it once it may.
@@ -658,29 +679,36 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     try { return Promise.resolve(comments.anchorFor(node)).catch(() => null); } catch (e) { return null; }
   }
   // One viewer action: save send.patch, ping the asking chat with send.ping, and show the
-  // result next to the card. anchorFor runs first, inside the click (it needs the gesture).
-  // No redraw runs until it settles (or ANCHOR_WAIT_MS passes), so its card node stays put;
-  // meanwhile the row is busy and further clicks on it do nothing.
+  // result next to the card. A click that changes nothing (see changesNothing) only says so.
+  // anchorFor runs first, inside the click (it needs the gesture). No redraw runs until it
+  // settles (or ANCHOR_WAIT_MS passes), so its card node stays put. The row stays busy, and
+  // its tick, options and Not needed stay disabled, until both the save and the ping end.
   function act(ev, d, send, where) {
     if (busy.has(d.id)) return;
+    const row = (docs || []).find((x) => x.id === d.id) || d;
+    if (changesNothing(row.data, send.patch)) { flash(d.id, SAME_TEXT, "ok", where); requestRender(true); return; }
     const node = ev && ev.currentTarget && ev.currentTarget.closest ? ev.currentTarget.closest("article") : null;
     const anchorP = anchorOf(node);
-    busy.add(d.id);
-    if (node) node.setAttribute("aria-busy", "true");
-    const pinged = send.ping ? ping(d, anchorP, send.ping) : Promise.resolve(false);
-    const seq = (clicks.get(d.id) || 0) + 1;
-    clicks.set(d.id, seq);
-    flash(d.id, "Saving…", "busy", where, true);
-    const saved = write(d.id, send.patch);
-    const settled = anchorP ? Promise.race([anchorP, new Promise((r) => setTimeout(r, ANCHOR_WAIT_MS))]) : Promise.resolve();
-    if (anchorP) anchoring++;
-    settled.then(() => { if (anchorP) anchoring--; busy.delete(d.id); requestRender(true); });
-    Promise.all([saved, pinged]).then(([err, sent]) => {
-      if (clicks.get(d.id) !== seq) return;
+    // ping() waits for the anchor at most ANCHOR_WAIT_MS too, so every click ends.
+    const anchor = anchorP ? Promise.race([anchorP, new Promise((r) => setTimeout(() => r(null), ANCHOR_WAIT_MS))]) : null;
+    holdRow(busy, d.id, async () => {
+      const a = document.activeElement;
+      if (node && node.contains(a) && SAVE_LOCKED.test(a.dataset.k || "")) held = takeFocus();
+      lockCard(node);
+      flash(d.id, "Saving…", "busy", where, true);
+      if (anchor) { anchoring++; anchor.then(() => { anchoring--; requestRender(true); }); }
+      const [err, sent] = await Promise.all([write(d.id, send.patch), send.ping ? ping(d, anchor, send.ping) : false]);
       if (err) flash(d.id, err, "error", where);
       else flash(d.id, resultText(send.said, !!send.ping, sent), "ok", where);
-      requestRender(false);
-    });
+    }).catch(() => flash(d.id, "Something went wrong. Reload the page and check this card.", "error", where))
+      .then(() => requestRender(false));
+  }
+  // Disable a card's status and answer controls while its row saves, and mark it busy.
+  // card() calls it for a busy row too, so a redraw meanwhile keeps them disabled.
+  function lockCard(node) {
+    if (!node) return;
+    node.setAttribute("aria-busy", "true");
+    for (const c of node.querySelectorAll("[data-k]")) if (SAVE_LOCKED.test(c.dataset.k)) c.disabled = true;
   }
 
   // Saves the change; returns null, or the error text to show.
@@ -779,6 +807,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     if (a.detail && openDetails.has(d.id)) main.append(renderDetail(a.detail, detailId, d.id));
     if (composing) main.append(composer(d, where, composeId));
     item.append(main);
+    if (busy.has(d.id)) lockCard(item);
     return item;
   }
 
@@ -867,6 +896,17 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     return { k: a.dataset.k, card: a.dataset.card, inOpen: !!a.closest("#open"),
       sel: a.tagName === "TEXTAREA" ? [a.selectionStart, a.selectionEnd] : null };
   }
+  // What focus to put back after a redraw: the focused control, or the one a click
+  // disabled (held) once its row is no longer busy. Focus the user moved elsewhere wins.
+  function focusToKeep() {
+    const f = takeFocus();
+    if (!held) return f;
+    if (f && f.k !== held.k) { held = null; return f; }
+    if (busy.has(held.card)) return f;
+    const h = held;
+    held = null;
+    return h;
+  }
   function find(k) { return [...document.querySelectorAll("[data-k]")].find((n) => n.dataset.k === k) || null; }
   function giveFocus(f) {
     // A focus the user asked for (open a note, Show all kinds) may scroll; one that only
@@ -901,7 +941,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
 
   function render() {
     dirty = false;
-    const focus = takeFocus();
+    const focus = focusToKeep();
     const now = Date.now();
     const view = projectView(docs, project);
     const all = view.all, projects = view.projects;
