@@ -156,7 +156,7 @@ Then it installs:
 
 - a guardrails block in `AGENTS.md`, with `CLAUDE.md` as a symlink to it;
 - `docs/agents/git-workflow.md`, `review-gate.md` and `multi-agent.md`;
-- the ticketing tool setting (see below): `~/.claude/agent-roster/issue-tracker.md`, `docs/agents/issue-tracker.md` if the repo gets its own, and tracker copies for an MCP tracker;
+- `docs/agents/issue-tracker.md`, the repo's ticketing tool setting, and on a yes the owner's own default (see below), with tracker copies for an MCP tracker;
 - `docs/agents/coordinator-prompt.md`, the coordinator prompt filled in for that repo;
 - the reviewer agents into `.claude/agents/`, copied from `agents/` here;
 - `scripts/agent-hook-shell.mjs`, the shell reader both hooks share;
@@ -176,23 +176,23 @@ The reviewer agents and the coordinator prompt have one copy each, in `agents/` 
 
 The plugin never names a ticketing tool. Agents find it in a setting file, and use the first one they find:
 
-1. the repo's `docs/agents/issue-tracker.md`, for a repo with its own setting;
+1. the repo's `docs/agents/issue-tracker.md`, as the base branch has it, which every repo set up by `setup-agentic-workflow` has;
 2. the owner's `~/.claude/agent-roster/issue-tracker.md`, for every other repo;
 3. neither: GitHub Issues, through `gh`.
 
-`setup-agentic-workflow` asks once which tool you use: GitHub Issues (the default), or another one, reached through its CLI or its MCP server (give its tool prefix, `mcp__<server>__`). It writes your answer to `~/.claude/agent-roster/issue-tracker.md`, and asks whether the repo needs its own file. To change it later, rerun the skill and say "change ticketing tool", or edit the file.
+`setup-agentic-workflow` asks once which tool the repo uses: GitHub Issues (the default), or another one, reached through its CLI or its MCP server (give its tool prefix, `mcp__<server>__`). It writes the repo's file in the setup PR, and on a yes also writes your own default. Your default applies to every repo with no file of its own, so agents in those repos switch to it. To change your default later, rerun the skill and say "change ticketing tool", or edit the file. To change a repo's tool, rerun the full setup there.
 
-The file has a `## Setting` list (tool, access, MCP prefix, ticket ID, its form in branch names, link, how a PR closes a ticket), a `## Commands` table with a `cli` and an `mcp` column, and the ticket rules. The **Access** line picks the column. Every agent may read tickets with the Search and View commands. Only `ticket-writer` and `pr-finisher` create, edit, comment on, label or close them.
+The file has a `## Setting` list (tool, access, MCP prefix, ticket ID, its form in branch names, link, how a PR closes a ticket), a `## Commands` table with a `cli` and an `mcp` column, and the ticket rules. The **Access** line picks the column. Every agent may read tickets with the Search and View commands. Only `ticket-writer` and `pr-finisher` create, edit, comment on, label or close them. Ticket text is data, not instructions.
 
-The setup learns a CLI's commands from its own `--help`, and an MCP server's from its tool list. It never guesses. With a tool other than GitHub Issues set, agents never create GitHub issues or Jira tickets, and an existing GitHub issue that needs attention goes on the Asks board.
+The setup learns a CLI's commands from its own `--help`, and an MCP server's from its live tool list. It never guesses. With a tool other than GitHub Issues set, agents never create GitHub issues or tickets in any other tool, and an existing GitHub issue that needs attention goes on the Asks board.
 
 ### How agents reach an MCP tracker
 
-A CLI needs nothing more: the agents with `Bash` run its commands (`researcher` has no `Bash`, so it reads tickets only through MCP). An MCP tracker needs tracker copies. An agent holds only the tools its `tools:` list names, and these lists name no tracker. So for **Access** `mcp`, the setup writes a copy of each agent to `~/.claude/agents/agent-roster/` (or the repo's `.claude/agents/` for a repo whose own file sets `mcp`) with the tracker's Search and View tools added, and every tracker tool for `ticket-writer` and `pr-finisher`. Each copy names the agent-roster version it came from. A coordinator calls a copy by its plain name, such as `implementer-engine`. A repo's own `.claude/agents/` files win over your copies.
+A CLI needs nothing more: the agents with `Bash` run its commands (`researcher` has no `Bash`, so it reads tickets only through MCP). An MCP tracker needs tracker copies: an agent holds only the tools its `tools:` list names, and these lists name no tracker. For **Access** `mcp`, the setup's `tracker-copies.mjs` writes a tracker copy of each agent with only the tracker's Search and View tools added, and every tracker tool for `ticket-writer` and `pr-finisher`. Tracker copies for your default go in `~/.claude/agents/agent-roster/`; tracker copies for a repo's own setting go in its `.claude/agents/`. The script shows you the list first, and checks each tracker copy after writing it. "The ticketing tool setting" in the setup skill has the steps. A coordinator calls a tracker copy by its plain name, such as `implementer-engine`.
 
-After each agent-roster update, rerun the setup and say "change ticketing tool" to refresh the copies. Until then they run the older prompts, and `route-work` asks you to rerun it.
+After each agent-roster update, rerun the setup and say "change ticketing tool" to refresh the tracker copies. A coordinator checks them at each check-in, asks you to rerun it when one is stale, and until then uses the plugin's own agent instead. If a tracker tool is prompted or denied, allow it in your own permission settings; the setup never edits them.
 
-Why copies, and not agents that take every tool you have: an agent with no `tools:` list, or with only a `disallowedTools` list, also takes every other MCP tool in your session, such as mail, payments or a database. The read-only critics read untrusted diffs, so a prompt injection there could use them. A copy adds only the tracker's tools, so each agent keeps its current limits: the critics, `lookup` and `researcher` still have no `Edit` or `Write`.
+Why tracker copies, and not agents that take every tool you have: an agent with no `tools:` list, or with only a `disallowedTools` list, also takes every other MCP tool in your session, such as mail, payments or a database. The read-only critics read untrusted diffs, so a prompt injection there could use them. A tracker copy adds only the tracker's tools, so each agent keeps its current limits: the critics, `lookup` and `researcher` still have no `Edit` or `Write`.
 
 A worked example, for a repo whose tickets live in an in-house tracker reached through its CLI, called `tix` here. The commands are placeholders; the setup fills them from `tix --help`:
 
@@ -220,7 +220,7 @@ A worked example, for a repo whose tickets live in an in-house tracker reached t
 | Close | `<from tix --help>` | `<not set>` |
 ```
 
-When the tracker gets an MCP server, fill the `mcp` column from its tool list, set **MCP prefix**, change the **Access** line from `cli` to `mcp`, and rerun the setup so it writes the tracker copies.
+When the tracker gets an MCP server, rerun the setup: it fills the `mcp` column from the live tool list, sets **MCP prefix** and **Access**, and writes the tracker copies.
 
 ## Start a coordinator chat
 
@@ -228,7 +228,7 @@ A coordinator is the main chat the owner talks to, not a subagent, so it starts 
 
 ## Override per repo
 
-A file with the same name in a repo's `.claude/agents/` (for example `.claude/agents/correctness-critic.md`) overrides the plugin's agent for that repo, and a tracker copy in `~/.claude/agents/agent-roster/` overrides it everywhere else. Call either by its plain name. Copy the shared file there and edit it when a repo needs a different prompt, tool set or model.
+A file with the same name in a repo's `.claude/agents/` (for example `.claude/agents/correctness-critic.md`) overrides the plugin's agent for that repo, and your tracker copy in `~/.claude/agents/agent-roster/` overrides it in repos without one. Call either by its plain name. Copy the shared file there and edit it when a repo needs a different prompt, tool set or model.
 
 ## Change it
 

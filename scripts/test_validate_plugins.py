@@ -352,74 +352,106 @@ class CheckTerms(unittest.TestCase):
         self.assertEqual(self.run_check(None), ["rules.md: missing"])
 
 
-class UnitTestRule(unittest.TestCase):
-    def test_repo_files_carry_the_rule(self):
-        with mock.patch.object(vp, "problems", []):
-            vp.check_unit_test_rule()
-            self.assertEqual(vp.problems, [])
-
-
 A11Y_TOOL = vp.A11Y_PREFIX + "get_specialist"
 WORK_TOOLS = "Read, Edit, Write, Grep, Glob, Bash, Skill"
 READ_TOOLS = "Read, Grep, Glob, Bash"
 
 
+def frontmatter(tools_line: str, extra: str = "") -> str:
+    """A raw frontmatter block, as agent_tool_problems reads it."""
+    return f"name: x\ndescription: d\n{tools_line}\n{extra}model: sonnet"
+
+
 class AgentToolProblems(unittest.TestCase):
-    """agent_tool_problems keeps every agent on a tools: allow-list with no tracker named."""
+    """agent_tool_problems keeps every agent on one plain tools: allow-list with no tracker named."""
 
     PASSING = [
-        ("work agent with file tools", "implementer-engine", {"tools": WORK_TOOLS}),
-        ("read-only agent without file tools", "correctness-critic", {"tools": READ_TOOLS}),
+        ("work agent with file tools", "implementer-engine", frontmatter(f"tools: {WORK_TOOLS}")),
+        ("read-only agent without file tools", "correctness-critic", frontmatter(f"tools: {READ_TOOLS}")),
         ("read-only agent with accessibility tools", "accessibility-critic",
-         {"tools": f"{READ_TOOLS}, {A11Y_TOOL}"}),
+         frontmatter(f"tools: {READ_TOOLS}, {A11Y_TOOL}")),
+        ("work agent that starts agents", "pr-finisher", frontmatter(f"tools: {WORK_TOOLS}, Agent")),
     ]
     FAILING = [
-        ("no tools line", "lookup", {}, "no `tools:` allow-list"),
-        ("blank tools line", "lookup", {"tools": " "}, "no `tools:` allow-list"),
+        ("no tools line", "lookup", frontmatter(""), "exactly one `tools:` line"),
+        ("blank tools line", "lookup", frontmatter("tools: "), "exactly one `tools:` line"),
+        ("tools line followed by another key", "lookup", frontmatter("tools:"), "exactly one `tools:` line"),
+        ("two tools lines", "lookup", frontmatter(f"tools: {READ_TOOLS}", "tools: Edit\n"),
+         "exactly one `tools:` line"),
+        ("block list", "lookup", frontmatter("tools:\n  - Read\n  - Edit"), "exactly one `tools:` line"),
+        ("flow list", "lookup", frontmatter("tools: [Read, Edit]"), "'[Read' is not one"),
+        ("quoted list", "lookup", frontmatter('tools: "Read, Edit"'), "'\"Read' is not one"),
+        ("comment after a tool", "lookup", frontmatter("tools: Read # Edit"), "'Read # Edit' is not one"),
         ("deny-list instead of allow-list", "implementer-engine",
-         {"tools": WORK_TOOLS, "disallowedTools": "NotebookEdit"}, "disallowedTools"),
+         frontmatter(f"tools: {WORK_TOOLS}", "disallowedTools: NotebookEdit\n"), "disallowedTools"),
         ("tracker tool named", "ticket-writer",
-         {"tools": f"{READ_TOOLS}, mcp__tracker__get_ticket"}, "mcp__tracker__get_ticket"),
-        ("whole MCP server named", "implementer-engine", {"tools": f"{WORK_TOOLS}, mcp__tracker__*"},
-         "mcp__tracker__*"),
-        ("read-only agent with Edit", "spec-critic", {"tools": f"{READ_TOOLS}, Edit"}, "holds Edit"),
-        ("read-only agent with Write", "lookup", {"tools": f"{READ_TOOLS}, Write"}, "holds Write"),
-        ("read-only agent with NotebookEdit", "researcher", {"tools": "Read, NotebookEdit"},
-         "holds NotebookEdit"),
+         frontmatter(f"tools: {READ_TOOLS}, mcp__tracker__get_ticket"), "mcp__tracker__get_ticket"),
+        ("whole MCP server named", "implementer-engine", frontmatter(f"tools: {WORK_TOOLS}, mcp__tracker__*"),
+         "'mcp__tracker__*' is not one"),
+        *[(f"read-only agent with {tool}", "spec-critic", frontmatter(f"tools: {READ_TOOLS}, {tool}"),
+           f"holds {tool}") for tool in vp.READ_ONLY_FORBIDDEN],
     ]
 
     def test_allowed_tool_sets_pass(self):
-        for label, name, fields in self.PASSING:
+        for label, name, block in self.PASSING:
             with self.subTest(label):
-                self.assertEqual(vp.agent_tool_problems(name, fields), [])
+                self.assertEqual(vp.agent_tool_problems(name, block), [])
 
     def test_each_problem_is_named(self):
-        for label, name, fields, needle in self.FAILING:
+        for label, name, block, needle in self.FAILING:
             with self.subTest(label):
-                found = vp.agent_tool_problems(name, fields)
+                found = vp.agent_tool_problems(name, block)
                 self.assertTrue(any(needle in p for p in found), found)
 
 
-class TrackerNeutralAgents(unittest.TestCase):
-    def test_repo_agents_and_docs_pass(self):
-        with mock.patch.object(vp, "problems", []):
-            vp.check_tracker_neutral_agents()
-            self.assertEqual(vp.problems, [])
+class RepoChecks(unittest.TestCase):
+    """Each repo-wide check passes on this repo as it is."""
 
+    CHECKS = [
+        ("unit-test rule", vp.check_unit_test_rule),
+        ("agent tool policy", lambda: vp.check_agent_tool_policy(vp.load_agents())),
+        ("agent rule lines", vp.check_agent_rule_lines),
+        ("ticketing tool setting", vp.check_tracker_setting),
+    ]
+
+    def test_repo_passes(self):
+        for label, check in self.CHECKS:
+            with self.subTest(label), mock.patch.object(vp, "problems", []):
+                check()
+                self.assertEqual(vp.problems, [])
+
+
+class TrackerSetting(unittest.TestCase):
     def test_every_read_only_agent_exists(self):
         names = {p.stem for p in (vp.AGENT_ROSTER / "agents").glob("*.md")}
         self.assertEqual(vp.READ_ONLY_AGENTS - names, set())
 
-    def test_agent_without_the_tracker_line_fails(self):
+    def test_every_critic_is_read_only(self):
+        critics = {p.stem for p in (vp.AGENT_ROSTER / "agents").glob("*.md")
+                   if p.stem.endswith("-critic") or p.stem.endswith("-reviewer")}
+        self.assertEqual(critics - vp.READ_ONLY_AGENTS, set())
+
+    def test_agent_without_a_rule_line_fails(self):
+        for rule, (line, _) in vp.AGENT_RULE_LINES.items():
+            with self.subTest(rule), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "agent-roster"
+                agent = root / "agents" / "lookup.md"
+                agent.parent.mkdir(parents=True)
+                others = "\n".join(other for other, _ in vp.AGENT_RULE_LINES.values() if other != line)
+                agent.write_text(f"---\nname: lookup\ntools: {READ_TOOLS}\n---\n\n{others}\n")
+                with mock.patch.multiple(vp, ROOT=Path(tmp), AGENT_ROSTER=root, problems=[]):
+                    vp.check_agent_rule_lines()
+                    self.assertEqual([rule in p for p in vp.problems], [True], vp.problems)
+
+    def test_repo_issue_tracker_that_drifts_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            agent = root / "plugins" / "agent-roster" / "agents" / "lookup.md"
-            agent.parent.mkdir(parents=True)
-            agent.write_text(f"---\nname: lookup\ntools: {READ_TOOLS}\n---\n\nNo ticket rule here.\n")
-            with mock.patch.multiple(vp, ROOT=root, AGENT_ROSTER=root / "plugins" / "agent-roster",
-                                     TRACKER_POINTERS={}, problems=[]):
-                vp.check_tracker_neutral_agents()
-                self.assertTrue(any("ticketing tool line" in p for p in vp.problems), vp.problems)
+            drifted = Path(tmp) / "issue-tracker.md"
+            drifted.write_text(vp.ISSUE_TRACKER_TEMPLATE.read_text() + "\nAn extra line.\n")
+            with mock.patch.multiple(vp, ROOT=Path(tmp), REPO_ISSUE_TRACKER=drifted, TRACKER_POINTERS={},
+                                     ISSUE_TRACKER_TEMPLATE=vp.ISSUE_TRACKER_TEMPLATE, problems=[]), \
+                    mock.patch.object(vp, "rel", lambda p: p):
+                vp.check_tracker_setting()
+                self.assertTrue(any("must equal" in p for p in vp.problems), vp.problems)
 
 
 class SelfChecks(unittest.TestCase):

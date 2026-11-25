@@ -16,7 +16,8 @@ Placeholders:
   {{MERGE_STYLE}}    how PRs merge: merge, squash or rebase (the gh pr merge
                      flag); docs/agents/git-workflow.md names it
   {{TICKETING_TOOL}} where tickets live, for example "GitHub Issues" or
-                     "Linear"; docs/agents/issue-tracker.md holds its commands
+                     "the team's own tracker"; docs/agents/issue-tracker.md
+                     holds its commands
   {{JOB}}            what this coordinator is for: the goal, what is known,
                      what done looks like, and what to do once it is done
 -->
