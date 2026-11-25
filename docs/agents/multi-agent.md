@@ -15,7 +15,7 @@ A fresh machine has no registry. Create it from the header row, and treat open P
 
 ## The coordinator
 
-The chat the owner talks to is the coordinator. It hands off every task to an agent or subagent and stays free to talk; the full rule is in the `route-work` skill. Every ask it has for the owner goes on the Asks board, and only the Board Router watches the board for live pings; the `asks-board` skill's "If you are a project coordinator" section says how a coordinator handles one. Its other rules are in `AGENTS.md` and [coordinator-prompt.md](coordinator-prompt.md). Start one by pasting that prompt as its first message, with the job filled in.
+The chat the owner talks to is the coordinator. It hands off every task to an agent or subagent and stays free to talk; the full rule is in the `route-work` skill. Every ask it has for the owner goes on the Asks board, except a merge, which it asks for in chat (the merge policy is in [git-workflow.md](git-workflow.md#merge-policy)). Only the Board Router watches the board for live pings; the `asks-board` skill's "If you are a project coordinator" section says how a coordinator handles one. Its other rules are in `AGENTS.md` and [coordinator-prompt.md](coordinator-prompt.md). Start one by pasting that prompt as its first message, with the job filled in.
 
 ## Peers
 
