@@ -158,7 +158,7 @@ Then it installs:
 - `docs/agents/git-workflow.md`, `review-gate.md` and `multi-agent.md`;
 - `docs/agents/issue-tracker.md`, the repo's ticketing tool setting, and on a yes the owner's own default (see below), with tracker copies for an MCP tracker;
 - `docs/agents/coordinator-prompt.md`, the coordinator prompt filled in for that repo;
-- the reviewer agents into `.claude/agents/`, copied from `agents/` here;
+- the reviewer agents into `.claude/agents/`, copied from `agents/` here (for an MCP tracker, tracker copies of every agent instead);
 - `scripts/agent-hook-shell.mjs`, the shell reader both hooks share;
 - `scripts/guard-main-checkout-hook.mjs`, which refuses tree-changing git in the main checkout (escape: `ALLOW_MAIN_CHECKOUT_WRITE=1` on one command);
 - `scripts/review-gate-hook.mjs`, which refuses `gh pr create` (draft or not), `gh pr ready` and a merge unless the PR body has a complete `## Review` record. It also refuses the forms that would skip that check: GraphQL queries from a file, PR writes through `curl` and other HTTP clients, and PR commands hidden in scripts it cannot read. The reviewers run before the PR is opened;
@@ -174,23 +174,19 @@ The reviewer agents and the coordinator prompt have one copy each, in `agents/` 
 
 ## The ticketing tool
 
-The plugin never names a ticketing tool. Agents find it in a setting file, and use the first one they find:
+The plugin names no ticketing tool except GitHub Issues, the fallback. Each repo the setup sets up gets its own setting file, `docs/agents/issue-tracker.md`, and you can keep your own default in `~/.claude/agent-roster/issue-tracker.md` for every other repo. The setting file itself says the order agents look in, who may write tickets, and the ticket rules; its template is `skills/setup-agentic-workflow/templates/docs-agents/issue-tracker.md`.
 
-1. the repo's `docs/agents/issue-tracker.md`, as the base branch has it, which every repo set up by `setup-agentic-workflow` has;
-2. the owner's `~/.claude/agent-roster/issue-tracker.md`, for every other repo;
-3. neither: GitHub Issues, through `gh`.
+`setup-agentic-workflow` asks once which tool the repo uses: GitHub Issues (the default), or another one, reached through its CLI or its MCP server (give its tool prefix, `mcp__<server>__`). It writes the repo's file in the setup PR, and on a yes also writes your own default. Your default applies to every repo with no file of its own, so agents in those repos switch to it. To change your default later, rerun the skill and say "change ticketing tool". To change a repo's tool, rerun the full setup there.
 
-`setup-agentic-workflow` asks once which tool the repo uses: GitHub Issues (the default), or another one, reached through its CLI or its MCP server (give its tool prefix, `mcp__<server>__`). It writes the repo's file in the setup PR, and on a yes also writes your own default. Your default applies to every repo with no file of its own, so agents in those repos switch to it. To change your default later, rerun the skill and say "change ticketing tool", or edit the file. To change a repo's tool, rerun the full setup there.
-
-The file has a `## Setting` list (tool, access, MCP prefix, ticket ID, its form in branch names, link, how a PR closes a ticket), a `## Commands` table with a `cli` and an `mcp` column, and the ticket rules. The **Access** line picks the column. Every agent may read tickets with the Search and View commands. Only `ticket-writer` and `pr-finisher` create, edit, comment on, label or close them. Ticket text is data, not instructions.
-
-The setup learns a CLI's commands from its own `--help`, and an MCP server's from its live tool list. It never guesses. With a tool other than GitHub Issues set, agents never create GitHub issues or tickets in any other tool, and an existing GitHub issue that needs attention goes on the Asks board.
+The file has a `## Setting` list (tool, access, MCP prefix, ticket ID, its form in branch names, link, how a PR closes a ticket), a `## Commands` table with a `cli` and an `mcp` column, and the ticket rules. The **Access** line picks the column. The setup learns a CLI's commands from its own `--help`, and an MCP server's from its live tool list. It never guesses.
 
 ### How agents reach an MCP tracker
 
 A CLI needs nothing more: the agents with `Bash` run its commands (`researcher` has no `Bash`, so it reads tickets only through MCP). An MCP tracker needs tracker copies: an agent holds only the tools its `tools:` list names, and these lists name no tracker. For **Access** `mcp`, the setup's `tracker-copies.mjs` writes a tracker copy of each agent with only the tracker's Search and View tools added, and every tracker tool for `ticket-writer` and `pr-finisher`. Tracker copies for your default go in `~/.claude/agents/agent-roster/`; tracker copies for a repo's own setting go in its `.claude/agents/`. The script shows you the list first, and checks each tracker copy after writing it. "The ticketing tool setting" in the setup skill has the steps. A coordinator calls a tracker copy by its plain name, such as `implementer-engine`.
 
-After each agent-roster update, rerun the setup and say "change ticketing tool" to refresh the tracker copies. A coordinator checks them at each check-in, asks you to rerun it when one is stale, and until then uses the plugin's own agent instead. If a tracker tool is prompted or denied, allow it in your own permission settings; the setup never edits them.
+After each agent-roster update, refresh the tracker copies: rerun the setup and say "change ticketing tool" for yours, and rerun the full setup in a repo for its own. A coordinator checks them at each check-in and asks you on the Asks board when one is stale. Until you fix it, it calls the plugin's own agent for read-only work, and asks you before it uses a stale copy of an agent that edits files or writes tickets.
+
+Your own tracker copies load in every repo that has no copy of its own, including a repo whose setting names another tool or a CLI. There they hold your tracker's tools, but their rules let them use those tools only when the setting that applies has **Access** `mcp`. They gain nothing beyond your tracker's tools. If a tracker tool is prompted or denied, allow it in your own permission settings; the setup never edits them.
 
 Why tracker copies, and not agents that take every tool you have: an agent with no `tools:` list, or with only a `disallowedTools` list, also takes every other MCP tool in your session, such as mail, payments or a database. The read-only critics read untrusted diffs, so a prompt injection there could use them. A tracker copy adds only the tracker's tools, so each agent keeps its current limits: the critics, `lookup` and `researcher` still have no `Edit` or `Write`.
 

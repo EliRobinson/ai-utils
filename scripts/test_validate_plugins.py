@@ -382,6 +382,8 @@ class AgentToolProblems(unittest.TestCase):
         ("flow list", "lookup", frontmatter("tools: [Read, Edit]"), "'[Read' is not one"),
         ("quoted list", "lookup", frontmatter('tools: "Read, Edit"'), "'\"Read' is not one"),
         ("comment after a tool", "lookup", frontmatter("tools: Read # Edit"), "'Read # Edit' is not one"),
+        ("tools continued on the next line", "spec-critic", frontmatter(f"tools: {READ_TOOLS}", "  , Edit\n"),
+         "not another key"),
         ("deny-list instead of allow-list", "implementer-engine",
          frontmatter(f"tools: {WORK_TOOLS}", "disallowedTools: NotebookEdit\n"), "disallowedTools"),
         ("tracker tool named", "ticket-writer",
@@ -410,7 +412,7 @@ class RepoChecks(unittest.TestCase):
     CHECKS = [
         ("unit-test rule", vp.check_unit_test_rule),
         ("agent tool policy", lambda: vp.check_agent_tool_policy(vp.load_agents())),
-        ("agent rule lines", vp.check_agent_rule_lines),
+        ("agent rule lines", lambda: vp.check_agent_rule_lines(vp.load_agents())),
         ("ticketing tool setting", vp.check_tracker_setting),
     ]
 
@@ -421,27 +423,24 @@ class RepoChecks(unittest.TestCase):
                 self.assertEqual(vp.problems, [])
 
 
+ROSTER_AGENT_NAMES = {p.stem for p in (vp.AGENT_ROSTER / "agents").glob("*.md")}
+
+
 class TrackerSetting(unittest.TestCase):
     def test_every_read_only_agent_exists(self):
-        names = {p.stem for p in (vp.AGENT_ROSTER / "agents").glob("*.md")}
-        self.assertEqual(vp.READ_ONLY_AGENTS - names, set())
+        self.assertEqual(vp.READ_ONLY_AGENTS - ROSTER_AGENT_NAMES, set())
 
     def test_every_critic_is_read_only(self):
-        critics = {p.stem for p in (vp.AGENT_ROSTER / "agents").glob("*.md")
-                   if p.stem.endswith("-critic") or p.stem.endswith("-reviewer")}
+        critics = {name for name in ROSTER_AGENT_NAMES if name.endswith(("-critic", "-reviewer"))}
         self.assertEqual(critics - vp.READ_ONLY_AGENTS, set())
 
     def test_agent_without_a_rule_line_fails(self):
         for rule, (line, _) in vp.AGENT_RULE_LINES.items():
-            with self.subTest(rule), tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp) / "agent-roster"
-                agent = root / "agents" / "lookup.md"
-                agent.parent.mkdir(parents=True)
+            with self.subTest(rule), mock.patch.object(vp, "problems", []):
                 others = "\n".join(other for other, _ in vp.AGENT_RULE_LINES.values() if other != line)
-                agent.write_text(f"---\nname: lookup\ntools: {READ_TOOLS}\n---\n\n{others}\n")
-                with mock.patch.multiple(vp, ROOT=Path(tmp), AGENT_ROSTER=root, problems=[]):
-                    vp.check_agent_rule_lines()
-                    self.assertEqual([rule in p for p in vp.problems], [True], vp.problems)
+                path = vp.AGENT_ROSTER / "agents" / "lookup.md"
+                vp.check_agent_rule_lines([vp.Agent(path, f"No {rule} here.\n{others}\n", "", [])])
+                self.assertEqual([rule in p for p in vp.problems], [True], vp.problems)
 
     def test_repo_issue_tracker_that_drifts_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
