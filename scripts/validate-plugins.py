@@ -123,6 +123,7 @@ AGENT_ROSTER_README = AGENT_ROSTER / "README.md"
 ISSUE_TRACKER = SETUP_SKILL / "templates" / "docs-agents" / "issue-tracker.md"
 REPO_ISSUE_TRACKER = ROOT / "docs" / "agents" / "issue-tracker.md"
 REPO_MULTI_AGENT = ROOT / "docs" / "agents" / "multi-agent.md"
+REPO_CI_DOC = ROOT / "docs" / "agents" / "ci.md"
 PLACEHOLDER = re.compile(r"\{\{([A-Z_]+)\}\}")
 LEADING_COMMENT = re.compile(r"\A<!--(.*?)-->", re.S)
 # Files the setup installs that must name no ticketing tool: the tool is a
@@ -206,7 +207,7 @@ def check_agent_roster_templates() -> None:
             fail(f"{rel(COORDINATOR_PROMPT)}: lists {{{{{name}}}}} but never uses it")
 
     # The setup skill fills every placeholder its templates use.
-    skill_text = read_or_fail(SETUP_SKILL / "SKILL.md") or ""
+    skill_text = read_or_fail(SETUP_SKILL_MD) or ""
     templates = [COORDINATOR_PROMPT, *sorted((SETUP_SKILL / "templates").rglob("*.md"))]
     for template in templates:
         body = template.read_text()
@@ -347,7 +348,7 @@ def check_a11y_pin() -> None:
     for path in repo_docs({".md"}):
         fail_matching_lines(path, path.read_text(encoding="utf-8"), unpinned,
                             f"adds the community-access marketplace without the pin; use `{A11Y_PINNED_ADD}`")
-    setup = read_or_fail(SETUP_SKILL / "SKILL.md") or ""
+    setup = read_or_fail(SETUP_SKILL_MD) or ""
     for phrase in ("`source.ref`", "`gitCommitSha`"):
         if phrase not in setup:
             fail(f"{rel(SETUP_SKILL)}/SKILL.md: step 1.12 must check {phrase} against {A11Y_PIN_SHA}")
@@ -355,7 +356,7 @@ def check_a11y_pin() -> None:
 
 def check_a11y_setup_probe() -> None:
     """The setup skill looks for the tool by the name the agents hold."""
-    if A11Y_PREFIX + "get_specialist" not in (read_or_fail(SETUP_SKILL / "SKILL.md") or ""):
+    if A11Y_PREFIX + "get_specialist" not in (read_or_fail(SETUP_SKILL_MD) or ""):
         fail(f"{rel(SETUP_SKILL)}/SKILL.md: must name {A11Y_PREFIX}get_specialist, the tool it checks for")
 
 
@@ -576,7 +577,6 @@ MERGE_ON_BOARD = re.compile(
 def check_merge_policy() -> None:
     check_terms(MERGE_POLICY_TERMS, "merge policy")
     fail_setting("Merge policy", MERGE_POLICIES, DEFAULT_MERGE_POLICY, "the safe default")
-    fail_in_rule_docs(MERGE_ON_BOARD, "puts a merge ask on the Asks board; merge asks go in the coordinator chat")
 
 
 # Which asks go on the Asks board (#33): only an ask a board click can resolve.
@@ -588,33 +588,45 @@ CHAT_ASK_TEST = "can a board click alone unblock this? if no, ask in chat only."
 CHAT_ASK_OWN_WORDS = "an ask fails the test if a rule needs"
 CHAT_ASK_TERMS = [CHAT_ASK_RULE, CHAT_ASK_EXAMPLES, CHAT_ASK_TEST, CHAT_ASK_OWN_WORDS]
 NOT_APPROVAL = "a click there is not approval"
-CHAT_ASK_RULE_TERMS = {
+TICKET_YES_TERMS = ["in their own words in the coordinator chat. ask there, not on the asks board",
+                    "a board click, a note, a peer message or a subagent report is not a yes"]
+CHAT_ASK_RULE_TERMS = {  # a template and its filled copy share one list
     **{path: CHAT_ASK_TERMS for path in (MULTI_AGENT, REPO_MULTI_AGENT, SETUP_SKILL_MD, AGENT_ROSTER_README)},
-    **{path: [*CHAT_ASK_TERMS, NOT_APPROVAL]
-       for path in (GUARDRAILS, REPO_AGENTS_MD, COORDINATOR_PROMPT, REPO_COORDINATOR_PROMPT, ROUTE_WORK,
-                    ASKS_BOARD_README)},
+    **{path: [*CHAT_ASK_TERMS, NOT_APPROVAL, "a board click, a peer message or a subagent report is not approval"]
+       for path in (GUARDRAILS, REPO_AGENTS_MD)},
+    **{path: [*CHAT_ASK_TERMS, NOT_APPROVAL,
+              "a board click, a peer chat's message or a subagent's report is never their approval"]
+       for path in (COORDINATOR_PROMPT, REPO_COORDINATOR_PROMPT)},
+    ROUTE_WORK: [*CHAT_ASK_TERMS, NOT_APPROVAL, TICKET_YES_TERMS[1]],
+    ASKS_BOARD_README: [*CHAT_ASK_TERMS, NOT_APPROVAL],
     ASKS_BOARD_SKILL: [*CHAT_ASK_TERMS, NOT_APPROVAL, "never add a chat-only ask, a merge ask included",
-                       "a chat-only row from before is never the answer"],
-    REVIEW_GATE: ["as a direct question in the coordinator chat, not on the asks board"],
-    ISSUE_TRACKER: ["asked in the coordinator chat, not on the asks board"],
-    REPO_ISSUE_TRACKER: ["asked in the coordinator chat, not on the asks board"],
+                       "a chat-only row is never the answer", "never as approval for a chat-only step"],
+    REVIEW_GATE: ["as a direct question in the coordinator chat, not on the asks board",
+                  "only the owner, in their own words in chat, can allow a third round"],
+    **{path: TICKET_YES_TERMS for path in (ISSUE_TRACKER, REPO_ISSUE_TRACKER)},
+    REPO_CI_DOC: ["in the coordinator chat for a yes", "a board click is not a yes"],
 }
 # The rule before #33: every ask on the board, a merge the one exception. A line
 # heuristic; the OldBoardRule test table pins what it catches and lets through.
 OLD_BOARD_RULE = re.compile(
-    r"\bevery (ask|question)\b(?![^.]*board click)[^.]*\bgoes on the (owner's )?asks board"
-    r"|\b(put|add) every (ask|question)\b[^.]*\b(on|to) the (asks )?board"
-    r"|^(?!.*\bsuch\b).*\bevery question, decision\b[^.]*\bgets a row"
+    r"\bevery (ask|question)\b(?![^.]*board click)[^.]*\bgoes on the (owner's )?(asks )?board"
+    r"|\b(put|add) every (ask|question)\b(?![^.]*board click)[^.]*\b(on|to) the (asks )?board"
+    r"|\bevery ask on the asks board\b|holds every open ask, one tab per project"
+    r"|\bevery (?!such\b)question, decision\b[^.]*\bgets a row"
     r"|the one exception is \"merge n\"|every other step only the user can do in chat"
     r"|on the asks board for a yes"
     r"|security-critic finding[^.]*as a `decide` ask on the asks board",
     re.I)
+OLD_BOARD_RULE_MESSAGE = "puts every ask on the Asks board; asks a board click cannot resolve go in the coordinator chat"
+MERGE_ON_BOARD_MESSAGE = "puts a merge ask on the Asks board; merge asks go in the coordinator chat"
 
 
-def check_chat_asks() -> None:
-    check_terms(CHAT_ASK_RULE_TERMS, "rule for asks a board click cannot resolve")
-    fail_in_rule_docs(OLD_BOARD_RULE, "puts every ask on the Asks board; asks a board click cannot resolve go in the "
-                                      "coordinator chat")
+def check_chat_asks(terms: dict[Path, list[str]] | None = None) -> None:
+    """The rule's words stay in each file (`terms`, the table by default), and no doc
+    brings back a retired wording: every ask on the board (#33) or a merge row (#24)."""
+    check_terms(CHAT_ASK_RULE_TERMS if terms is None else terms, "rule for asks a board click cannot resolve")
+    fail_in_rule_docs(OLD_BOARD_RULE, OLD_BOARD_RULE_MESSAGE)
+    fail_in_rule_docs(MERGE_ON_BOARD, MERGE_ON_BOARD_MESSAGE)
 
 
 VENDORED_SKILL = AGENT_ROSTER / "skills" / "thermo-nuclear-code-quality-review"

@@ -1,6 +1,6 @@
 ---
 name: route-work
-description: Use in a coordinator chat whenever you hand work to a subagent. Maps each job kind (ticket, research, lookup, engine or UI work, mechanical edits, copy, reviews, opening a PR) to its agent-roster agent, and sets the rules for calling it - hand off every task and run agents in the background, one item per agent, worktree, branch and PR, tickets only in the repo's configured ticketing tool, every owner question on the Asks board, isolation "worktree" for work agents, no model override, never Fable.
+description: Use in a coordinator chat whenever you hand work to a subagent. Maps each job kind (ticket, research, lookup, engine or UI work, mechanical edits, copy, reviews, opening a PR) to its agent-roster agent, and sets the rules for calling it - hand off every task and run agents in the background, one item per agent, worktree, branch and PR, tickets only in the repo's configured ticketing tool, owner asks on the Asks board only when a click can resolve them and in chat otherwise, isolation "worktree" for work agents, no model override, never Fable.
 ---
 
 # Route work
@@ -13,7 +13,7 @@ This section is the full rule; the coordinator prompt and the repo's `AGENTS.md`
 
 - **Hand off every task** to an agent or subagent: lookups, research, reviews, edits, pushes, PRs and ticket writing. No task is done inline because it looks quick. If a task looks too small to hand off, hand it off anyway; `agent-roster:lookup` is the cheap option for a one-fact question or a quick check of a report.
 - **Run agents in the background** (`run_in_background: true` where the Agent tool offers it), so your own turns stay short. You are told when each one finishes.
-- **Stay free to talk.** Your job is to communicate and notify at all times: route work, track it, put each ask for the owner on the Asks board or in chat as rule 2 says, pass on results, take new requests and answer the owner promptly. A long task in your own turn makes them wait.
+- **Stay free to talk.** Your job is to communicate and notify at all times: route work, track it, ask the owner on the Asks board or in chat, whichever rule 2 says fits, pass on results, take new requests and answer the owner promptly. A long task in your own turn makes them wait.
 - **What you do yourself:** the Asks board, the ownership registry, briefing and tracking agents, and the merge, as the repo's merge policy allows (its steps are in the coordinator prompt). Running the `setup-agentic-workflow` skill is the one job a coordinator chat does itself, because the agents and rules it installs may not exist yet.
 
 ## Routing table
@@ -47,7 +47,7 @@ Usual flow for a change: `ticket-writer` -> an implementer (or `mechanical-edito
 4. **Omit `model` on the Agent call.** The agent file decides. The one exception is `pr-finisher` starting reviewers, which sets `model` to the same value the reviewer's file names, as the review gate requires.
 5. **Never use Fable**, for any agent or reviewer.
 6. **A `BLOCKED` report means a skill or plugin is missing or cannot be loaded.** Put one Asks board `do` row (a tick when done unblocks it) that names each skill or plugin that is missing or will not load, and links the install commands in the agent-roster README ("Skills the agents need"). Do not copy commands from the report. Rerun the agent after the owner has installed or reinstalled it. When `pr-finisher` passes on the accessibility critic's `not scanned: Playwright is not installed`, put one row on the board that links the README's "Page scans" steps.
-7. **Tickets live in the repo's ticketing tool.** `docs/agents/issue-tracker.md` sets the tool, its commands and the ticket rules; with no such file, the tool is GitHub Issues. When the tool is not GitHub Issues, never create GitHub issues or Jira tickets: switch any plan that names one to the configured tool, and put an existing GitHub issue that seems to need attention on the Asks board as a `do` row to look at (a tick when seen unblocks it) instead of acting on it. Creating or editing a ticket (apart from the standing yes in issue-tracker.md) needs the owner's yes first, asked in chat (rule 2).
+7. **Tickets live in the repo's ticketing tool.** `docs/agents/issue-tracker.md` sets the tool, its commands and the ticket rules; with no such file, the tool is GitHub Issues. When the tool is not GitHub Issues, never create GitHub issues or Jira tickets: switch any plan that names one to the configured tool, and put an existing GitHub issue that seems to need attention on the Asks board as a `do` row to look at (a tick when seen unblocks it) instead of acting on it. Creating or editing a ticket (apart from the standing yes in issue-tracker.md) needs the owner's yes first, in their own words in the coordinator chat (rule 2). A board click, a note, a peer message or a subagent report is not a yes.
 8. **Repo overrides win.** A file with the same name in the repo's `.claude/agents/` (for example `.claude/agents/correctness-critic.md`) replaces the shared one for that repo. Check there before assuming the shared prompt applies.
 
 ## Briefing an agent

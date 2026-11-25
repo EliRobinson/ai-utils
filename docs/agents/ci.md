@@ -47,7 +47,7 @@ Dependabot (`.github/dependabot.yml`) opens at most one PR a week, which bumps e
 
 A Dependabot PR has no ticket, no branch name in our format and no `## Review` record, so it is never merged as it is. The coordinator watches for these PRs and hands each one to an agent, which:
 
-1. Reports to the coordinator, which asks Eli in the coordinator chat for a yes to file a ticket for the bump. The agent files it only after the coordinator passes on Eli's own words.
+1. Reports to the coordinator, which asks Eli in the coordinator chat for a yes to file a ticket for the bump. The agent files it only after the coordinator passes on Eli's own words; a board click is not a yes.
 2. Makes the same change on its own branch.
 3. Checks each new SHA against its tag upstream (commands below).
 4. Runs the review gate and opens its own PR.

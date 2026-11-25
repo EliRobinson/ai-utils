@@ -180,7 +180,7 @@ Each repo sets where its tickets live in one file it owns: `docs/agents/issue-tr
 
 The file has a `## Setting` list (tool, access, ticket ID, its form in branch names, link, how a PR closes a ticket), a `## Commands` table with a `cli` and an `mcp` column, and the ticket rules. The **Access** line picks the column. So moving a tool from its CLI to an MCP server is a change to that line once the `mcp` column is filled, plus repo copies of `ticket-writer` and `pr-finisher` in `.claude/agents/` whose `tools:` lists name the server's tools. No plugin release is needed.
 
-The setup learns a CLI's commands from its own `--help`, and an MCP server's from its tool list. It never guesses. With a tool other than GitHub Issues set, agents never create GitHub issues or Jira tickets, and an existing GitHub issue that needs attention goes on the Asks board.
+The setup learns a CLI's commands from its own `--help`, and an MCP server's from its tool list. It never guesses. With a tool other than GitHub Issues set, agents never create GitHub issues or Jira tickets, and an existing GitHub issue that needs attention goes on the Asks board as a `do` row to look at.
 
 A worked example, for a repo whose tickets live in Spotlight, reached through its CLI. No Spotlight CLI was installed when this was written, so the commands are placeholders; the setup fills them from `spotlight --help`:
 
@@ -224,7 +224,7 @@ The full rule is the **Merge policy** section of [`git-workflow.md`](skills/setu
 
 ## Start a coordinator chat
 
-A coordinator is the main chat the owner talks to, not a subagent, so it starts from a prompt rather than an agent file. Paste `coordinator/coordinator-prompt.md` as the first message of a new chat, with its placeholders filled (`setup-agentic-workflow` fills them for a repo). It holds the start-up steps, the working rule (hand off every task, tickets in the configured tool), asking the owner (every ask on the Asks board except "merge N", which goes in chat, and a pointer to the `asks-board` skill for Board Router pings), the ownership registry, and the merge steps, which read the merge policy before each merge. The routing table stays in `route-work`, which the prompt links to.
+A coordinator is the main chat the owner talks to, not a subagent, so it starts from a prompt rather than an agent file. Paste `coordinator/coordinator-prompt.md` as the first message of a new chat, with its placeholders filled (`setup-agentic-workflow` fills them for a repo). It holds the start-up steps, the working rule (hand off every task, tickets in the configured tool), asking the owner (on the Asks board only when a board click can resolve the ask, in chat otherwise, "merge N" included, and a pointer to the `asks-board` skill for Board Router pings), the ownership registry, and the merge steps, which read the merge policy before each merge. The routing table stays in `route-work`, which the prompt links to.
 
 ## Override per repo
 

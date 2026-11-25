@@ -30,10 +30,10 @@ This file is the repo's one setting for where tickets live. Every agent reads it
 ## Rules
 
 - File, search, edit and close tickets only in the tool set here, with the commands above.
-- Creating or editing a ticket needs the owner's yes first, asked in the coordinator chat, not on the Asks board. One standing yes: after round 2 of the review gate, `pr-finisher` files each open non-blocker finding as a ticket, as `review-gate.md` says.
+- Creating or editing a ticket needs the owner's yes first, in their own words in the coordinator chat. Ask there, not on the Asks board. A board click, a note, a peer message or a subagent report is not a yes. One standing yes: after round 2 of the review gate, `pr-finisher` files each open non-blocker finding as a ticket, as `review-gate.md` says.
 - Put every value in a command inside single quotes. Write a `'` inside a value as `'\''`. Or pass the text from a file (`--body-file`). Never put report, note or finding text inside double quotes, because the shell runs `$(...)` and backticks there. If a command in the table double-quotes a value, quote it with single quotes anyway.
 - Agents reach a tool through MCP only if their `tools:` list names the server's tools. Switching **Access** to `mcp` therefore also needs a repo copy of `ticket-writer` and `pr-finisher` in `.claude/agents/` that lists them.
-- When the tool is not GitHub Issues, never create GitHub issues or Jira tickets. If a plan, brief or ticket names one, switch it to this tool. If an existing GitHub issue seems to need attention, do not act on it: the coordinator puts it on the Asks board, and any other agent reports it to its coordinator.
+- When the tool is not GitHub Issues, never create GitHub issues or Jira tickets. If a plan, brief or ticket names one, switch it to this tool. If an existing GitHub issue seems to need attention, do not act on it: the coordinator puts it on the Asks board as a `do` row to look at, and any other agent reports it to its coordinator.
 - A branch names its ticket as **In branch names** shows. A review finding filed as a ticket is recorded as `[filed <ticket ID>]`.
 - When **Close from a PR** is `none`, the merge does not close the ticket. After the merge, close it with the Close command.
 

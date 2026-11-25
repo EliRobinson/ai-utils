@@ -1,6 +1,6 @@
 # asks-board
 
-One page for everything your Claude chats need from you.
+One page for the asks your Claude chats need you to click. Asks that need your typed words stay in the chat.
 
 - Each chat adds an "ask" (do, decide or approve) to a claude.ai artifact board. The board shows every project at once, grouped, with a filter per project and per kind.
 - You tick it, press an option, press "Not needed" or leave a note. The result shows right next to the card you clicked.
