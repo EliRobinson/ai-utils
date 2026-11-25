@@ -119,6 +119,9 @@ REPO_AGENTS_MD = ROOT / "AGENTS.md"
 REPO_COORDINATOR_PROMPT = ROOT / "docs" / "agents" / "coordinator-prompt.md"
 ASKS_BOARD_SKILL = ROOT / "plugins" / "asks-board" / "skills" / "asks-board" / "SKILL.md"
 ASKS_BOARD_README = ROOT / "plugins" / "asks-board" / "README.md"
+AGENT_ROSTER_README = AGENT_ROSTER / "README.md"
+ISSUE_TRACKER = SETUP_SKILL / "templates" / "docs-agents" / "issue-tracker.md"
+REPO_ISSUE_TRACKER = ROOT / "docs" / "agents" / "issue-tracker.md"
 REPO_MULTI_AGENT = ROOT / "docs" / "agents" / "multi-agent.md"
 PLACEHOLDER = re.compile(r"\{\{([A-Z_]+)\}\}")
 LEADING_COMMENT = re.compile(r"\A<!--(.*?)-->", re.S)
@@ -160,7 +163,7 @@ RULE_HOMES = [
     RuleHome(ASKS_BOARD_SKILL, "### If you are a project coordinator (not the router)", "`asks-board`",
              {path: "only the board router watches"
               for path in (COORDINATOR_PROMPT, ROUTE_WORK, GUARDRAILS, MULTI_AGENT,
-                           SETUP_SKILL / "SKILL.md", AGENT_ROSTER / "README.md")},
+                           SETUP_SKILL_MD, AGENT_ROSTER_README)},
              section="If you are a project coordinator",
              never_copied=tuple(COPIED_BOARD_STEPS)),
 ]
@@ -253,7 +256,7 @@ A11Y_PIN_VERSION = "=7.1.0"
 A11Y_MARKETPLACE_ADD = "claude plugin marketplace add Community-Access/accessibility-agents"
 A11Y_PINNED_ADD = f"{A11Y_MARKETPLACE_ADD}#{A11Y_PIN_SHA}"
 # The docs that give the install command.
-A11Y_INSTALL_DOCS = [ROOT / "README.md", AGENT_ROSTER / "README.md", SETUP_SKILL / "SKILL.md"]
+A11Y_INSTALL_DOCS = [ROOT / "README.md", AGENT_ROSTER_README, SETUP_SKILL_MD]
 A11Y_PREFIX = "mcp__plugin_accessibility-agents_accessibility-agents__"
 # The accessibility-agents MCP tools the agents hold: scans, checks and
 # get_specialist. None writes files or audit history. Kept by hand against the
@@ -374,6 +377,12 @@ def rule_docs() -> list[Path]:
     return list({p.resolve(): p for p in [REPO_AGENTS_MD, *repo_docs({".md"})]}.values())
 
 
+def fail_in_rule_docs(pattern: re.Pattern, message: str) -> None:
+    """Report each line of a rule doc that matches `pattern`: wording a rule retired."""
+    for path in rule_docs():
+        fail_matching_lines(path, path.read_text(encoding="utf-8"), pattern, message)
+
+
 def check_retired_a11y_names() -> None:
     for path in repo_docs({".md", ".json"}):
         fail_matching_lines(path, path.read_text(encoding="utf-8"), RETIRED_A11Y_NAMES,
@@ -422,10 +431,8 @@ MERGE_FLAGS = {"merge": "allow_merge_commit", "squash": "allow_squash_merge", "r
 
 
 def check_old_branch_rule_gone() -> None:
-    for path in rule_docs():
-        fail_matching_lines(path, path.read_text(encoding="utf-8"), OLD_BRANCH_RULE,
-                            "brings back the dropped -r2 / rebase-only branch rule; state the same-branch "
-                            "rule in templates/docs-agents/git-workflow.md instead")
+    fail_in_rule_docs(OLD_BRANCH_RULE, "brings back the dropped -r2 / rebase-only branch rule; state the same-branch "
+                                       "rule in templates/docs-agents/git-workflow.md instead")
 
 
 def check_terms(table: dict[Path, list[str]], rule: str) -> None:
@@ -556,7 +563,6 @@ MERGE_POLICY_TERMS = {  # a template and its filled copy share one list
     REPO_COORDINATOR_PROMPT: MERGE_POLICY_COORDINATOR_TERMS,
     GIT_WORKFLOW: [READS_MERGE_POLICY, "what `auto` never covers", "bash(gh pr merge *--admin*)"],
     SETUP_SKILL_MD: ["## change the merge policy", "never add it for them"],
-    ASKS_BOARD_SKILL: ["never add a chat-only ask, a merge ask included"],
 }
 # Wording that puts a merge ask on the board: the phrasings before #24, or a line
 # naming the board and "merge N" that does not say never, except or not. A word
@@ -570,9 +576,7 @@ MERGE_ON_BOARD = re.compile(
 def check_merge_policy() -> None:
     check_terms(MERGE_POLICY_TERMS, "merge policy")
     fail_setting("Merge policy", MERGE_POLICIES, DEFAULT_MERGE_POLICY, "the safe default")
-    for path in rule_docs():
-        fail_matching_lines(path, path.read_text(encoding="utf-8"), MERGE_ON_BOARD,
-                            "puts a merge ask on the Asks board; merge asks go in the coordinator chat")
+    fail_in_rule_docs(MERGE_ON_BOARD, "puts a merge ask on the Asks board; merge asks go in the coordinator chat")
 
 
 # Which asks go on the Asks board (#33): only an ask a board click can resolve.
@@ -581,26 +585,36 @@ def check_merge_policy() -> None:
 CHAT_ASK_RULE = "any ask a board click cannot resolve goes in the coordinator chat as a direct question, and not on the board"
 CHAT_ASK_EXAMPLES = 'a merge request ("merge n"), filing or editing a ticket, opening a pr, allowing a third review round'
 CHAT_ASK_TEST = "can a board click alone unblock this? if no, ask in chat only."
+CHAT_ASK_OWN_WORDS = "an ask fails the test if a rule needs"
+CHAT_ASK_TERMS = [CHAT_ASK_RULE, CHAT_ASK_EXAMPLES, CHAT_ASK_TEST, CHAT_ASK_OWN_WORDS]
+NOT_APPROVAL = "a click there is not approval"
 CHAT_ASK_RULE_TERMS = {
-    path: [CHAT_ASK_RULE, CHAT_ASK_EXAMPLES, CHAT_ASK_TEST]
-    for path in (GUARDRAILS, REPO_AGENTS_MD, COORDINATOR_PROMPT, REPO_COORDINATOR_PROMPT, ROUTE_WORK,
-                 MULTI_AGENT, REPO_MULTI_AGENT, SETUP_SKILL_MD, AGENT_ROSTER / "README.md",
-                 ASKS_BOARD_SKILL, ASKS_BOARD_README)
+    **{path: CHAT_ASK_TERMS for path in (MULTI_AGENT, REPO_MULTI_AGENT, SETUP_SKILL_MD, AGENT_ROSTER_README)},
+    **{path: [*CHAT_ASK_TERMS, NOT_APPROVAL]
+       for path in (GUARDRAILS, REPO_AGENTS_MD, COORDINATOR_PROMPT, REPO_COORDINATOR_PROMPT, ROUTE_WORK,
+                    ASKS_BOARD_README)},
+    ASKS_BOARD_SKILL: [*CHAT_ASK_TERMS, NOT_APPROVAL, "never add a chat-only ask, a merge ask included",
+                       "a chat-only row from before is never the answer"],
+    REVIEW_GATE: ["as a direct question in the coordinator chat, not on the asks board"],
+    ISSUE_TRACKER: ["asked in the coordinator chat, not on the asks board"],
+    REPO_ISSUE_TRACKER: ["asked in the coordinator chat, not on the asks board"],
 }
-# The rule before #33: every ask on the board, a merge the one exception.
+# The rule before #33: every ask on the board, a merge the one exception. A line
+# heuristic; the OldBoardRule test table pins what it catches and lets through.
 OLD_BOARD_RULE = re.compile(
-    r"\bevery (ask|question)\b[^.]*\bgoes on the (owner's )?asks board"
+    r"\bevery (ask|question)\b(?![^.]*board click)[^.]*\bgoes on the (owner's )?asks board"
+    r"|\b(put|add) every (ask|question)\b[^.]*\b(on|to) the (asks )?board"
+    r"|^(?!.*\bsuch\b).*\bevery question, decision\b[^.]*\bgets a row"
     r"|the one exception is \"merge n\"|every other step only the user can do in chat"
-    r"|as a `decide` ask on the asks board",
+    r"|on the asks board for a yes"
+    r"|security-critic finding[^.]*as a `decide` ask on the asks board",
     re.I)
 
 
 def check_chat_asks() -> None:
     check_terms(CHAT_ASK_RULE_TERMS, "rule for asks a board click cannot resolve")
-    for path in rule_docs():
-        fail_matching_lines(path, path.read_text(encoding="utf-8"), OLD_BOARD_RULE,
-                            "puts every ask on the Asks board; asks a board click cannot resolve go in the "
-                            "coordinator chat")
+    fail_in_rule_docs(OLD_BOARD_RULE, "puts every ask on the Asks board; asks a board click cannot resolve go in the "
+                                      "coordinator chat")
 
 
 VENDORED_SKILL = AGENT_ROSTER / "skills" / "thermo-nuclear-code-quality-review"

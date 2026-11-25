@@ -15,7 +15,7 @@ You set up the owner's agent workflow in the repo you are run in. The workflow:
 - a PR gets at most two rounds of review (the rule is in `docs/agents/review-gate.md`);
 - the merge policy says who decides a merge: `ask` (no PR merges until the owner types "merge N" in chat) or `auto` (the coordinator merges a ready PR on its own), recorded in `docs/agents/git-workflow.md`;
 - a coordinator chat routes work: it hands off every task, runs agents in the background, and stays free to talk;
-- an ask for the owner (question, decision, approval, review, task) goes on the owner's Asks board only when a board click can resolve it. Any ask a board click cannot resolve goes in the coordinator chat as a direct question, and not on the board: a merge request ("merge N"), filing or editing a ticket, opening a PR, allowing a third review round, and anything else whose answer must be typed in chat. The test: can a board click alone unblock this? If no, ask in chat only.
+- an ask for the owner (question, decision, approval, review, task) goes on the owner's Asks board only when a board click can resolve it. Any ask a board click cannot resolve goes in the coordinator chat as a direct question, and not on the board: a merge request ("merge N"), filing or editing a ticket, opening a PR, allowing a third review round, and anything else whose answer must be typed in chat. The test: can a board click alone unblock this? If no, ask in chat only. An ask fails the test if a rule needs the owner's own words for it (an approval to merge, file a ticket, open a PR or run a third round, a deploy, a value to paste), or if any of its options leads to a chat-only step.
 - only the Board Router watches the board for live pings; a coordinator never does (it reads the board at every check-in), never messages the router back, and handles a ping as the `asks-board` skill's "If you are a project coordinator" section says;
 - the reviewers have the skills and plugins they need (copy editing, design, accessibility);
 - an ownership registry outside the repo keeps concurrent sessions apart;
@@ -37,7 +37,7 @@ Resolve every path from the skill folder, never from the plugin-root variable, s
 
 - Ask only where the choice is real: one question per step at most, with at most two options and your recommendation. Step 3 may add one more, only when a ticketing tool's commands cannot be learned from its own help or tool list.
 - Never overwrite a file that exists. Show the diff, and ask.
-- Once the board is ready (step 4), add each question for the owner that a board click can resolve to the Asks board first, then ask it in chat. Ask the rest in chat only. Before the board is ready, ask everything in chat only.
+- Once the board is ready (step 4), put each ask a board click can resolve on the Asks board first, then ask it in chat. Ask everything else in chat only. Until the board is ready, ask everything in chat only.
 - Write in plain short sentences, with no em-dashes. Refer to the owner as they/them.
 
 ## Steps
@@ -113,7 +113,7 @@ Then the choice:
    - Then, if the board has no route for the project slug, add one: `ArtifactData` `set`, collection `routes`, `doc_id` = the slug, data `{project: "<slug>", session: "<Repo name> Coordinator", note: "", updatedAt: "<now>"}`. Leave out `sessionId`; the coordinator sets it when it starts.
    - If a route with that slug already points at another chat, it belongs to another project. Never write over it. Show it, and ask the owner for another slug, such as `<owner>-<repo>`. Read the route for that slug too, and apply the same check before you write. Use the slug you end with everywhere `{{PROJECT}}` goes.
    - Do not message the Board Router. It reads routes from the board on each ping.
-   - From here on, add every question for the owner to the board first, under this project.
+   - From here on, put each ask a board click can resolve on the board first, under this project. Ask the rest in chat only.
 2. **Page scans.** If the `accessibility-agents` plugin is installed but Playwright is not beside its MCP server, give the owner the steps in the agent-roster README ("Page scans") to run themselves. They are optional: without them the accessibility critic reviews the code but cannot scan the page.
 
 ### 5. Claim, then take a worktree (option A)

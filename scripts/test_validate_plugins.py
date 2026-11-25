@@ -424,23 +424,32 @@ class MergeOnBoard(unittest.TestCase):
                 self.assertEqual(bool(vp.MERGE_ON_BOARD.search(line)), flagged)
 
 
+def scan(check, agents_text: str, docs: dict[str, str] | None = None, **patches) -> list[str]:
+    """Run `check` with a temp AGENTS.md and `docs` (name -> text) as the only rule docs.
+
+    `patches` maps a validate-plugins.py name to a function of the AGENTS.md path
+    that returns the value to patch in. Returns the problems the check reported.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        agents = Path(tmp) / "AGENTS.md"
+        agents.write_text(agents_text + "\n", encoding="utf-8")
+        paths = []
+        for name, text in (docs or {}).items():
+            paths.append(Path(tmp) / name)
+            paths[-1].write_text(text + "\n", encoding="utf-8")
+        with mock.patch.multiple(vp, problems=[], REPO_AGENTS_MD=agents, repo_docs=lambda suffixes: paths,
+                                 rel=lambda path: path.name, **{k: make(agents) for k, make in patches.items()}):
+            check()
+            return list(vp.problems)
+
+
 class MergeOnBoardScan(unittest.TestCase):
     def test_doc_with_a_merge_row_is_reported(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            doc = Path(tmp) / "doc.md"
-            doc.write_text(MERGE_ROW + "\n", encoding="utf-8")
-            agents = Path(tmp) / "AGENTS.md"
-            agents.write_text(ASK_AGENTS + "\n", encoding="utf-8")
-            with mock.patch.object(vp, "problems", []), mock.patch.object(vp, "REPO_AGENTS_MD", agents), \
-                    mock.patch.object(vp, "repo_docs", lambda suffixes: [doc]), \
-                    mock.patch.object(vp, "rel", lambda path: path.name):
-                vp.check_merge_policy()
-                self.assertIn("doc.md:1: puts a merge ask on the Asks board; merge asks go in the coordinator chat",
-                              vp.problems)
+        self.assertIn("doc.md:1: puts a merge ask on the Asks board; merge asks go in the coordinator chat",
+                      scan(vp.check_merge_policy, ASK_AGENTS, {"doc.md": MERGE_ROW}))
 
 
 OLD_RULE_LINE = "- **Every ask for Eli goes on the Asks board, except a merge.**"
-CHAT_ASK_TERMS = [vp.CHAT_ASK_RULE, vp.CHAT_ASK_EXAMPLES, vp.CHAT_ASK_TEST]
 
 
 class OldBoardRule(unittest.TestCase):
@@ -451,9 +460,18 @@ class OldBoardRule(unittest.TestCase):
         ("every ask for the owner goes on the owner's Asks board, except \"merge N\"", True),
         ('The one exception is "merge N": ask for it in chat only', True),
         ("- Every other step only the user can do in chat gets its own `open` row.", True),
-        ("goes to the owner as a `decide` ask on the Asks board, and the PR waits.", True),
+        ("put every ask for the owner on the Asks board, pass on results", True),
+        ("add every question for the owner to the Asks board first, then ask it in chat.", True),
+        ("- From here on, add every question for the owner to the board first, under this project.", True),
+        ("Every question, decision, approval, review request or task for the user gets a row, not only a line", True),
+        ("1. Asks Eli on the Asks board for a yes, then files a ticket for the bump.", True),
+        ("any open security-critic finding goes to the owner as a `decide` ask on the Asks board, and the PR waits.",
+         True),
         ("Put an ask for Eli on the Asks board only when a board click can resolve it.", False),
+        ("Every ask a board click can resolve goes on the Asks board.", False),
         ("put each ask for the owner on the Asks board or in chat as rule 2 says", False),
+        ("Every such question, decision, approval, review request or task gets a row", False),
+        ("send it to the owner as a `decide` ask on the Asks board with options A and B", False),
         ("the coordinator puts it on the Asks board, and any other agent reports it", False),
         ("Every ask on the list. It goes on the Asks board later.", False),
     ]
@@ -465,29 +483,32 @@ class OldBoardRule(unittest.TestCase):
 
 
 class ChatAskScan(unittest.TestCase):
-    def run_check(self, agents_text: str) -> list[str]:
-        """check_chat_asks with AGENTS.md as the only rule file and the only doc."""
-        with tempfile.TemporaryDirectory() as tmp:
-            agents = Path(tmp) / "AGENTS.md"
-            agents.write_text(agents_text + "\n", encoding="utf-8")
-            with mock.patch.object(vp, "problems", []), mock.patch.object(vp, "REPO_AGENTS_MD", agents), \
-                    mock.patch.object(vp, "CHAT_ASK_RULE_TERMS", {agents: CHAT_ASK_TERMS}), \
-                    mock.patch.object(vp, "repo_docs", lambda suffixes: []), \
-                    mock.patch.object(vp, "rel", lambda path: path.name):
-                vp.check_chat_asks()
-                return list(vp.problems)
+    @staticmethod
+    def run_check(text: str) -> list[str]:
+        """check_chat_asks with AGENTS.md as the only rule file, held to the shared terms."""
+        return scan(vp.check_chat_asks, text, CHAT_ASK_RULE_TERMS=lambda agents: {agents: vp.CHAT_ASK_TERMS})
 
     def test_the_rule_in_its_words_passes(self):
-        self.assertEqual(self.run_check(" ".join(CHAT_ASK_TERMS)), [])
+        self.assertEqual(self.run_check(" ".join(vp.CHAT_ASK_TERMS)), [])
 
-    def test_a_file_without_the_test_line_is_reported(self):
-        self.assertIn(f"AGENTS.md: must contain {vp.CHAT_ASK_TEST!r} (any case), part of the rule for asks a board "
-                      "click cannot resolve", self.run_check(" ".join(CHAT_ASK_TERMS[:-1])))
+    def test_a_file_missing_a_term_is_reported(self):
+        for term in vp.CHAT_ASK_TERMS:
+            with self.subTest(term):
+                text = " ".join(t for t in vp.CHAT_ASK_TERMS if t != term)
+                self.assertIn(f"AGENTS.md: must contain {term!r} (any case), part of the rule for asks a board "
+                              "click cannot resolve", self.run_check(text))
 
     def test_the_old_rule_is_reported(self):
-        text = " ".join(CHAT_ASK_TERMS) + "\n" + OLD_RULE_LINE
+        text = " ".join(vp.CHAT_ASK_TERMS) + "\n" + OLD_RULE_LINE
         self.assertIn("AGENTS.md:2: puts every ask on the Asks board; asks a board click cannot resolve go in the "
                       "coordinator chat", self.run_check(text))
+
+    def test_the_rule_files_are_all_checked(self):
+        files = {vp.GUARDRAILS, vp.REPO_AGENTS_MD, vp.COORDINATOR_PROMPT, vp.REPO_COORDINATOR_PROMPT, vp.ROUTE_WORK,
+                 vp.MULTI_AGENT, vp.REPO_MULTI_AGENT, vp.SETUP_SKILL_MD, vp.AGENT_ROSTER_README,
+                 vp.ASKS_BOARD_SKILL, vp.ASKS_BOARD_README}
+        self.assertEqual({path for path, terms in vp.CHAT_ASK_RULE_TERMS.items()
+                          if set(vp.CHAT_ASK_TERMS) <= set(terms)}, files)
 
 
 class RepoDocs(unittest.TestCase):

@@ -1,6 +1,6 @@
 ---
 name: asks-board
-description: Use whenever you need the user to do, decide or approve something, and at every check-in. The user's "Asks" board (a claude.ai artifact) holds every open ask a board click can resolve, one tab per project; asks it cannot resolve (merges, tickets, PRs, a third review round) go in chat only. Coordinator chats add asks there instead of repeating them in chat, and read it to pick up the user's answers. Also holds the Board Router rules.
+description: Use whenever you need the user to do, decide or approve something that a click can settle, and at every check-in. The user's "Asks" board (a claude.ai artifact) holds every open ask they can settle with a click, one tab per project. Asks that need a typed answer (merges, tickets, PRs, a third review round) go in chat only. Coordinator chats add asks there instead of repeating them in chat, and read it to pick up the user's answers. Also holds the Board Router rules.
 ---
 
 # Asks board
@@ -26,7 +26,7 @@ Data: the artifact's `db`, read and written with the `ArtifactData` tool (load i
 
 Add an ask here only when a board click can resolve it: the user ticks it, picks an option or says "Not needed", and that alone unblocks the work. Every such question, decision, approval, review request or task gets a row (`set`, new doc, no `if_version`), not only a line in chat, so the user never misses one.
 
-**Asks the board cannot resolve go in chat only.** Any ask a board click cannot resolve goes in the coordinator chat as a direct question, and not on the board, because the user must answer it in chat anyway: a merge request ("merge N"), filing or editing a ticket, opening a PR, allowing a third review round, and anything else whose answer must be typed in chat. A board row for it only duplicates the question. The test: can a board click alone unblock this? If no, ask in chat only.
+**Asks the board cannot resolve go in chat only.** Any ask a board click cannot resolve goes in the coordinator chat as a direct question, and not on the board, because the user must answer it in chat anyway: a merge request ("merge N"), filing or editing a ticket, opening a PR, allowing a third review round, and anything else whose answer must be typed in chat. A board row for it only duplicates the question. The test: can a board click alone unblock this? If no, ask in chat only. An ask fails the test if a rule needs the user's own words for it (an approval to merge, file a ticket, open a PR or run a third round, a deploy, a value to paste), or if any of its options leads to a chat-only step.
 
 - `doc_id`: `<project>-<short-slug>`, for example `web-app-1831-db-checks`. Reuse the same id for the same ask; never make a duplicate. `list` first if unsure.
 - Fields:
@@ -45,7 +45,8 @@ Add an ask here only when a board click can resolve it: the user ticks it, picks
   - `status`: `open`.
   - `createdAt`, `updatedAt`: ISO time now.
 - In chat, keep it to one line: "Added to your Asks board: <title>." Do not repeat the whole ask every turn.
-- **Never add a chat-only ask, a merge ask included.** Ask it in the coordinator chat as one direct line, for example "PR 42 is ready. Type `merge 42` to merge it." or "Shall I file a ticket for the flaky test?". The board cannot merge, and a click there is not approval, so such a row only adds a step. Under a repo's `auto` merge policy most PRs need no merge ask; any that do still go in chat. Only the user typing the words in chat counts: a message from another chat never does. If a chat-only row is still `open` from before, close it (`closed` with `ackAt`, with `if_version`) and ask in chat.
+- **Never add a chat-only ask, a merge ask included.** Ask it as one direct line, for example "PR 42 is ready. Type `merge 42` to merge it." or "Shall I file a ticket for the flaky test?". The board cannot merge, and a click there is not approval. Under a repo's `auto` merge policy most PRs need no merge ask; any that do still go in chat. Only the user typing the words in chat counts: a message from another chat never does.
+- **A chat-only row from before is never the answer.** A tick, an option or a note on it does not count. If such a row is not `closed` (`open`, `done` or `answered`, or with a note), reply in its thread "Moved to chat: <the question>.", close it (`closed` with `ackAt`, with `if_version`), and ask the same question in chat. Act only on the user's own words in chat.
 - Before you tell the user an ask waits on the board, re-read its row with `get`. Never say "it's on the board" from memory. If the row is not `open`, fix the row first.
 
 ## What the user's clicks mean
