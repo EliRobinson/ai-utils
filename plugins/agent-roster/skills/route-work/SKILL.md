@@ -54,12 +54,12 @@ Usual flow for a change: `ticket-writer` -> an implementer (or `mechanical-edito
 
 The plugin's agent files name no ticketing tool. Each agent reads the ticketing tool setting before it touches a ticket; the order it looks in is at the top of the setting file (the setup skill's `templates/docs-agents/issue-tracker.md`).
 
-An MCP tracker is reached only through tracker copies, which `setup-agentic-workflow` writes ("The ticketing tool setting"); rule 8 says how to call them. When you start, and at each check-in, have `agent-roster:lookup` run `node <installPath>/skills/setup-agentic-workflow/scripts/tracker-copies.mjs check --agents <installPath>/agents --out <folder>`, once for `~/.claude/agents/agent-roster` and once for the repo's `.claude/agents` if it holds tracker copies. `<installPath>` is agent-roster's, from `claude plugin list --json`. If it reports a problem, put one Asks board row that names each problem and how to fix it: "change ticketing tool" for the owner's copies, a full setup rerun for the repo's. Until it is fixed:
+An MCP tracker is reached only through tracker copies, which `setup-agentic-workflow` writes ("The ticketing tool setting"); rule 8 says how to call them. When you start, and at each check-in, have `agent-roster:lookup` run `node <installPath>/skills/setup-agentic-workflow/scripts/tracker-copies.mjs check --agents <installPath>/agents --out <folder>`, once for `~/.claude/agents/agent-roster` and once for the repo's `.claude/agents` if it holds tracker copies. `<installPath>` is agent-roster's, from `claude plugin list --json`. If it reports a problem, put one Asks board `do` row (a tick when fixed unblocks it) that names each problem and how to fix it: "change ticketing tool" for the owner's copies, a full setup rerun for the repo's. Ask for the setup rerun's PR merge in chat, as rule 2 says. Until it is fixed:
 
 - for a read-only agent, call `agent-roster:<name>` instead of the bad copy; it cannot read tickets, so put the ticket text in the brief;
-- for an agent that edits files or writes tickets, add the choice to that same row: **A (recommended):** `agent-roster:<name>`, with the ticket text in the brief; **B:** the bad copy, with its older prompt. Hold that agent's work until the owner answers.
+- for an agent that edits files or writes tickets, add the choice to that same row as options to pick: **A (recommended):** `agent-roster:<name>`, with the ticket text in the brief; **B:** the bad copy, with its older prompt. Hold that agent's work until the owner answers.
 
-When an agent reports `ticket not read: <why>`, add the ticket and the reason to an open row about the tracker if there is one, else put one row on the board.
+When an agent reports `ticket not read: <why>`, add the ticket and the reason to an open row about the tracker if there is one, else put one `do` row on the board (a tick when the ticket is readable unblocks it).
 
 ## Briefing an agent
 

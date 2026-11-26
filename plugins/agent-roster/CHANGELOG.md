@@ -7,9 +7,10 @@
 **Upgrade steps:**
 
 1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils` and `claude plugin update asks-board@ai-utils` (1.2.0), then restart Claude Code.
-2. Rerun `setup-agentic-workflow` in each repo set up before 1.14.0 and merge its setup PR. It rewrites the Asks board bullet in `AGENTS.md`, the "Asking" section of `docs/agents/coordinator-prompt.md`, and `docs/agents/multi-agent.md`, `review-gate.md` and `issue-tracker.md`.
+2. Rerun `setup-agentic-workflow` once in each repo set up before 1.14.0 (it covers the 1.13.0 refresh too) and merge its setup PR. If you use tracker copies, also run it once and say "change ticketing tool" to refresh yours, since `pr-finisher` changed. It rewrites the Asks board bullet in `AGENTS.md`, the "Asking" section of `docs/agents/coordinator-prompt.md`, and `docs/agents/multi-agent.md`, `review-gate.md` and `issue-tracker.md`.
 3. Start a new coordinator chat from the new prompt, or tell the open one the new rule.
 4. Tell each open coordinator chat to move its chat-only rows (a merge, a ticket, a PR, a third review round) off the board, as the `asks-board` skill's "A chat-only row is never the answer" says. A click on such a row, "Not needed" included, only moves it to chat. Rows of a chat that no longer checks in stay on the board; close them by telling a coordinator chat to.
+5. If your repo keeps hash-pinned verbatim copies of these files (`review-gate.md`, `pr-finisher.md` among them), refresh the copies and their hash list in a later change of its own.
 
 **Changes:**
 
