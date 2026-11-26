@@ -352,19 +352,107 @@ class CheckTerms(unittest.TestCase):
         self.assertEqual(self.run_check(None), ["rules.md: missing"])
 
 
-class RepoRules(unittest.TestCase):
-    # (rule, its check); each must pass on the repo's own files
-    CASES = [
+A11Y_TOOL = vp.A11Y_PREFIX + "get_specialist"
+WORK_TOOLS = "Read, Edit, Write, Grep, Glob, Bash, Skill"
+READ_TOOLS = "Read, Grep, Glob, Bash"
+
+
+def frontmatter(tools_line: str, extra: str = "") -> str:
+    """A raw frontmatter block, as agent_tool_problems reads it."""
+    return f"name: x\ndescription: d\n{tools_line}\n{extra}model: sonnet"
+
+
+class AgentToolProblems(unittest.TestCase):
+    """agent_tool_problems keeps every agent on one plain tools: allow-list with no tracker named."""
+
+    PASSING = [
+        ("work agent with file tools", "implementer-engine", frontmatter(f"tools: {WORK_TOOLS}")),
+        ("read-only agent without file tools", "correctness-critic", frontmatter(f"tools: {READ_TOOLS}")),
+        ("read-only agent with accessibility tools", "accessibility-critic",
+         frontmatter(f"tools: {READ_TOOLS}, {A11Y_TOOL}")),
+        ("work agent that starts agents", "pr-finisher", frontmatter(f"tools: {WORK_TOOLS}, Agent")),
+    ]
+    FAILING = [
+        ("no tools line", "lookup", frontmatter(""), "exactly one `tools:` line"),
+        ("blank tools line", "lookup", frontmatter("tools: "), "exactly one `tools:` line"),
+        ("tools line followed by another key", "lookup", frontmatter("tools:"), "exactly one `tools:` line"),
+        ("two tools lines", "lookup", frontmatter(f"tools: {READ_TOOLS}", "tools: Edit\n"),
+         "exactly one `tools:` line"),
+        ("block list", "lookup", frontmatter("tools:\n  - Read\n  - Edit"), "exactly one `tools:` line"),
+        ("flow list", "lookup", frontmatter("tools: [Read, Edit]"), "'[Read' is not one"),
+        ("quoted list", "lookup", frontmatter('tools: "Read, Edit"'), "'\"Read' is not one"),
+        ("comment after a tool", "lookup", frontmatter("tools: Read # Edit"), "'Read # Edit' is not one"),
+        ("tools continued on the next line", "spec-critic", frontmatter(f"tools: {READ_TOOLS}", "  , Edit\n"),
+         "not another key"),
+        ("deny-list instead of allow-list", "implementer-engine",
+         frontmatter(f"tools: {WORK_TOOLS}", "disallowedTools: NotebookEdit\n"), "disallowedTools"),
+        ("tracker tool named", "ticket-writer",
+         frontmatter(f"tools: {READ_TOOLS}, mcp__tracker__get_ticket"), "mcp__tracker__get_ticket"),
+        ("whole MCP server named", "implementer-engine", frontmatter(f"tools: {WORK_TOOLS}, mcp__tracker__*"),
+         "'mcp__tracker__*' is not one"),
+        *[(f"read-only agent with {tool}", "spec-critic", frontmatter(f"tools: {READ_TOOLS}, {tool}"),
+           f"holds {tool}") for tool in vp.READ_ONLY_FORBIDDEN],
+    ]
+
+    def test_allowed_tool_sets_pass(self):
+        for label, name, block in self.PASSING:
+            with self.subTest(label):
+                self.assertEqual(vp.agent_tool_problems(name, block), [])
+
+    def test_each_problem_is_named(self):
+        for label, name, block, needle in self.FAILING:
+            with self.subTest(label):
+                found = vp.agent_tool_problems(name, block)
+                self.assertTrue(any(needle in p for p in found), found)
+
+
+class RepoChecks(unittest.TestCase):
+    """Each repo-wide check passes on this repo as it is."""
+
+    CHECKS = [
         ("unit-test rule", vp.check_unit_test_rule),
+        ("agent tool policy", lambda: vp.check_agent_tool_policy(vp.load_agents())),
+        ("agent rule lines", lambda: vp.check_agent_rule_lines(vp.load_agents())),
+        ("ticketing tool setting", vp.check_tracker_setting),
         ("merge policy", vp.check_merge_policy),
         ("rule for asks a board click cannot resolve", vp.check_chat_asks),
     ]
 
-    def test_repo_files_carry_the_rule(self):
-        for rule, check in self.CASES:
-            with self.subTest(rule), mock.patch.object(vp, "problems", []):
+    def test_repo_passes(self):
+        for label, check in self.CHECKS:
+            with self.subTest(label), mock.patch.object(vp, "problems", []):
                 check()
                 self.assertEqual(vp.problems, [])
+
+
+ROSTER_AGENT_NAMES = {p.stem for p in (vp.AGENT_ROSTER / "agents").glob("*.md")}
+
+
+class TrackerSetting(unittest.TestCase):
+    def test_every_read_only_agent_exists(self):
+        self.assertEqual(vp.READ_ONLY_AGENTS - ROSTER_AGENT_NAMES, set())
+
+    def test_every_critic_is_read_only(self):
+        critics = {name for name in ROSTER_AGENT_NAMES if name.endswith(("-critic", "-reviewer"))}
+        self.assertEqual(critics - vp.READ_ONLY_AGENTS, set())
+
+    def test_agent_without_a_rule_line_fails(self):
+        for rule, (line, _) in vp.AGENT_RULE_LINES.items():
+            with self.subTest(rule), mock.patch.object(vp, "problems", []):
+                others = "\n".join(other for other, _ in vp.AGENT_RULE_LINES.values() if other != line)
+                path = vp.AGENT_ROSTER / "agents" / "lookup.md"
+                vp.check_agent_rule_lines([vp.Agent(path, f"No {rule} here.\n{others}\n", "", [])])
+                self.assertEqual([rule in p for p in vp.problems], [True], vp.problems)
+
+    def test_repo_issue_tracker_that_drifts_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            drifted = Path(tmp) / "issue-tracker.md"
+            drifted.write_text(vp.ISSUE_TRACKER_TEMPLATE.read_text() + "\nAn extra line.\n")
+            with mock.patch.multiple(vp, ROOT=Path(tmp), REPO_ISSUE_TRACKER=drifted, TRACKER_POINTERS={},
+                                     ISSUE_TRACKER_TEMPLATE=vp.ISSUE_TRACKER_TEMPLATE, problems=[]), \
+                    mock.patch.object(vp, "rel", lambda p: p):
+                vp.check_tracker_setting()
+                self.assertTrue(any("must equal" in p for p in vp.problems), vp.problems)
 
 
 ASK_LINE = "- **Merge policy:** `ask`"

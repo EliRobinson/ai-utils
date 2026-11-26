@@ -75,7 +75,7 @@ Rounds: 1
 - **Model** names Opus, Sonnet or Haiku.
 - **Findings** is a whole number; `0` when there are none.
 - **Disposition** sums the finding lines, such as `2 fixed, 1 declined`; `none` when Findings is `0`.
-- Each finding line starts with the reviewer's name and a colon, and ends with `[fixed]`, `[declined: <why>]` or `[filed <ticket ID>]`. The ticket ID is one word with a digit in it, made of letters, digits and `# . _ -` only, as the ticketing tool writes it, such as `#123` or `SPOT-42`.
+- Each finding line starts with the reviewer's name and a colon, and ends with `[fixed]`, `[declined: <why>]` or `[filed <ticket ID>]`. The ticket ID is one word with a digit in it, made of letters, digits and `# . _ -` only, as the ticketing tool writes it, such as `#123` or `PROJ-42`.
 - A reviewer may be named by its record name or its agent name.
 - A record inside a code block or an HTML comment does not count.
 
