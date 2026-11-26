@@ -213,7 +213,7 @@ try {
     review("gh pr ready 5", "refuse", { FAKE_PR_BODY: noSeparator }),
     // Filed findings: a GitHub issue or a ticket ID from another tool, never no ID.
     review("gh pr ready 5", "allow", { FAKE_PR_BODY: filedAs("#123") }),
-    review("gh pr ready 5", "allow", { FAKE_PR_BODY: filedAs("SPOT-42") }),
+    review("gh pr ready 5", "allow", { FAKE_PR_BODY: filedAs("PROJ-42") }),
     review("gh pr ready 5", "allow", { FAKE_PR_BODY: filedAs("ENG-7") }),
     review("gh pr ready 5", "refuse", { FAKE_PR_BODY: filedAs("later") }),
     review("gh pr ready 5", "refuse", { FAKE_PR_BODY: filedAs("") }),

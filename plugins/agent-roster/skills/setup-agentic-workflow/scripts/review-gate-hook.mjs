@@ -73,7 +73,7 @@ function dispositionOf(tag) {
   if (/^fixed$/i.test(tag)) return "fixed";
   if (/^declined:\s*\S/i.test(tag)) return "declined";
   // One ticket ID in the repo's ticketing tool (docs/agents/issue-tracker.md):
-  // "#123" for GitHub, "SPOT-42" or similar elsewhere. It must hold a digit and only letters, digits and # . _ -.
+  // "#123" for GitHub, "PROJ-42" or similar elsewhere. It must hold a digit and only letters, digits and # . _ -.
   if (/^filed\s+(?=[\w#.-]*\d)[\w#.-]+$/i.test(tag)) return "filed";
   return null;
 }
