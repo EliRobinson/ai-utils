@@ -12,7 +12,7 @@ plugins/
     skills/                        route-work (routing table + coordinator rules),
                                    setup-agentic-workflow (installs the workflow into a repo),
                                    thermo-nuclear-code-quality-review (Cursor's, vendored)
-  asks-board/                    Asks board: one artifact for everything chats need from you
+  asks-board/                    Asks board: one artifact for the asks chats need you to click
     skills/                        asks-board (daily rules), asks-board-setup (+ board page template)
 .claude-plugin/marketplace.json  marketplace index, lists everything in plugins/
 .claude/agents/                  this repo's reviewer agents (symlinks into agent-roster)

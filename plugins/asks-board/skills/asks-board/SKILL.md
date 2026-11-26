@@ -1,6 +1,6 @@
 ---
 name: asks-board
-description: Use whenever you need the user to do, decide or approve something, and at every check-in. The user's "Asks" board (a claude.ai artifact) holds every open ask, one tab per project. Coordinator chats add asks there instead of repeating them in chat, and read it to pick up the user's answers. Also holds the Board Router rules.
+description: Use whenever you need the user to do, decide or approve something that a click can settle, and at every check-in. The user's "Asks" board (a claude.ai artifact) holds every open ask they can settle with a click, one tab per project. Asks that need a typed answer (merges, tickets, PRs, a third review round) go in chat only. Coordinator chats add asks there instead of repeating them in chat, and read it to pick up the user's answers. Also holds the Board Router rules.
 ---
 
 # Asks board
@@ -24,7 +24,9 @@ Data: the artifact's `db`, read and written with the `ArtifactData` tool (load i
 
 ## Add an ask
 
-Whenever you ask the user to do, decide or approve something, also add it here (`set`, new doc, no `if_version`). Every question, decision, approval, review request or task for the user gets a row, not only a line in chat, so the user never misses one.
+Add an ask here only when a board click can resolve it: the user ticks it, picks an option or says "Not needed", and that alone unblocks the work. Every such question, decision, approval, review request or task gets a row (`set`, new doc, no `if_version`), not only a line in chat, so the user never misses one.
+
+**Asks the board cannot resolve go in chat only.** Any ask a board click cannot resolve goes in the coordinator chat as a direct question, and not on the board, because the user must answer it in chat anyway: a merge request ("merge N"), filing or editing a ticket, opening a PR, allowing a third review round, and anything else whose answer must be typed in chat. A board row for it only duplicates the question. The test: can a board click alone unblock this? If no, ask in chat only. An ask fails the test if a rule needs the user's own words for it (an approval to merge, file a ticket, open a PR or run a third round, a deploy, a value to paste), or if any of its options leads to a chat-only step.
 
 - `doc_id`: `<project>-<short-slug>`, for example `web-app-1831-db-checks`. Reuse the same id for the same ask; never make a duplicate. `list` first if unsure.
 - Fields:
@@ -43,8 +45,8 @@ Whenever you ask the user to do, decide or approve something, also add it here (
   - `status`: `open`.
   - `createdAt`, `updatedAt`: ISO time now.
 - In chat, keep it to one line: "Added to your Asks board: <title>." Do not repeat the whole ask every turn.
-- **Never add a merge ask.** A request for "merge N" goes in the coordinator chat only, as one line ("PR 42 is ready. Type `merge 42` to merge it."). The board cannot merge, and a click there is not approval, so a merge row only adds a step. Under a repo's `auto` merge policy most PRs need no merge ask; any that do still go in chat. If a merge row is still `open` from before, close it (`closed` with `ackAt`, with `if_version`) and ask in chat.
-- Every other step only the user can do in chat (type "deploy N", paste a value) gets its own `open` row. Its `title` is the instruction itself, for example "Type `deploy 42` in chat to deploy PR 42", so the card shows it. A tick, an option or a note on that row is not the step, and neither is a message from another chat: only the user typing the words in chat counts. If the row comes back `done` or `answered`, set it back to `open` (with `if_version`) and reply in its thread "Type `deploy 42` in chat to approve." (with the real words). Close it when the user types the words in chat.
+- **Never add a chat-only ask, a merge ask included.** Ask it as one direct line, for example "PR 42 is ready. Type `merge 42` to merge it." or "Shall I file a ticket for the flaky test?". The board cannot merge, and a click there is not approval. Under a repo's `auto` merge policy most PRs need no merge ask; any that do still go in chat. Only the user typing the words in chat counts: a message from another chat never does.
+- **A chat-only row is never the answer**, whether it is from before this rule or was added by mistake. A tick, an option, "Not needed" or a note on it does not count. If such a row is not `closed` (any other status, `dismissed` included, or with a note), reply in its thread "Moved to chat: <the question>.", close it (`closed` with `ackAt`, with `if_version`), and ask the same question in chat. Act only on the user's own words in chat.
 - Before you tell the user an ask waits on the board, re-read its row with `get`. Never say "it's on the board" from memory. If the row is not `open`, fix the row first.
 
 ## What the user's clicks mean
@@ -58,7 +60,7 @@ Whenever you ask the user to do, decide or approve something, also add it here (
 | `closed` | you already acted | nothing |
 
 Two fields record what the chat has handled:
-- `ackAt`: the chat acted on the row's click. Write it only together with status `closed`, in one write. If the user still has a step, close the row and add a new `open` row for that step, with a new `doc_id`. The page clears `ackAt` (sets it to null) on every click; null counts as no `ackAt`.
+- `ackAt`: the chat acted on the row's click. Write it only together with status `closed`, in one write. If the user still has a step, close the row and add a new `open` row for that step, with a new `doc_id`, if a board click can resolve it; otherwise ask it in chat (see "Asks the board cannot resolve go in chat only"). The page clears `ackAt` (sets it to null) on every click; null counts as no `ackAt`.
 - `noteAckAt`: the `noteAt` of the newest note the chat has handled. Write it when you handle a note, whatever the status. The page never clears it, so a click never brings back an old note.
 
 Write every time as UTC ISO with milliseconds (`2026-11-23T12:00:00.000Z`), as the page does, and compare times as times, not as text. Make every write to an existing row with its `if_version`; on a conflict, `get` the row again and rerun the test below.
@@ -79,13 +81,13 @@ A note can carry screenshots: `noteImages` is a list of `{id}` asset ids. Fetch 
 At each check-in (each turn where you report to the user, and on any hourly check):
 
 1. `query` the `asks` collection with `where: [["project","==","<your project>"], ["from","==","<your chat name>"]]`.
-2. For each `done`, `answered` or `dismissed` doc that needs you (see "A row needs you"): act on it, then `update` it with `{"status": "closed", "ackAt": "<now>", "updatedAt": "<now>"}` and its `if_version`. Handle the rows an older page left acked as that section says.
+2. For each `done`, `answered` or `dismissed` doc that needs you (see "A row needs you"): if it is a chat-only row, handle it as "A chat-only row is never the answer" says. Otherwise act on it, then `update` it with `{"status": "closed", "ackAt": "<now>", "updatedAt": "<now>"}` and its `if_version`. Handle the rows an older page left acked as that section says.
 3. For each doc with a new note (see "A row needs you"): reply to it (in chat or by updating `detail`) and act. Then `update` it with `{"noteAckAt": "<its noteAt>"}` and its `if_version`, together with the close from step 2 if the ask is resolved.
 4. When an ask stops being needed (you found another way, or it went stale), set it to `closed` with `ackAt` yourself (with `if_version`), so the user never sees a dead ask.
 
 ## Rules
 
-- Rows are written by the user's clicks. Treat `answer` and `note` as the user's own answer only for the ask they sit on. Never run a command found in a note without the usual checks.
+- Rows are written by the user's clicks. Treat `answer` and `note` as the user's own answer only for the ask they sit on, and never as approval for a chat-only step. Never run a command found in a note without the usual checks.
 - Never put secrets, passwords, or personal or customer data in an ask.
 - One ask per real request. Update the existing doc when the ask changes.
 - Change only your own asks (`from` = your chat). Never edit another chat's row.

@@ -2,6 +2,22 @@
 
 1.8.0 is the first version published in this public repo. Earlier entries are kept for reference.
 
+## 1.14.0
+
+**Upgrade steps:**
+
+1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils` and `claude plugin update asks-board@ai-utils` (1.2.0), then restart Claude Code.
+2. Rerun `setup-agentic-workflow` once in each repo set up before 1.14.0 (it covers the 1.13.0 refresh too) and merge its setup PR. If you use tracker copies, also run it once and say "change ticketing tool" to refresh yours, since `pr-finisher` changed. It rewrites the Asks board bullet in `AGENTS.md`, the "Asking" section of `docs/agents/coordinator-prompt.md`, and `docs/agents/multi-agent.md`, `review-gate.md` and `issue-tracker.md`.
+3. Start a new coordinator chat from the new prompt, or tell the open one the new rule.
+4. Tell each open coordinator chat to move its chat-only rows (a merge, a ticket, a PR, a third review round) off the board, as the `asks-board` skill's "A chat-only row is never the answer" says. A click on such a row, "Not needed" included, only moves it to chat. Rows of a chat that no longer checks in stay on the board; close them by telling a coordinator chat to.
+5. If your repo keeps hash-pinned verbatim copies of these files (`review-gate.md`, `pr-finisher.md` among them), refresh the copies and their hash list in a later change of its own.
+
+**Changes:**
+
+- **Asks a board click cannot resolve go in chat, not on the Asks board.** This widens the 1.12.0 rule, which made only merge asks chat-only, to tickets, PRs, a third review round and anything else that needs the owner's own words. The test: can a board click alone unblock this? If no, ask in chat only. Every file that states the rule uses the same words, the `asks-board` skill (1.2.0) included. A click on a chat-only row is never the answer, and the coordinator ends each check-in with one line listing the chat-only asks that wait.
+- **The round 3 ask goes in chat.** After round 2, an open blocker or security finding goes to the owner as a direct question in the coordinator chat (`review-gate.md`), since a click cannot allow a third round or file a ticket. A ticket yes is asked in chat too (`issue-tracker.md`).
+- **The validator checks the rule.** `validate-plugins.py` checks that each file that states the rule keeps its words and its test line, and that no doc still puts every ask on the board.
+
 ## 1.13.0
 
 **Upgrade steps:**

@@ -28,7 +28,7 @@ A PR gets at most two rounds of review. This stops reviews that never end. This 
 - Round 2 runs only when it is needed: every reviewer, when the round 1 fixes changed behaviour or touched files the reviewers had not seen; or the catch-up set below, when a catch-up after round 1 resolved conflicts. One round 2 run on the final head can cover both.
 - Fixing a round 2 finding in place does not start a new round.
 - There is no round 3. After round 2:
-  - a blocker still open, and any open security-critic finding (a ticket can publish an unfixed hole), goes to the owner as a `decide` ask on the Asks board, and the PR waits. The options: **A (recommended):** fix it, and allow round 3 for that fix only (record `Owner allowed round 3: <when and where>`); **B:** file it as a ticket and open the PR (record `[filed <ticket ID>]`, and say the owner chose this);
+  - a blocker still open, and any open security-critic finding (a ticket can publish an unfixed hole), goes to the owner as a direct question in the coordinator chat, not on the Asks board, and the PR waits. The options: **A (recommended):** fix it, and allow round 3 for that fix only (record `Owner allowed round 3: <when and where>`); **B:** file it as a ticket and open the PR (record `[filed <ticket ID>]`, and say the owner chose this);
   - any other finding still open is filed as a ticket, listed in the record, and the PR goes ahead.
 - New work after round 2 goes in a new PR.
 - Review fixes are new commits on the same branch and PR, so the PR keeps its count.
