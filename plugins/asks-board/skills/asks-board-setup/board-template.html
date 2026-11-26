@@ -94,6 +94,10 @@ h3.group-head { font-size: 0.9375rem; font-weight: 700; color: var(--muted); mar
 .tick { display: grid; place-items: start center; padding-top: 2px; min-height: 44px; cursor: pointer; }
 .check { width: 22px; height: 22px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .check:disabled { cursor: default; }
+/* A card's status and answer controls while its click saves (lockCard). */
+.locked:disabled { cursor: progress; }
+.locked:disabled:not(.chosen) { opacity: 0.6; }
+.btn.locked:hover { background: transparent; }
 .main { display: grid; gap: 10px; min-width: 0; }
 .head { display: grid; gap: 4px; }
 .meta { color: var(--muted); font-size: 0.875rem; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: center; }
@@ -118,7 +122,8 @@ h3.group-head { font-size: 0.9375rem; font-weight: 700; color: var(--muted); mar
 .opt.chosen { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .opt.chosen .tag { background: var(--accent-ink); color: var(--accent); }
 .opt.nokey { border-style: dashed; color: var(--muted); cursor: default; }
-.opt.nokey:hover { border-color: var(--control-line); }
+/* An option that takes no click: no key, or locked while its card saves. */
+.opt.nokey:hover, .opt.locked:not(.rec, .chosen):hover { border-color: var(--control-line); }
 /* Answered cards are quieter: the chosen option is outlined, not filled. */
 .wait .opt.chosen { background: var(--accent-soft); color: var(--ink); border-width: 2px; }
 .wait .opt.chosen .tag { background: var(--accent); color: var(--accent-ink); }
@@ -138,7 +143,7 @@ h3.group-head { font-size: 0.9375rem; font-weight: 700; color: var(--muted); mar
 .feedback { margin: 0; font-size: 0.9375rem; display: flex; gap: 6px; align-items: flex-start; }
 .feedback .ico { margin-top: 3px; }
 .feedback.ok { color: var(--ok); }
-.feedback.busy { color: var(--muted); }
+.feedback.busy, .feedback.info { color: var(--muted); }
 .feedback.error { color: var(--error); }
 .receipt { border: 1px dashed var(--line-strong); border-radius: 12px; padding: 10px 14px; display: grid; gap: 2px; color: var(--muted); }
 .receipt .title { font-size: 0.9375rem; color: var(--muted); }
@@ -243,8 +248,10 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     dismissed: { section: "wait", label: "Not needed" },
     closed: { section: "closed", label: "Closed" },
   };
+  // A row's status; a row with none is open.
+  function statusKey(a) { return String(a.status || "open"); }
   function statusOf(a) {
-    const st = String(a.status || "open");
+    const st = statusKey(a);
     // Own keys only: a status such as "constructor" must not reach Object.prototype.
     return Object.hasOwn(STATUS, st) ? STATUS[st] : { section: "wait", label: "Status not recognized: " + oneLine(st) };
   }
@@ -344,6 +351,27 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
       };
     },
   };
+  // A click that sets the status and answer the row already has (a second click on the
+  // chosen answer) changes nothing, so it saves and pings nothing. A click that sets no
+  // status (a note) always counts.
+  function changesNothing(row, patch) {
+    if (!("status" in patch) || statusKey(row) !== patch.status) return false;
+    if (!("answer" in patch)) return true;
+    return patch.answer == null ? oneLine(row.answer) === "" : matchesKey(row.answer, patch.answer);
+  }
+  const SAME_TEXT = "Already set, so nothing was saved or sent. To tell the chat more, add a note.";
+  // Runs one click's work with its row in busy, and takes the row out only when all of the
+  // work has ended, failed or not. A row already in busy runs nothing (returns null).
+  function holdRow(busy, id, work) {
+    if (busy.has(id)) return null;
+    busy.add(id);
+    return (async () => { try { return await work(); } finally { busy.delete(id); } })();
+  }
+  // p, or fallback once ms pass, so a save or ping that never answers still ends its click.
+  function within(p, ms, fallback) {
+    let t;
+    return Promise.race([p, new Promise((r) => { t = setTimeout(() => r(fallback), ms); })]).finally(() => clearTimeout(t));
+  }
   // What the page says once a click is saved, and whether the ping reached the chat.
   function resultText(said, pinged, sent) {
     if (!pinged) return said;
@@ -467,17 +495,23 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
   const composers = new Map();
   // Row id -> { text, tone, from, until }: the result line next to the clicked card.
   const flashes = new Map();
-  // Row id -> the number of its latest click, so an older click's result never shows last.
-  const clicks = new Map();
-  // Rows with a click whose anchorFor has not settled: a second click on them does nothing.
+  // Rows with a click whose save or ping has not ended: a second click on them does nothing.
   const busy = new Set();
+  // The control a click disabled while it had focus, so the redraw after the save puts
+  // focus back (see focusToKeep).
+  let held = null;
   const FLASH_MS = 15000, ERROR_MS = 60000, LOAD_MS = 10000, ANCHOR_WAIT_MS = 2000, IDLE_MS = 30000;
+  // The longest a click waits for its save, or for its ping, before it gives up on it.
+  const CLICK_WAIT_MS = 15000;
+  const RECHECK = "Reload the page and check whether this card saved.";
+  const SLOW_SAVE = "Saving took too long. " + RECHECK, CLICK_FAILED = "Could not finish. " + RECHECK;
   // Redraws go through requestRender (see drawNow). anchoring: clicks whose anchorFor has
   // not settled. dirty: a redraw was put off; flush() draws it once it may.
   let focusNext = null, flashTimer = 0, anchoring = 0, dirty = false, pointerDown = false, lastInput = 0;
   const PROJECT_KEY = "asks.project";
   const ALL_PROJECTS = fkey("chip", "project"), ALL_KINDS = fkey("chip", "kind");
   const NO_KEY_ADVICE = "Write a note to tell the chat instead.";
+  const NOTE_WAIT = "Still saving your last change, so your note was not sent. It is still in the box. Send it again in a moment.";
   try { project = localStorage.getItem(PROJECT_KEY) || ALL; } catch (e) {}
 
   const CHECK = '<path d="M20 6 9 17l-5-5"/>';
@@ -491,6 +525,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
     ok: CHECK,
     busy: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>',
     error: '<circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/>',
   };
   function icon(name) {
@@ -658,29 +693,67 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     try { return Promise.resolve(comments.anchorFor(node)).catch(() => null); } catch (e) { return null; }
   }
   // One viewer action: save send.patch, ping the asking chat with send.ping, and show the
-  // result next to the card. anchorFor runs first, inside the click (it needs the gesture).
-  // No redraw runs until it settles (or ANCHOR_WAIT_MS passes), so its card node stays put;
-  // meanwhile the row is busy and further clicks on it do nothing.
+  // result next to the card. A click that changes nothing (see changesNothing) only says so.
+  // anchorFor runs first, inside the click (it needs the gesture). No redraw runs until it
+  // settles (or ANCHOR_WAIT_MS passes), so its card node stays put. The row stays busy, and
+  // its tick, options and Not needed stay disabled, until both the save and the ping end.
   function act(ev, d, send, where) {
     if (busy.has(d.id)) return;
+    // d is the row as the card was drawn; a newer snapshot may have changed it since.
+    const row = rowNow(d.id) || d;
+    if (changesNothing(row.data, send.patch)) {
+      // A tick that changes nothing shows what the row says.
+      const t = ev && ev.currentTarget;
+      if (t && t.type === "checkbox") t.checked = statusOf(row.data).section !== "open";
+      flash(d.id, SAME_TEXT, "info", where);
+      requestRender(true);
+      return;
+    }
     const node = ev && ev.currentTarget && ev.currentTarget.closest ? ev.currentTarget.closest("article") : null;
     const anchorP = anchorOf(node);
-    busy.add(d.id);
-    if (node) node.setAttribute("aria-busy", "true");
-    const pinged = send.ping ? ping(d, anchorP, send.ping) : Promise.resolve(false);
-    const seq = (clicks.get(d.id) || 0) + 1;
-    clicks.set(d.id, seq);
-    flash(d.id, "Saving…", "busy", where, true);
-    const saved = write(d.id, send.patch);
-    const settled = anchorP ? Promise.race([anchorP, new Promise((r) => setTimeout(r, ANCHOR_WAIT_MS))]) : Promise.resolve();
-    if (anchorP) anchoring++;
-    settled.then(() => { if (anchorP) anchoring--; busy.delete(d.id); requestRender(true); });
-    Promise.all([saved, pinged]).then(([err, sent]) => {
-      if (clicks.get(d.id) !== seq) return;
-      if (err) flash(d.id, err, "error", where);
-      else flash(d.id, resultText(send.said, !!send.ping, sent), "ok", where);
-      requestRender(false);
+    // ping() waits for the anchor at most ANCHOR_WAIT_MS too.
+    const anchor = anchorP ? within(anchorP, ANCHOR_WAIT_MS, null) : null;
+    const run = holdRow(busy, d.id, async () => {
+      const a = document.activeElement;
+      held = node && node.contains(a) && a.hasAttribute("data-lock") ? takeFocus() : null;
+      lockCard(node);
+      flash(d.id, "Saving…", "busy", where);
+      if (anchor) { anchoring++; anchor.then(() => { anchoring--; requestRender(true); }); }
+      const [err, sent] = await Promise.all([
+        within(write(d.id, send.patch), CLICK_WAIT_MS, SLOW_SAVE),
+        send.ping ? within(ping(d, anchor, send.ping), CLICK_WAIT_MS, false) : false,
+      ]);
+      if (err) { flash(d.id, err, "error", where); return; }
+      // The live update with this change may come after the save: until then, the page
+      // reads the row as saved, so a quick click on the same answer still changes nothing.
+      const now = rowNow(d.id);
+      if (now) now.data = Object.assign({}, now.data, send.patch);
+      flash(d.id, resultText(send.said, !!send.ping, sent), "ok", where);
     });
+    if (!run) return; // Cannot happen after the busy check above; holdRow refuses a busy row too.
+    run.catch(() => flash(d.id, CLICK_FAILED, "error", where))
+      .then(() => { unlockCard(d.id); requestRender(false); });
+  }
+  function rowNow(id) { return (docs || []).find((x) => x.id === id) || null; }
+  // Disable a card's status and answer controls (marked data-lock) while its row saves,
+  // and mark the card busy. card() calls it for a busy row too, so a redraw meanwhile
+  // keeps them disabled.
+  function lockCard(node) {
+    if (!node) return;
+    node.setAttribute("aria-busy", "true");
+    for (const c of node.querySelectorAll("[data-lock]")) if (!c.disabled) { c.disabled = true; c.classList.add("locked"); }
+  }
+  // Undo lockCard on the row's card as it is now, at once: a redraw can wait (while the
+  // user types a note), and the controls must not stay disabled meanwhile.
+  function unlockCard(id) {
+    for (const card of document.querySelectorAll("article[data-card]")) {
+      if (card.dataset.card !== id) continue;
+      card.removeAttribute("aria-busy");
+      for (const c of card.querySelectorAll(".locked")) { c.disabled = false; c.classList.remove("locked"); }
+      // A note's Send button waits for its card too (see composer).
+      const send = card.querySelector(".compose .primary");
+      if (send && send.sync) send.sync();
+    }
   }
 
   // Saves the change; returns null, or the error text to show.
@@ -710,8 +783,8 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     const k = kindOf(a);
     const live = where !== "closed";
     const titleId = "t-" + d.id, detailId = "d-" + d.id, composeId = "c-" + d.id;
-    const item = el("article", { class: "card " + where, "aria-labelledby": titleId });
-    const check = ctl("input", "chk", d, { type: "checkbox", class: "check", "aria-label": "Done: " + titleOf(a) });
+    const item = el("article", { class: "card " + where, "aria-labelledby": titleId, "data-card": d.id });
+    const check = ctl("input", "chk", d, { "data-lock": "", type: "checkbox", class: "check", "aria-label": "Done: " + titleOf(a) });
     check.checked = where !== "open";
     check.disabled = !live;
     check.addEventListener("change", (ev) => act(ev, d, check.checked ? ACTIONS.done() : ACTIONS.reopen(), where));
@@ -737,7 +810,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
       a.options.forEach((o, i) => {
         const b = optionButton(o, a);
         if (!b.writable) noKey = true;
-        opts.append(ctl("button", "opt" + i, d, {
+        opts.append(ctl("button", "opt" + i, d, { "data-lock": "",
           class: b.cls, type: "button", "aria-pressed": String(b.chosen),
           onclick: (ev) => b.writable ? act(ev, d, b.send, where) : noKeyClick(d, where),
         }, [
@@ -769,7 +842,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
         [icon("note"), saved ? "Edit note" : "Add a note"]));
     }
     if (where === "open") {
-      row.append(ctl("button", "dis", d, { class: "btn", type: "button",
+      row.append(ctl("button", "dis", d, { "data-lock": "", class: "btn", type: "button",
         onclick: (ev) => act(ev, d, ACTIONS.dismiss(), where) }, [icon("dismiss"), "Not needed"]));
     }
     if (row.childNodes.length) main.append(row);
@@ -779,6 +852,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     if (a.detail && openDetails.has(d.id)) main.append(renderDetail(a.detail, detailId, d.id));
     if (composing) main.append(composer(d, where, composeId));
     item.append(main);
+    if (busy.has(d.id)) lockCard(item);
     return item;
   }
 
@@ -796,7 +870,9 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     ta.value = c.draft != null ? c.draft : a.note == null ? "" : String(a.note);
     const hadNote = hasNote(a);
     const sendBtn = ctl("button", "send", d, { class: "btn primary", type: "button" });
-    const sync = () => { const b = noteButton(ta.value, c.pics.length, hadNote); sendBtn.disabled = b.disabled; sendBtn.textContent = b.label; };
+    // Send waits while the card's last click still saves, so the note is not sent too early.
+    const sync = () => { const b = noteButton(ta.value, c.pics.length, hadNote); sendBtn.disabled = b.disabled || busy.has(d.id); sendBtn.textContent = b.label; };
+    sendBtn.sync = sync;
     sync();
     ta.addEventListener("input", () => { c.draft = ta.value; sync(); });
     ta.addEventListener("paste", (ev) => {
@@ -805,6 +881,8 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     });
     const send = (ev) => {
       if (sendBtn.disabled) return;
+      // The last click on this card is still saving: keep the note for a second try.
+      if (busy.has(d.id)) { flash(d.id, NOTE_WAIT, "info", where); requestRender(true); return; }
       const note = ACTIONS.note(ta.value, c.pics.slice(), new Date().toISOString());
       closeNote(d);
       act(ev, d, note, where);
@@ -867,6 +945,19 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     return { k: a.dataset.k, card: a.dataset.card, inOpen: !!a.closest("#open"),
       sel: a.tagName === "TEXTAREA" ? [a.selectionStart, a.selectionEnd] : null };
   }
+  // What focus to put back after a redraw: the focused control, or the one a click
+  // disabled (held) once its row is no longer busy. Focus the user moved elsewhere wins.
+  function focusToKeep() {
+    const f = takeFocus();
+    if (!held) return f;
+    const a = document.activeElement;
+    const away = a && a !== document.body && a !== document.documentElement && !(f && f.k === held.k);
+    if (away) { held = null; return f; }
+    if (busy.has(held.card)) return f;
+    const h = held;
+    held = null;
+    return h;
+  }
   function find(k) { return [...document.querySelectorAll("[data-k]")].find((n) => n.dataset.k === k) || null; }
   function giveFocus(f) {
     // A focus the user asked for (open a note, Show all kinds) may scroll; one that only
@@ -901,7 +992,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
 
   function render() {
     dirty = false;
-    const focus = takeFocus();
+    const focus = focusToKeep();
     const now = Date.now();
     const view = projectView(docs, project);
     const all = view.all, projects = view.projects;

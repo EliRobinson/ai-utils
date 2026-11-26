@@ -20,6 +20,16 @@ const each = (behaviour, table, run) => {
     if (msg) problems.push(behaviour + " " + show(c) + ": " + msg);
   }
 };
+// each() for async cases: [name, input, want] rows; run(input) may return a promise.
+const eachAsync = async (behaviour, table, run) => {
+  const done = [];
+  for (const [name, input, want] of table) {
+    let got;
+    try { got = await run(input); } catch (e) { got = "threw " + e.message; }
+    done.push([name, got, want]);
+  }
+  each(behaviour, done, (_, got, want) => expect(got, want));
+};
 // A case passes when got equals want; else the message says what it got.
 const expect = (got, want) => (same(got, want) ? null : `want ${show(want)}, got ${show(got)}`);
 
@@ -329,8 +339,11 @@ each("tripwire:", [
 // The click needs its user gesture for anchorFor: act() calls it first, before it saves,
 // shows a result or redraws, and ping() only awaits the promise act() made.
 const body = (name) => { const m = page.match(new RegExp("\\n  (?:async )?function " + name + "\\([\\s\\S]*?\\n  }\\n")); return m ? m[0] : ""; };
+// From the click's card node on: the early return before it (a click that changes
+// nothing) needs no anchor.
+const acting = () => { const a = body("act"), k = a.indexOf("const node ="); return k >= 0 ? a.slice(k) : a; };
 each("tripwire: act() starts anchorFor before", [["flash("], ["write("], ["Render("], ["ping("]], (call) => {
-  const a = body("act"), i = a.indexOf("anchorOf(node)"), j = a.indexOf(call);
+  const a = acting(), i = a.indexOf("anchorOf(node)"), j = a.indexOf(call);
   return i >= 0 && j > i ? null : "anchorOf at " + i + ", " + call + " at " + j;
 });
 each("tripwire: anchorOf() calls anchorFor synchronously", [[]], () =>
@@ -339,8 +352,32 @@ each("tripwire: a busy row takes no second click", [[]], () => {
   const a = body("act");
   return a.indexOf("if (busy.has(d.id)) return;") === a.indexOf("{") + 6 ? null : "act() does not check busy first";
 });
-each("tripwire: the anchor wait always ends and redraws", [[]], () =>
-  (/settled\.then\(\(\) => \{ if \(anchorP\) anchoring--; busy\.delete\(d\.id\); requestRender\(true\); \}\)/.test(body("act")) ? null : "missing"));
+// The anchor wait, and one click, one ping (#32): each of these must hold in the named function.
+each("tripwire: click handling:", [
+  ["the anchor wait always ends and redraws", "act", /anchor\.then\(\(\) => \{ anchoring--; requestRender\(true\); \}\)/],
+  ["the anchor wait has a time limit", "act", /within\(anchorP, ANCHOR_WAIT_MS, null\)/],
+  ["act() checks a click that changes nothing before it anchors, saves or pings", "act",
+    /if \(changesNothing\(row\.data, send\.patch\)\) \{[^}]*flash\(d\.id, SAME_TEXT, "info", where\);\s*requestRender\(true\);\s*return;\s*\}\s*const node/],
+  ["act() runs the save and the ping inside holdRow, each with a time limit", "act",
+    /holdRow\(busy, d\.id, async \(\) => \{[\s\S]*await Promise\.all\(\[\s*within\(write\(d\.id, send\.patch\), CLICK_WAIT_MS, SLOW_SAVE\),\s*send\.ping \? within\(ping\(d, anchor, send\.ping\), CLICK_WAIT_MS, false\) : false,/],
+  ["act() never takes a row out of busy itself", "act", /^(?![\s\S]*busy\.(?:delete|add)\()/],
+  ["act() disables the card's controls when the click starts", "act", /holdRow\([\s\S]*lockCard\(node\);[\s\S]*await/],
+  ["act() reads the row as saved once the save ends", "act", /if \(now\) now\.data = Object\.assign\(\{\}, now\.data, send\.patch\);/],
+  ["card() disables a busy row's controls when it redraws", "card", /if \(busy\.has\(d\.id\)\) lockCard\(item\);\s*return item;/],
+  ["card() marks the tick as a lockable control", "card", /ctl\("input", "chk", d, \{ "data-lock": ""/],
+  ["card() marks each option as a lockable control", "card", /ctl\("button", "opt" \+ i, d, \{ "data-lock": ""/],
+  ["card() marks Not needed as a lockable control", "card", /ctl\("button", "dis", d, \{ "data-lock": ""/],
+  ["lockCard() marks the card aria-busy", "lockCard", /node\.setAttribute\("aria-busy", "true"\)/],
+  ["lockCard() disables every data-lock control that is not disabled already", "lockCard",
+    /for \(const c of node\.querySelectorAll\("\[data-lock\]"\)\) if \(!c\.disabled\) \{ c\.disabled = true; c\.classList\.add\("locked"\); \}/],
+  ["act() enables the card's controls as soon as the click ends, before any redraw", "act", /\.then\(\(\) => \{ unlockCard\(d\.id\); requestRender\(false\); \}\)/],
+  ["unlockCard() clears the card's aria-busy", "unlockCard", /card\.removeAttribute\("aria-busy"\)/],
+  ["unlockCard() enables only what lockCard disabled", "unlockCard", /for \(const c of card\.querySelectorAll\("\.locked"\)\) \{ c\.disabled = false;/],
+  ["unlockCard() lets the card's note Send button wait no longer", "unlockCard", /if \(send && send\.sync\) send\.sync\(\);/],
+  ["a note's Send button is disabled while its card saves", "composer", /sendBtn\.disabled = b\.disabled \|\| busy\.has\(d\.id\);/],
+  ["a note sent while its row saves is kept, not lost", "composer",
+    /if \(busy\.has\(d\.id\)\) \{ flash\(d\.id, NOTE_WAIT, "info", where\); requestRender\(true\); return; \}[\s\S]*closeNote\(d\);/],
+], (_, fn, re) => (re.test(body(fn)) ? null : "missing in " + fn + "()"));
 each("tripwire: ping() sends nothing when the header would not match the row", [[]], () =>
   (/if \(!comments \|\| !pingable\(d\)\) return false;/.test(body("ping")) ? null : "missing"));
 each("tripwire: every redraw goes through requestRender and drawNow", [[]], () => {
@@ -348,6 +385,55 @@ each("tripwire: every redraw goes through requestRender and drawNow", [[]], () =
   return calls === 2 && /drawNow\(\{ anchoring, typing: typing\(\), user \}\)/.test(body("requestRender")) ? null : calls + " render() names (want the definition and one call)";
 });
 each("tripwire: ping() never calls anchorFor itself", [[]], () => (body("ping") && !body("ping").includes("anchorFor(") ? null : "ping() calls anchorFor or is missing"));
+// A second click on the chosen answer changes nothing: [row, the click's patch, changes nothing].
+each("changesNothing:", [
+  ["the chosen answer again", { status: "answered", answer: "A" }, ACTIONS.answer("A", "x").patch, true],
+  ["the chosen answer again, row key with spaces", { status: "answered", answer: " A " }, ACTIONS.answer("A", "").patch, true],
+  ["another answer", { status: "answered", answer: "A" }, ACTIONS.answer("B", "").patch, false],
+  ["an answer on an open row", { status: "open" }, ACTIONS.answer("A", "").patch, false],
+  ["the same key on a done row", { status: "done", answer: "A" }, ACTIONS.answer("A", "").patch, false],
+  ["done on a done row", { status: "done" }, ACTIONS.done().patch, true],
+  ["done on an open row", { status: "open" }, ACTIONS.done().patch, false],
+  ["done on a row with no status", {}, ACTIONS.done().patch, false],
+  ["reopen on an open row with no answer", { status: "open" }, ACTIONS.reopen().patch, true],
+  ["reopen on an open row that keeps an answer", { status: "open", answer: "A" }, ACTIONS.reopen().patch, false],
+  ["reopen on an answered row", { status: "answered", answer: "A" }, ACTIONS.reopen().patch, false],
+  ["not needed on an open row", {}, ACTIONS.dismiss().patch, false],
+  ["a note, even the same one", { note: "hi" }, ACTIONS.note("hi", [], NOW).patch, false],
+], (_, r, patch, want) => expect(changesNothing(r, patch), want));
+each("SAME_TEXT: says nothing was saved or sent", [[]], () => (/nothing was saved or sent/.test(SAME_TEXT) ? null : "says " + SAME_TEXT));
+each("statusKey: a row's status; none is open", [[{}, "open"], [{ status: "" }, "open"], [{ status: "done" }, "done"]], (a, want) => expect(statusKey(a), want));
+
+// holdRow: the row stays busy until all of its work ends. A tick lets settled work finish.
+const later = () => { let res, rej; const p = new Promise((a, b) => { res = a; rej = b; }); return { p, res, rej }; };
+const tick = () => new Promise((r) => setTimeout(r, 0));
+// Settle the work as a case says, wait a tick, and say whether the row is still busy.
+const heldAfter = async (settle) => {
+  const busy = new Set(), save = later(), ping = later();
+  const run = holdRow(busy, "a", () => Promise.all([save.p, ping.p]));
+  if (run) run.catch(() => {});
+  settle(save, ping);
+  await tick();
+  return busy.has("a");
+};
+await eachAsync("holdRow:", [
+  ["stays busy after only the save ends", (save) => save.res(null), true],
+  ["stays busy after only the ping ends", (save, ping) => ping.res(true), true],
+  ["out of busy once both end", (save, ping) => { save.res(null); ping.res(true); }, false],
+  ["out of busy when the work fails", (save, ping) => { save.rej(new Error("x")); ping.res(true); }, false],
+], heldAfter);
+each("holdRow: a busy row runs nothing and returns null", [[]], () => {
+  let ran = false;
+  const got = holdRow(new Set(["a"]), "a", () => { ran = true; });
+  return expect([got, ran], [null, false]);
+});
+
+// within: a save or ping that never answers still ends its click.
+await eachAsync("within:", [
+  ["gives the result when it comes in time", Promise.resolve("done"), "done"],
+  ["gives the fallback when it never comes", new Promise(() => {}), "late"],
+], (p) => within(p, 5, "late"));
+
 // Every function and const in the pure block is used by a case above, not only listed.
 const self = readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
 each("pure block: every function and const is tested", NAMES.map((n) => [n]),

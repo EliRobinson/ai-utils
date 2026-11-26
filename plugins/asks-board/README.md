@@ -15,7 +15,7 @@ To get a fixed board page after a change merges, republish `board-template.html`
 ```
 skills/asks-board/            daily rules: add asks, check in, coordinator and router rules
 skills/asks-board-setup/      setup steps + board-template.html (the board page)
-                              + scripts/check-board-page.mjs (tests the page's section, click, ping, option, filter and receipt logic)
+                              + scripts/check-board-page.mjs (tests the page's section, click, ping, option, filter and receipt logic, and that one click sends one ping)
 ```
 
 Personal values never go in this repo. Each user keeps them in `~/.claude/asks-board.md`:
