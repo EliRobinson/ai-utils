@@ -352,18 +352,107 @@ class CheckTerms(unittest.TestCase):
         self.assertEqual(self.run_check(None), ["rules.md: missing"])
 
 
-class RepoRules(unittest.TestCase):
-    # (rule, its check); each must pass on the repo's own files
-    CASES = [
-        ("unit-test rule", vp.check_unit_test_rule),
-        ("merge policy", vp.check_merge_policy),
+A11Y_TOOL = vp.A11Y_PREFIX + "get_specialist"
+WORK_TOOLS = "Read, Edit, Write, Grep, Glob, Bash, Skill"
+READ_TOOLS = "Read, Grep, Glob, Bash"
+
+
+def frontmatter(tools_line: str, extra: str = "") -> str:
+    """A raw frontmatter block, as agent_tool_problems reads it."""
+    return f"name: x\ndescription: d\n{tools_line}\n{extra}model: sonnet"
+
+
+class AgentToolProblems(unittest.TestCase):
+    """agent_tool_problems keeps every agent on one plain tools: allow-list with no tracker named."""
+
+    PASSING = [
+        ("work agent with file tools", "implementer-engine", frontmatter(f"tools: {WORK_TOOLS}")),
+        ("read-only agent without file tools", "correctness-critic", frontmatter(f"tools: {READ_TOOLS}")),
+        ("read-only agent with accessibility tools", "accessibility-critic",
+         frontmatter(f"tools: {READ_TOOLS}, {A11Y_TOOL}")),
+        ("work agent that starts agents", "pr-finisher", frontmatter(f"tools: {WORK_TOOLS}, Agent")),
+    ]
+    FAILING = [
+        ("no tools line", "lookup", frontmatter(""), "exactly one `tools:` line"),
+        ("blank tools line", "lookup", frontmatter("tools: "), "exactly one `tools:` line"),
+        ("tools line followed by another key", "lookup", frontmatter("tools:"), "exactly one `tools:` line"),
+        ("two tools lines", "lookup", frontmatter(f"tools: {READ_TOOLS}", "tools: Edit\n"),
+         "exactly one `tools:` line"),
+        ("block list", "lookup", frontmatter("tools:\n  - Read\n  - Edit"), "exactly one `tools:` line"),
+        ("flow list", "lookup", frontmatter("tools: [Read, Edit]"), "'[Read' is not one"),
+        ("quoted list", "lookup", frontmatter('tools: "Read, Edit"'), "'\"Read' is not one"),
+        ("comment after a tool", "lookup", frontmatter("tools: Read # Edit"), "'Read # Edit' is not one"),
+        ("tools continued on the next line", "spec-critic", frontmatter(f"tools: {READ_TOOLS}", "  , Edit\n"),
+         "not another key"),
+        ("deny-list instead of allow-list", "implementer-engine",
+         frontmatter(f"tools: {WORK_TOOLS}", "disallowedTools: NotebookEdit\n"), "disallowedTools"),
+        ("tracker tool named", "ticket-writer",
+         frontmatter(f"tools: {READ_TOOLS}, mcp__tracker__get_ticket"), "mcp__tracker__get_ticket"),
+        ("whole MCP server named", "implementer-engine", frontmatter(f"tools: {WORK_TOOLS}, mcp__tracker__*"),
+         "'mcp__tracker__*' is not one"),
+        *[(f"read-only agent with {tool}", "spec-critic", frontmatter(f"tools: {READ_TOOLS}, {tool}"),
+           f"holds {tool}") for tool in vp.READ_ONLY_FORBIDDEN],
     ]
 
-    def test_repo_files_carry_the_rule(self):
-        for rule, check in self.CASES:
-            with self.subTest(rule), mock.patch.object(vp, "problems", []):
+    def test_allowed_tool_sets_pass(self):
+        for label, name, block in self.PASSING:
+            with self.subTest(label):
+                self.assertEqual(vp.agent_tool_problems(name, block), [])
+
+    def test_each_problem_is_named(self):
+        for label, name, block, needle in self.FAILING:
+            with self.subTest(label):
+                found = vp.agent_tool_problems(name, block)
+                self.assertTrue(any(needle in p for p in found), found)
+
+
+class RepoChecks(unittest.TestCase):
+    """Each repo-wide check passes on this repo as it is."""
+
+    CHECKS = [
+        ("unit-test rule", vp.check_unit_test_rule),
+        ("agent tool policy", lambda: vp.check_agent_tool_policy(vp.load_agents())),
+        ("agent rule lines", lambda: vp.check_agent_rule_lines(vp.load_agents())),
+        ("ticketing tool setting", vp.check_tracker_setting),
+        ("merge policy", vp.check_merge_policy),
+        ("rule for asks a board click cannot resolve", vp.check_chat_asks),
+    ]
+
+    def test_repo_passes(self):
+        for label, check in self.CHECKS:
+            with self.subTest(label), mock.patch.object(vp, "problems", []):
                 check()
                 self.assertEqual(vp.problems, [])
+
+
+ROSTER_AGENT_NAMES = {p.stem for p in (vp.AGENT_ROSTER / "agents").glob("*.md")}
+
+
+class TrackerSetting(unittest.TestCase):
+    def test_every_read_only_agent_exists(self):
+        self.assertEqual(vp.READ_ONLY_AGENTS - ROSTER_AGENT_NAMES, set())
+
+    def test_every_critic_is_read_only(self):
+        critics = {name for name in ROSTER_AGENT_NAMES if name.endswith(("-critic", "-reviewer"))}
+        self.assertEqual(critics - vp.READ_ONLY_AGENTS, set())
+
+    def test_agent_without_a_rule_line_fails(self):
+        for rule, (line, _) in vp.AGENT_RULE_LINES.items():
+            with self.subTest(rule), mock.patch.object(vp, "problems", []):
+                others = "\n".join(other for other, _ in vp.AGENT_RULE_LINES.values() if other != line)
+                path = vp.AGENT_ROSTER / "agents" / "lookup.md"
+                vp.check_agent_rule_lines([vp.Agent(path, f"No {rule} here.\n{others}\n", "", [])])
+                self.assertEqual([rule in p for p in vp.problems], [True], vp.problems)
+
+    def test_repo_issue_tracker_that_drifts_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            drifted = Path(tmp) / "issue-tracker.md"
+            drifted.write_text(vp.ISSUE_TRACKER_TEMPLATE.read_text() + "\nAn extra line.\n")
+            with mock.patch.multiple(vp, ROOT=Path(tmp), REPO_ISSUE_TRACKER=drifted, TRACKER_POINTERS={},
+                                     ISSUE_TRACKER_TEMPLATE=vp.ISSUE_TRACKER_TEMPLATE, problems=[]), \
+                    mock.patch.object(vp, "rel", lambda p: p):
+                vp.check_tracker_setting()
+                self.assertTrue(any("must equal" in p for p in vp.problems), vp.problems)
 
 
 ASK_LINE = "- **Merge policy:** `ask`"
@@ -424,19 +513,84 @@ class MergeOnBoard(unittest.TestCase):
                 self.assertEqual(bool(vp.MERGE_ON_BOARD.search(line)), flagged)
 
 
+def scan(check, agents_text: str, docs: dict[str, str] | None = None) -> list[str]:
+    """Run `check` with a temp AGENTS.md and `docs` (name -> text) as the only rule docs.
+    Returns the problems the check reported."""
+    with tempfile.TemporaryDirectory() as tmp:
+        agents = Path(tmp) / "AGENTS.md"
+        agents.write_text(agents_text + "\n", encoding="utf-8")
+        paths = []
+        for name, text in (docs or {}).items():
+            paths.append(Path(tmp) / name)
+            paths[-1].write_text(text + "\n", encoding="utf-8")
+        with mock.patch.multiple(vp, problems=[], REPO_AGENTS_MD=agents, repo_docs=lambda suffixes: paths,
+                                 rel=lambda path: path.name):
+            check()
+            return list(vp.problems)
+
+
+def scan_chat_asks(agents_text: str, docs: dict[str, str] | None = None) -> list[str]:
+    """check_chat_asks on temp docs only: no file is held to the rule's terms."""
+    return scan(lambda: vp.check_chat_asks(terms={}), agents_text, docs)
+
+
 class MergeOnBoardScan(unittest.TestCase):
     def test_doc_with_a_merge_row_is_reported(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            doc = Path(tmp) / "doc.md"
-            doc.write_text(MERGE_ROW + "\n", encoding="utf-8")
-            agents = Path(tmp) / "AGENTS.md"
-            agents.write_text(ASK_AGENTS + "\n", encoding="utf-8")
-            with mock.patch.object(vp, "problems", []), mock.patch.object(vp, "REPO_AGENTS_MD", agents), \
-                    mock.patch.object(vp, "repo_docs", lambda suffixes: [doc]), \
-                    mock.patch.object(vp, "rel", lambda path: path.name):
-                vp.check_merge_policy()
-                self.assertIn("doc.md:1: puts a merge ask on the Asks board; merge asks go in the coordinator chat",
-                              vp.problems)
+        self.assertIn(f"doc.md:1: {vp.MERGE_ON_BOARD_MESSAGE}", scan_chat_asks(ASK_AGENTS, {"doc.md": MERGE_ROW}))
+
+
+OLD_RULE_LINE = "- **Every ask for Eli goes on the Asks board, except a merge.**"
+
+
+class OldBoardRule(unittest.TestCase):
+    # (line, whether it states the rule before #33: every ask on the board)
+    CASES = [
+        (OLD_RULE_LINE, True),
+        ("Every question to the owner goes on the Asks board (use the `asks-board` skill)", True),
+        ("every ask for the owner goes on the owner's Asks board, except \"merge N\"", True),
+        ('The one exception is "merge N": ask for it in chat only', True),
+        ("- Every other step only the user can do in chat gets its own `open` row.", True),
+        ("put every ask for the owner on the Asks board, pass on results", True),
+        ("add every question for the owner to the Asks board first, then ask it in chat.", True),
+        ("- From here on, add every question for the owner to the board first, under this project.", True),
+        ("Every question, decision, approval, review request or task for the user gets a row, not only a line", True),
+        ("1. Asks Eli on the Asks board for a yes, then files a ticket for the bump.", True),
+        ("any open security-critic finding goes to the owner as a `decide` ask on the Asks board, and the PR waits.",
+         True),
+        ("Every ask for the owner goes on the board, except a merge.", True),
+        ("asking the owner (every ask on the Asks board except \"merge N\", which goes in chat)", True),
+        ("holds every open ask, one tab per project.", True),
+        ("Every question, decision, approval, review request or task gets a row, such as a merge.", True),
+        ("Put an ask for Eli on the Asks board only when a board click can resolve it.", False),
+        ("Put every ask a board click can resolve on the Asks board.", False),
+        ("Add every question a board click can resolve to the board first.", False),
+        ("Every ask a board click can resolve goes on the Asks board.", False),
+        ("put each ask for the owner on the Asks board or in chat as rule 2 says", False),
+        ("Every such question, decision, approval, review request or task gets a row", False),
+        ("send it to the owner as a `decide` ask on the Asks board with options A and B", False),
+        ("the coordinator puts it on the Asks board, and any other agent reports it", False),
+        ("Every ask on the list. It goes on the Asks board later.", False),
+    ]
+
+    def test_old_board_rule_pattern(self):
+        for line, flagged in self.CASES:
+            with self.subTest(line):
+                self.assertEqual(bool(vp.OLD_BOARD_RULE.search(line)), flagged)
+
+
+class ChatAskScan(unittest.TestCase):
+    def test_the_old_rule_is_reported(self):
+        self.assertIn(f"AGENTS.md:1: {vp.OLD_BOARD_RULE_MESSAGE}", scan_chat_asks(OLD_RULE_LINE))
+
+    def test_the_rule_files_are_all_checked(self):
+        # Pins the files that state the rule in full, on purpose: a file dropped
+        # from CHAT_ASK_RULE_TERMS by mistake would otherwise go unchecked.
+        files_that_state_the_rule = {
+            vp.GUARDRAILS, vp.REPO_AGENTS_MD, vp.COORDINATOR_PROMPT, vp.REPO_COORDINATOR_PROMPT, vp.ROUTE_WORK,
+            vp.MULTI_AGENT, vp.REPO_MULTI_AGENT, vp.SETUP_SKILL_MD, vp.AGENT_ROSTER_README,
+            vp.ASKS_BOARD_SKILL, vp.ASKS_BOARD_README}
+        self.assertEqual({path for path, terms in vp.CHAT_ASK_RULE_TERMS.items()
+                          if set(vp.CHAT_ASK_TERMS) <= set(terms)}, files_that_state_the_rule)
 
 
 class RepoDocs(unittest.TestCase):

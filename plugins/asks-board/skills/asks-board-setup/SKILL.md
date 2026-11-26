@@ -1,6 +1,6 @@
 ---
 name: asks-board-setup
-description: Use when the user wants to set up an "Asks" board (one claude.ai artifact that lists everything their Claude chats need from them, with instant pings back to the asking chat through one Board Router chat), or to move an existing board to a new computer.
+description: Use when the user wants to set up an "Asks" board (one claude.ai artifact that lists the asks their Claude chats need them to click, with instant pings back to the asking chat through one Board Router chat), or to move an existing board to a new computer.
 ---
 
 # Set up an Asks board

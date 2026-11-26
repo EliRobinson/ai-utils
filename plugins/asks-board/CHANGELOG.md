@@ -1,8 +1,8 @@
 # Changelog
 
-Entries start at 1.1.1. Earlier changes are in the git history of `plugins/asks-board`.
+Entries start at 1.3.0. Earlier changes are in the git history of `plugins/asks-board`; 1.2.0 (chat-only asks) is described under agent-roster 1.14.0 in `plugins/agent-roster/CHANGELOG.md`.
 
-## 1.1.1
+## 1.3.0
 
 **Upgrade steps:**
 
