@@ -28,7 +28,7 @@
       "name": "asks-board",
       "description": "One claude.ai artifact board for the asks your Claude chats need you to settle with a click. Chats add asks; your clicks ping the asking chat through one Board Router chat. Includes the daily-use skill and a setup skill with the board page template.",
       "source": "./plugins/asks-board",
-      "version": "1.3.0",
+      "version": "1.3.1",
       "category": "productivity",
       "tags": [
         "artifact",

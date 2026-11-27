@@ -335,6 +335,9 @@ each("tripwire:", [
   [/const text = pingText\(d, what\)/, "ping() builds its text with pingText()"],
   [/todoItems\(open,/, "render() draws To do from todoItems()"],
   [/role="status"/, "the page keeps its role=status line for screen readers"],
+  [/<p class="sub">Asks a click can settle\. Asks that need a typed answer, like a merge, a ticket or a new PR, come up in your chats\./, "the subtitle says the board holds click-settled asks and sends typed asks to the chats"],
+  [/empty\("Nothing here needs you"/, "the cleared state does not claim the board holds every ask"],
+  [/When a chat has an ask a click can settle, it shows up here\. You don’t need to reload\. Asks that need a typed answer come up in your chats\./, "the first empty state does not claim the board holds every ask"],
 ], (re, behaviour) => (re.test(page) ? null : "missing: " + behaviour));
 // The click needs its user gesture for anchorFor: act() calls it first, before it saves,
 // shows a result or redraws, and ping() only awaits the promise act() made.
