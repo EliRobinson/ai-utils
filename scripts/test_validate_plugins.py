@@ -249,6 +249,37 @@ class CheckWorkflows(unittest.TestCase):
         self.assertEqual(self.run_check({"ci.yml": GOOD, "x.yml": NO_VALIDATE}), [])
 
 
+PASSING_TEST = "import unittest\n\nclass T(unittest.TestCase):\n    def test_ok(self):\n        pass\n"
+
+
+class RunSkillTests(unittest.TestCase):
+    """run_skill_tests runs each plugins/*/skills/*/scripts/tests folder."""
+
+    CASES = [
+        ("passing tests", {"test_a.py": PASSING_TEST}, None),
+        ("failing test", {"test_a.py": PASSING_TEST.replace("pass", "self.fail('boom')")},
+         "tests failed"),
+        ("no tests", {"helper.py": "X = 1\n"}, "found no tests"),
+    ]
+
+    def run_check(self, files: dict[str, str]) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tests = root / "plugins" / "p" / "skills" / "s" / "scripts" / "tests"
+            tests.mkdir(parents=True)
+            for name, text in files.items():
+                (tests / name).write_text(text)
+            with mock.patch.multiple(vp, ROOT=root, problems=[]):
+                vp.run_skill_tests()
+                return list(vp.problems)
+
+    def test_outcomes(self):
+        for label, files, needle in self.CASES:
+            with self.subTest(label):
+                found = self.run_check(files)
+                self.assertEqual([needle in p for p in found], [True] if needle else [], found)
+
+
 class CheckManifest(unittest.TestCase):
     ENTRY = {"name": "p", "version": "1.0.0", "description": "Does a thing."}
     ENTRY_NO_DESCRIPTION = {"name": "p", "version": "1.0.0"}

@@ -5,9 +5,9 @@ Checks the things that silently stop a plugin or skill from loading — a
 mangled frontmatter block, a manifest name, version or description that
 drifted from its marketplace entry, a ${CLAUDE_PLUGIN_ROOT} path left behind
 by a move. It also runs each skill's scripts/check-*.mjs self-check when node
-is installed, runs the unit tests in scripts/test_*.py, and checks the GitHub
-Actions workflows (rules in docs/agents/ci.md). It is the whole test gate,
-locally and in CI.
+is installed, runs the unit tests in scripts/test_*.py and in each skill's
+scripts/tests/, and checks the GitHub Actions workflows (rules in
+docs/agents/ci.md). It is the whole test gate, locally and in CI.
 
 Run from the repo root:
 
@@ -875,13 +875,53 @@ def run_unit_tests() -> None:
              f"`python3 -m unittest discover -s {rel(TESTS_DIR)} -p '{TEST_PATTERN}'`")
 
 
+SKILL_SCRIPTS_GLOB = "plugins/*/skills/*/scripts"
+SKILL_TESTS_GLOB = f"{SKILL_SCRIPTS_GLOB}/tests"
+GATE_TIMEOUT_SECONDS = 300
+
+
+def tail(text: str, n: int = 15) -> str:
+    """The last `n` lines of a process's output, for a failure message."""
+    return "\n".join(text.strip().splitlines()[-n:])
+
+
+def run_gate_process(cmd: list[str], where: str, cwd: Path | None = None):
+    """Run one gate step in its own process; on a timeout, fail and return None."""
+    try:
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
+                              timeout=GATE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        fail(f"{where}: did not finish in {GATE_TIMEOUT_SECONDS} seconds")
+        return None
+
+
+def run_skill_tests() -> None:
+    """Run each skill's scripts/tests/test_*.py, each folder in its own process.
+
+    A process per folder keeps the skills' test modules, which may share
+    names, from clashing with each other and with scripts/test_*.py.
+    """
+    for tests in sorted(p for p in ROOT.glob(SKILL_TESTS_GLOB) if p.is_dir()):
+        where = f"{rel(tests)}/{TEST_PATTERN}"
+        cmd = [sys.executable, "-m", "unittest", "discover", "-s", str(tests), "-p", TEST_PATTERN]
+        run = run_gate_process(cmd, where, cwd=tests)
+        if run is None:
+            continue
+        if re.search(r"^Ran 0 tests", run.stderr, re.M):
+            fail(f"{where}: found no tests; add them or remove the folder")
+        elif run.returncode != 0:
+            fail(f"{where}: tests failed; run "
+                 f"`python3 -m unittest discover -s {rel(tests)} -p '{TEST_PATTERN}'`\n"
+                 f"{tail(run.stderr)}")
+
+
 def run_self_checks() -> None:
     """Run every skill's scripts/check-*.mjs, so a hook regression fails here.
 
     Skipped, with a note, when node is not installed; in CI (`CI` set) a
     missing node fails instead, so CI never skips them.
     """
-    checks = sorted(ROOT.glob("plugins/*/skills/*/scripts/check-*.mjs"))
+    checks = sorted(ROOT.glob(f"{SKILL_SCRIPTS_GLOB}/check-*.mjs"))
     if not checks:
         return
     if shutil.which("node") is None:
@@ -892,14 +932,10 @@ def run_self_checks() -> None:
         print(f"note: node not found, skipped {len(checks)} self-check(s)", file=sys.stderr)
         return
     for check in checks:
-        try:
-            run = subprocess.run(["node", str(check)], capture_output=True, text=True, timeout=300)
-        except subprocess.TimeoutExpired:
-            fail(f"{check.relative_to(ROOT)}: self-check did not finish in 300 seconds")
-            continue
-        if run.returncode != 0:
-            tail = "\n".join((run.stdout + run.stderr).strip().splitlines()[-15:])
-            fail(f"{check.relative_to(ROOT)}: self-check failed\n{tail}")
+        where = f"{rel(check)}: self-check"
+        run = run_gate_process(["node", str(check)], where)
+        if run is not None and run.returncode != 0:
+            fail(f"{where} failed\n{tail(run.stdout + run.stderr)}")
 
 
 MARKETPLACE_REL = ".claude-plugin/marketplace.json"
@@ -1021,6 +1057,7 @@ def main() -> int:
     check_accessibility_agents(agents)
     check_workflows()
     run_unit_tests()
+    run_skill_tests()
     run_self_checks()
     report(skill_count, len(entries))
     return 1 if problems else 0

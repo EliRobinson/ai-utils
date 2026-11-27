@@ -1,0 +1,17 @@
+# pkg.prices.x_infer_price__mutmut_2: survived
+--- pkg/prices.py
++++ pkg/prices.py
+@@ -4,7 +4,7 @@
+     Returns None when there are none.
+     """
+-    vals = [p for p in prices if p and p > 0]
++    vals = [p for p in prices if p or p > 0]
+     if not vals:
+         return None
+# pkg.prices.x_infer_price__mutmut_5: no tests
+--- pkg/prices.py
++++ pkg/prices.py
+@@ -7,4 +7,4 @@
+     if not vals:
+-        return None
++        return ""
