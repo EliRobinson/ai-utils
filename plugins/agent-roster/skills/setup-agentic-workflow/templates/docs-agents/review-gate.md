@@ -94,14 +94,17 @@ It refuses, always, a merge that bypasses branch protection, whatever the record
 
 - `gh pr merge` with `--admin`, in any position or spelling (`--admin`, `--admin=true`, even `--admin=false`), also inside `eval`, `bash -c`, a pipe into a shell, `python3 -c` or an `alias`. **Never use `--admin`.**
 - `gh api`, or an HTTP client (`curl`, `wget`, `http`, `xh`), writing to a PR's `pulls/N/merge`. That endpoint skips the branch protection check `gh pr merge` makes, so with admin rights it bypasses branch protection like `--admin`. Use a plain `gh pr merge`.
-- `gh api`, or an HTTP client, writing to an endpoint that moves, deletes, creates or renames a branch, commits to it directly, changes branch protection or rulesets, or changes the repository's own settings: `git/refs`, `branches/<name>/protection` and everything under it, `branches/<name>/rename`, `rulesets` (repo and org), `contents`, `merge-upstream`, and the repository itself (`repos/<owner>/<name>` or `repositories/<id>`, which sets the default branch among other settings). Also the GraphQL mutations that do the same (`createRef`, `updateRef`, `updateRefs`, `deleteRef`, `createCommitOnBranch`, `updateRepository`, and creating, updating or deleting a branch protection rule or a ruleset). Reads (`GET`, `HEAD`) of the same paths pass, and so do writes to the repository's other endpoints (issues, labels, comments). Push and delete branches with git from your worktree, and leave protection, rulesets and repository settings to the owner.
+- `gh api`, or an HTTP client, writing to an endpoint that moves, deletes, creates or renames a branch, commits to it directly, changes branch protection or rulesets, or changes the repository's own settings: `git/refs`, `branches/<name>/protection` and everything under it, `branches/<name>/rename`, `rulesets` (repo and org), `contents`, `merge-upstream`, `transfer`, and the repository itself (`repos/<owner>/<name>` or `repositories/<id>`; these also set the default branch). Also the GraphQL mutations that do the same (`createRef`, `updateRef`, `updateRefs`, `deleteRef`, `createCommitOnBranch`, `updateRepository`, `archiveRepository`, `unarchiveRepository`, and creating, updating or deleting a branch protection rule or a ruleset). Reads (`GET`, `HEAD`) of the same paths pass, and so do writes to the repository's other endpoints (issues, labels, comments). Push and delete branches with git from your worktree, and leave protection, rulesets and repository settings to the owner.
 - `gh alias set`, `gh alias import` and `gh alias delete`. `gh alias list` passes.
-- A `gh` command whose first word is not one of gh's own commands (`gh co 5`, or any other alias or extension name). Write the gh command out in full (`gh pr checkout 5`).
-- A git alias whose value is a shell command (it starts with `!`), set with `git -c alias.<name>=...`, `git config alias.<name> ...` or `--config-env`, or whose value is built at run time. A plain git alias (`git config alias.st status`) passes.
-
-It asks the user first (a permission prompt, not a refusal) before a `gh repo` command that changes or removes the repository: `gh repo edit`, `gh repo rename`, `gh repo delete`, `gh repo archive` and `gh repo unarchive`, with flags before `repo` too (`gh -R o/r repo delete`), inside `eval`, `bash -c`, a wrapper or another program, and when the action is built at run time. It also asks when a line has a call it cannot read and names such a command. `gh repo view`, `list`, `clone`, `set-default` and `--help` pass without a prompt. A refusal on the same line wins over the prompt.
+- A `gh` command whose first word is not one of gh's own commands (`gh co 5`, or any other alias or extension name). Write the gh command out in full (`gh pr checkout 5`). The hook's list of gh's own commands is gh 2.103's; when gh adds a command, add it to `GH_COMMANDS` in the hook.
+- A `gh` command whose subcommand comes from `xargs` (`... | xargs gh`, `... | xargs gh alias`).
+- A git alias whose value is a shell command (it starts with `!`), set with `git -c alias.<name>=...` or `git config alias.<name> ...`, any alias set with `--config-env` (either spelling), or one whose value is built at run time. A plain git alias (`git config alias.st status`) passes.
 
 When checks fail or a branch rule blocks a plain `gh pr merge`, the agent stops and asks the owner. The owner can fix the check or the rule, or merge the PR themselves on GitHub. See [git-workflow.md](git-workflow.md#branch-protection-is-never-bypassed).
+
+It asks the user first (a permission prompt, not a refusal) before a `gh repo` command that changes or removes the repository: `gh repo edit`, `gh repo rename`, `gh repo delete`, `gh repo archive` and `gh repo unarchive`. It reads them the same way wherever they appear: with flags before `repo` (`gh -R o/r repo delete`), inside `eval`, `bash -c`, a wrapper or another program, and when the action is built at run time or comes after another flag (`gh repo --description x edit`). It also asks when a line has a call it cannot read and names such a command.
+
+`gh repo view`, `list`, `clone`, `set-default` and `--help` pass without a prompt. A refusal on the same line wins over the prompt. If the prompt is denied or cannot be shown, stop and ask the owner; do not run the command another way.
 
 It also refuses, always, merge forms it cannot read, because they may hide `--admin` or a REST merge. Rewrite the command with everything written out:
 
@@ -123,7 +126,7 @@ A line over 20,000 characters is refused unwalked when it names a PR write, the 
 
 A command that names another repository is not held. It reads the repo from `-R` or `--repo` (the last one wins), from a PR URL, or from `GH_REPO=`. Every spelling of this repo is checked as this repo: a trailing `.git` or `/`, other letter case, `github.com/owner/name`, an `https://` URL, or `git@github.com:owner/name.git`. A repo on another host is checked too.
 
-There is no escape hatch: no variable or flag turns it off. If the hook itself fails while checking a PR command, it refuses.
+There is no escape hatch: no variable or flag turns the refusals off. The `gh repo` prompt is the user's decision. If the hook itself fails while checking a PR command, it refuses.
 
 It cannot stop:
 

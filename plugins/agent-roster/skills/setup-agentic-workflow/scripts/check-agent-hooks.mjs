@@ -109,8 +109,10 @@ try {
   const says = (c, phrase) => ({ ...c, says: phrase });
   const refuseSays = (command, phrase) => says(review(command, "refuse", { FAKE_PR_BODY: good }), phrase);
   const ASK_OWNER = "stop and ask the owner";
+  // Refused as a branch, protection, ruleset or settings write, and no other way.
+  const refuseBranch = (command) => refuseSays(command, "are the owner's");
   // Asks the user first (permissionDecision "ask"), and the reason says `phrase`.
-  const asks = (command, phrase = "changes the repository") => says(review(command, "ask", { FAKE_PR_BODY: good }), phrase);
+  const asks = (command, phrase = "asks you first") => says(review(command, "ask", { FAKE_PR_BODY: good }), phrase);
   const mcp = (tool, input, expect) => ({ hook: "review", hookDir: path.join(tree, "scripts"), cwd: tree, tool, input, expect });
   const fromTree = path.join(tree, "scripts");
 
@@ -482,68 +484,68 @@ try {
     review("gh api repos/o/r/pulls/$N", "refuse"),
     // 1.17.0: a GitHub API write that moves, deletes or renames a branch, commits to it
     // directly, or changes branch protection or rulesets is refused, in any repo.
-    refuseSays("gh api -X DELETE repos/o/r/git/refs/heads/main", ASK_OWNER),
-    refuseSays("gh api -X PATCH repos/o/r/git/refs/heads/main -f sha=abc -F force=true", ASK_OWNER),
-    refuseSays("gh api repos/o/r/git/refs -f ref=refs/heads/x -f sha=abc", ASK_OWNER),
-    refuseSays("gh api --method DELETE /repos/o/r/git/refs/heads/feature/x", ASK_OWNER),
-    refuseSays("gh api -XDELETE 'repos/{owner}/{repo}/git/refs/heads/main'", ASK_OWNER),
-    refuseSays("gh api -X delete https://api.github.com/repos/o/r/git/refs/heads/main", ASK_OWNER),
-    refuseSays("gh api -X DELETE repos/o/r/git%2Frefs/heads%2Fmain", ASK_OWNER),
-    refuseSays("gh api -X DELETE repos/o/r/branches/main/protection", ASK_OWNER),
-    refuseSays("gh api -X PUT repos/o/r/branches/main/protection --input p.json", ASK_OWNER),
-    refuseSays("gh api -X DELETE repos/o/r/branches/main/protection/enforce_admins", ASK_OWNER),
-    refuseSays("gh api -X PATCH repos/o/r/branches/main/protection/required_status_checks -F strict=false", ASK_OWNER),
-    refuseSays("gh api -X DELETE repos/o/r/branches/release/1.0/protection/required_pull_request_reviews", ASK_OWNER),
-    refuseSays("gh api -X PUT repos/o/r/x/../branches/main/protection/", ASK_OWNER),
-    refuseSays("gh api repos/o/r/branches/main/rename -f new_name=old", ASK_OWNER),
-    refuseSays("gh api -X DELETE repos/o/r/rulesets/42", ASK_OWNER),
-    refuseSays("gh api -X PUT repos/o/r/rulesets/42 --input r.json", ASK_OWNER),
-    refuseSays("gh api repos/o/r/rulesets -f name=x", ASK_OWNER),
-    refuseSays("gh api -X DELETE orgs/o/rulesets/42", ASK_OWNER),
-    refuseSays("gh api -X PUT repos/o/r/contents/README.md -f message=x -f content=eA== -f branch=main", ASK_OWNER),
-    refuseSays("gh api -X DELETE repos/o/r/contents/README.md -f message=x -f sha=abc", ASK_OWNER),
-    refuseSays("gh api repos/o/r/merge-upstream -f branch=main", ASK_OWNER),
-    refuseSays("gh api graphql -f query='mutation { deleteRef(input: {refId: \"x\"}) { clientMutationId } }'", ASK_OWNER),
-    refuseSays("gh api graphql -f query='mutation { updateRef(input: {refId: \"x\", oid: \"y\", force: true}) { clientMutationId } }'", ASK_OWNER),
-    refuseSays("gh api graphql -f query='mutation { deleteBranchProtectionRule(input: {branchProtectionRuleId: \"x\"}) { clientMutationId } }'", ASK_OWNER),
-    refuseSays("gh api graphql -f query='mutation { updateRepositoryRuleset(input: {repositoryRulesetId: \"x\", enforcement: DISABLED}) { clientMutationId } }'", ASK_OWNER),
-    refuseSays("gh api graphql -f query='mutation { createCommitOnBranch(input: {}) { clientMutationId } }'", ASK_OWNER),
-    says(inNamed("gh api -X DELETE repos/other/repo/git/refs/heads/main", "refuse"), ASK_OWNER),
-    refuseSays("bash -c 'gh api -X DELETE repos/o/r/branches/main/protection'", ASK_OWNER),
-    refuseSays("eval 'gh api -X DELETE repos/o/r/git/refs/heads/main'", ASK_OWNER),
-    refuseSays("timeout 30 gh api -X DELETE repos/o/r/rulesets/42", ASK_OWNER),
+    refuseBranch("gh api -X DELETE repos/o/r/git/refs/heads/main"),
+    refuseBranch("gh api -X PATCH repos/o/r/git/refs/heads/main -f sha=abc -F force=true"),
+    refuseBranch("gh api repos/o/r/git/refs -f ref=refs/heads/x -f sha=abc"),
+    refuseBranch("gh api --method DELETE /repos/o/r/git/refs/heads/feature/x"),
+    refuseBranch("gh api -XDELETE 'repos/{owner}/{repo}/git/refs/heads/main'"),
+    refuseBranch("gh api -X delete https://api.github.com/repos/o/r/git/refs/heads/main"),
+    refuseBranch("gh api -X DELETE repos/o/r/git%2Frefs/heads%2Fmain"),
+    refuseBranch("gh api -X DELETE repos/o/r/branches/main/protection"),
+    refuseBranch("gh api -X PUT repos/o/r/branches/main/protection --input p.json"),
+    refuseBranch("gh api -X DELETE repos/o/r/branches/main/protection/enforce_admins"),
+    refuseBranch("gh api -X PATCH repos/o/r/branches/main/protection/required_status_checks -F strict=false"),
+    refuseBranch("gh api -X DELETE repos/o/r/branches/release/1.0/protection/required_pull_request_reviews"),
+    refuseBranch("gh api -X PUT repos/o/r/x/../branches/main/protection/"),
+    refuseBranch("gh api repos/o/r/branches/main/rename -f new_name=old"),
+    refuseBranch("gh api -X DELETE repos/o/r/rulesets/42"),
+    refuseBranch("gh api -X PUT repos/o/r/rulesets/42 --input r.json"),
+    refuseBranch("gh api repos/o/r/rulesets -f name=x"),
+    refuseBranch("gh api -X DELETE orgs/o/rulesets/42"),
+    refuseBranch("gh api -X PUT repos/o/r/contents/README.md -f message=x -f content=eA== -f branch=main"),
+    refuseBranch("gh api -X DELETE repos/o/r/contents/README.md -f message=x -f sha=abc"),
+    refuseBranch("gh api repos/o/r/merge-upstream -f branch=main"),
+    refuseBranch("gh api graphql -f query='mutation { deleteRef(input: {refId: \"x\"}) { clientMutationId } }'"),
+    refuseBranch("gh api graphql -f query='mutation { updateRef(input: {refId: \"x\", oid: \"y\", force: true}) { clientMutationId } }'"),
+    refuseBranch("gh api graphql -f query='mutation { deleteBranchProtectionRule(input: {branchProtectionRuleId: \"x\"}) { clientMutationId } }'"),
+    refuseBranch("gh api graphql -f query='mutation { updateRepositoryRuleset(input: {repositoryRulesetId: \"x\", enforcement: DISABLED}) { clientMutationId } }'"),
+    refuseBranch("gh api graphql -f query='mutation { createCommitOnBranch(input: {}) { clientMutationId } }'"),
+    says(inNamed("gh api -X DELETE repos/other/repo/git/refs/heads/main", "refuse"), "are the owner's"),
+    refuseBranch("bash -c 'gh api -X DELETE repos/o/r/branches/main/protection'"),
+    refuseBranch("eval 'gh api -X DELETE repos/o/r/git/refs/heads/main'"),
+    refuseBranch("timeout 30 gh api -X DELETE repos/o/r/rulesets/42"),
     review("X='gh api -X DELETE repos/o/r/git/refs/heads/main'; eval \"$X\"", "refuse"),
     review("X='gh api -X DELETE repos/o/r/branches/main/protection'; eval \"$X\"", "refuse"),
     review("python3 -c \"import os; os.system('gh api -X DELETE repos/o/r/rulesets/42')\"", "refuse"),
-    refuseSays("curl -X DELETE https://api.github.com/repos/o/r/git/refs/heads/main", ASK_OWNER),
-    refuseSays("curl -X PUT -d @p.json https://api.github.com/repos/o/r/branches/main/protection", ASK_OWNER),
-    refuseSays("curl -sXDELETE https://api.github.com/repos/o/r/branches/main/protection/enforce_admins", ASK_OWNER),
-    refuseSays("curl -d '{\"sha\":\"abc\"}' https://api.github.com/repos/o/r/git/refs", ASK_OWNER),
-    refuseSays("wget --method=DELETE https://api.github.com/repos/o/r/rulesets/42", ASK_OWNER),
-    refuseSays("http DELETE https://api.github.com/repos/o/r/git/refs/heads/main", ASK_OWNER),
-    refuseSays("xh PATCH https://api.github.com/repos/o/r/git/refs/heads/main sha=abc", ASK_OWNER),
+    refuseBranch("curl -X DELETE https://api.github.com/repos/o/r/git/refs/heads/main"),
+    refuseBranch("curl -X PUT -d @p.json https://api.github.com/repos/o/r/branches/main/protection"),
+    refuseBranch("curl -sXDELETE https://api.github.com/repos/o/r/branches/main/protection/enforce_admins"),
+    refuseBranch("curl -d '{\"sha\":\"abc\"}' https://api.github.com/repos/o/r/git/refs"),
+    refuseBranch("wget --method=DELETE https://api.github.com/repos/o/r/rulesets/42"),
+    refuseBranch("http DELETE https://api.github.com/repos/o/r/git/refs/heads/main"),
+    refuseBranch("xh PATCH https://api.github.com/repos/o/r/git/refs/heads/main sha=abc"),
     // A write to the repo itself (default branch, settings) is refused too.
-    refuseSays("gh api -X PATCH repos/o/r -f default_branch=x", ASK_OWNER),
-    refuseSays("gh api repos/o/r -f default_branch=x", ASK_OWNER),
-    refuseSays("gh api repos/o/r -F archived=true", ASK_OWNER),
-    refuseSays("gh api --method=PATCH /repos/o/r --input s.json", ASK_OWNER),
-    refuseSays("gh api -XPATCH 'repos/{owner}/{repo}' -f default_branch=x", ASK_OWNER),
-    refuseSays("gh api -X patch https://api.github.com/repos/o/r -f default_branch=x", ASK_OWNER),
-    refuseSays("gh api -X PATCH repos/o/r/ -f default_branch=x", ASK_OWNER),
-    refuseSays("gh api -X PATCH repos%2Fo%2Fr -f default_branch=x", ASK_OWNER),
-    refuseSays("gh api -X PATCH REPOS/O/R -f default_branch=x", ASK_OWNER),
-    refuseSays("gh api -X PATCH repos/o/r/issues/.. -f default_branch=x", ASK_OWNER),
-    refuseSays("gh api -X DELETE repos/o/r", ASK_OWNER),
-    refuseSays("gh api -X PATCH repositories/123 -f default_branch=x", ASK_OWNER),
-    refuseSays("gh api graphql -f query='mutation { updateRepository(input: {repositoryId: \"x\"}) { clientMutationId } }'", ASK_OWNER),
-    says(inNamed("gh api -X PATCH repos/other/repo -f default_branch=x", "refuse"), ASK_OWNER),
-    refuseSays("bash -c 'gh api -X PATCH repos/o/r -f default_branch=x'", ASK_OWNER),
+    refuseBranch("gh api -X PATCH repos/o/r -f default_branch=x"),
+    refuseBranch("gh api repos/o/r -f default_branch=x"),
+    refuseBranch("gh api repos/o/r -F archived=true"),
+    refuseBranch("gh api --method=PATCH /repos/o/r --input s.json"),
+    refuseBranch("gh api -XPATCH 'repos/{owner}/{repo}' -f default_branch=x"),
+    refuseBranch("gh api -X patch https://api.github.com/repos/o/r -f default_branch=x"),
+    refuseBranch("gh api -X PATCH repos/o/r/ -f default_branch=x"),
+    refuseBranch("gh api -X PATCH repos%2Fo%2Fr -f default_branch=x"),
+    refuseBranch("gh api -X PATCH REPOS/O/R -f default_branch=x"),
+    refuseBranch("gh api -X PATCH repos/o/r/issues/.. -f default_branch=x"),
+    refuseBranch("gh api -X DELETE repos/o/r"),
+    refuseBranch("gh api -X PATCH repositories/123 -f default_branch=x"),
+    refuseBranch("gh api graphql -f query='mutation { updateRepository(input: {repositoryId: \"x\"}) { clientMutationId } }'"),
+    says(inNamed("gh api -X PATCH repos/other/repo -f default_branch=x", "refuse"), "are the owner's"),
+    refuseBranch("bash -c 'gh api -X PATCH repos/o/r -f default_branch=x'"),
     review("X='gh api -X PATCH repos/o/r -f default_branch=x'; eval \"$X\"", "refuse"),
-    refuseSays("curl -X PATCH -d '{\"default_branch\":\"x\"}' https://api.github.com/repos/o/r", ASK_OWNER),
-    refuseSays("curl -d '{\"default_branch\":\"x\"}' https://api.github.com/repos/o/r/", ASK_OWNER),
-    refuseSays("wget --method=PATCH --body-data='{}' https://api.github.com/repos/o/r", ASK_OWNER),
-    refuseSays("http PATCH https://api.github.com/repos/o/r default_branch=x", ASK_OWNER),
-    refuseSays("xh https://api.github.com/repos/o/r default_branch=x", ASK_OWNER),
+    refuseBranch("curl -X PATCH -d '{\"default_branch\":\"x\"}' https://api.github.com/repos/o/r"),
+    refuseBranch("curl -d '{\"default_branch\":\"x\"}' https://api.github.com/repos/o/r/"),
+    refuseBranch("wget --method=PATCH --body-data='{}' https://api.github.com/repos/o/r"),
+    refuseBranch("http PATCH https://api.github.com/repos/o/r default_branch=x"),
+    refuseBranch("xh https://api.github.com/repos/o/r default_branch=x"),
     review("gh api repos/o/r", "allow"),
     review("gh api -X GET repos/o/r --jq .default_branch", "allow"),
     review("gh api -X HEAD repos/o/r", "allow"),
@@ -554,6 +556,24 @@ try {
     review("gh api repos/o/r/labels -f name=bug", "allow"),
     review("gh api repos/o/r/issues/5/comments -f body=x", "allow"),
     review("curl -X POST -d '{}' https://api.github.com/repos/o/r/issues", "allow"),
+    refuseBranch("gh api graphql -f query='mutation { archiveRepository(input: {repositoryId: \"x\"}) { clientMutationId } }'"),
+    refuseBranch("gh api graphql -f query='mutation { unarchiveRepository(input: {repositoryId: \"x\"}) { clientMutationId } }'"),
+    refuseBranch("gh api -X POST repos/o/r/transfer -f new_owner=x"),
+    refuseBranch("curl -X POST -d '{}' https://api.github.com/repos/o/r/transfer"),
+    review("X='gh api -X PATCH repositories/$ID -f default_branch=x'; eval \"$X\"", "refuse"),
+    review("gh api -X HEAD \"repos/o/r/$P\"", "allow"),
+    review("gh api -X GET search/code -f q=createRef", "allow"),
+    // Local paths that look like API paths are not branch writes.
+    review("ls .github/rulesets", "allow"),
+    review("cp a .github/rulesets/", "allow"),
+    review("mkdir -p github/rename", "allow"),
+    review("npm test -- tests/protection # gh", "allow"),
+    review("npm test -- src/rename && gh pr view", "allow"),
+    review("mv lib/protection lib/guard && gh pr list", "allow"),
+    review("node build.js repos/a/b && gh issue list", "allow"),
+    review("cp -r docs/repos/a/b out/ && gh pr view", "allow"),
+    review("gh pr checkout 5 && npm run build -- --base repos/x/y", "allow"),
+    review("eval \"$(ssh-agent -s)\" && gh pr view 5 && git mv src/rename src/x", "allow"),
     // gh repo commands that change or remove the repository ask the user first.
     asks("gh repo edit --default-branch dev"),
     asks("gh repo edit o/r --visibility public --accept-visibility-change-consequences"),
@@ -575,6 +595,10 @@ try {
     asks("git fetch && gh repo edit --default-branch dev"),
     asks("X='gh repo delete o/r --yes'; eval \"$X\"", "cannot read"),
     asks("python3 -c \"import os; os.system('gh repo delete o/r --yes')\"", "cannot read"),
+    asks("gh repo --description x edit o/r --visibility public", "a flag comes before it"),
+    asks("X='gh repo --description x edit o/r'; eval \"$X\"", "cannot read"),
+    asks("X='gh -R o/r repo delete --yes'; eval \"$X\"", "cannot read"),
+    asks("python3 -c \"import os; os.system('gh -R o/r repo delete')\"", "cannot read"),
     // A refusal wins over an ask on the same line.
     review("gh repo delete o/r --yes && gh pr merge 5 --admin", "refuse"),
     review("X='gh pr merge 5'; eval \"$X\"; gh repo delete o/r --yes", "refuse"),
@@ -621,6 +645,10 @@ try {
     refuseSays("bash -c \"gh alias set m 'pr merge'\"", ASK_OWNER),
     review("X='gh alias set m x'; eval \"$X\"", "refuse"),
     review("python3 -c \"import os; os.system('gh alias set m x')\"", "refuse"),
+    review("X='gh alias --clobber set m x'; eval \"$X\"", "refuse"),
+    refuseSays("gh alias --clobber set m x", ASK_OWNER),
+    refuseSays("cat f | xargs gh alias", "xargs builds"),
+    refuseSays("echo m 5 | xargs gh", "xargs builds"),
     // A gh word that is not one of gh's own commands is an alias or an extension.
     refuseSays("gh m 5", "not a gh command"),
     refuseSays("gh co 5", "not a gh command"),
@@ -633,6 +661,11 @@ try {
     review("X='gh m 5'; eval \"$X\"", "refuse"),
     review("eval \"$(ssh-agent -s)\" && gh m 5", "refuse"),
     review("python3 -c \"import subprocess; subprocess.run(['gh','m','5'])\"", "refuse"),
+    review("X='gh -R o/r m 5'; eval \"$X\"", "refuse"),
+    review("X='gh --repo=o/r m 5'; eval \"$X\"", "refuse"),
+    review("brew install gh jq", "allow"),
+    review("which gh node", "allow"),
+    review("gh a11y", "allow"),
     // A git shell alias may run gh in a way the gate cannot read.
     review("git -c alias.m='!gh pr merge 5' m", "refuse"),
     review("git -c 'alias.m=!gh pr merge 5 --admin' m", "refuse"),
@@ -642,6 +675,9 @@ try {
     review("git config set alias.m '!gh pr merge 5'", "refuse"),
     review("git config alias.m \"$X\"", "refuse"),
     review("git --config-env=alias.m=X m", "refuse"),
+    review("git --config-env alias.m=X m", "refuse"),
+    review("git --config-env Alias.M=X M", "refuse"),
+    review("git -c alias.lg=log commit -m \"$MSG\"", "allow"),
     // gh's own commands, alias reads and plain git aliases still pass.
     review("gh alias list", "allow"),
     review("gh alias ls", "allow"),
@@ -696,15 +732,17 @@ try {
     });
     // Exit 0 allows, or asks the user when stdout says so; any other output on exit 0 is a failure.
     let decision = "allow";
+    let output = {};
     if (run.status === 0 && run.stdout.trim()) {
       try {
-        decision = JSON.parse(run.stdout).hookSpecificOutput?.permissionDecision ?? "no decision";
+        output = JSON.parse(run.stdout).hookSpecificOutput ?? {};
+        decision = output.permissionDecision ?? "no decision";
       } catch {
         decision = "unparsable output";
       }
     }
     let got = run.status === 2 ? "refuse" : run.status === 0 ? decision : `exit ${run.status}`;
-    const reason = got === "ask" ? JSON.parse(run.stdout).hookSpecificOutput.permissionDecisionReason ?? "" : run.stderr;
+    const reason = got === "ask" ? output.permissionDecisionReason ?? "" : run.stderr;
     if ((got === "refuse" || got === "ask") && c.says && !reason.toLowerCase().includes(c.says.toLowerCase())) got = `${got} without "${c.says}"`;
     if (got !== c.expect) failed += 1;
     const shown = (c.tool ?? c.command).replaceAll(tmp, "<tmp>").replace(/\n[\s\S]*/, " ...");
