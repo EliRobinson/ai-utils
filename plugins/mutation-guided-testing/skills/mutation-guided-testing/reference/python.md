@@ -1,6 +1,6 @@
 # Python: mutmut
 
-Verified with mutmut 3.x under uv (November 2026). The recipe pins mutmut to exactly **3.8.1**, the latest 3.x release on PyPI when this was written, so a new release never runs on your code unreviewed. To update it, check the release notes, change the version in the `mm()` line below and in the plugin README, and rerun the recipe once on a small change.
+Verified with mutmut 3.x under uv (November 2026). The recipe pins mutmut to exactly **3.8.1**, the latest 3.x release on PyPI when this was written, so a new release never runs on your code unreviewed. To update it, check the release notes, change the version in the `mm()` line below and in the plugin README, and rerun the recipe once on a small change. The pin covers mutmut only: uv still resolves its dependencies fresh on each run, which is one reason the recipe runs in a scratch copy without `.git`.
 
 mutmut writes a `mutants/` directory and reads its config from `[tool.mutmut]` in `pyproject.toml`. Run it in a scratch copy, so neither ends up in a commit, and run it through `uv run --with 'mutmut==3.8.1'` (or a throwaway venv with that version), never a global install.
 
