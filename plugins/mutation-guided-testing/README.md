@@ -25,10 +25,10 @@ It extends the Superpowers `test-driven-development` skill and its `writing-good
 
 ## Why
 
-- **Coverage is a weak signal.** Inozemtseva and Holmes, "Coverage Is Not Strongly Correlated with Test Suite Effectiveness" (ICSE 2014), found that coverage correlates only weakly with how many faults a suite finds once suite size is controlled for. So coverage here is a map of untested code, never a target.
+- **Coverage is a weak signal.** Inozemtseva and Holmes, "Coverage Is Not Strongly Correlated with Test Suite Effectiveness" ([ICSE 2014](https://doi.org/10.1145/2568225.2568271)), found that coverage correlates only weakly with how many faults a suite finds once suite size is controlled for. So coverage here is a map of untested code, never a target.
 - **Mutate only the diff, cap the survivors, don't chase a score.** Petrović, Ivanković, Fraser and Just, "Practical Mutation Testing at Scale: A view from Google" ([arXiv:2102.11378](https://arxiv.org/abs/2102.11378)), shows that surfacing a few mutants on changed lines during code review is what makes mutation testing usable, rather than a whole-program mutation score.
 - **Mutants from a plain-English concern.** Meta's ACH, "Mutation-Guided LLM-based Test Generation at Meta" ([arXiv:2501.12862](https://arxiv.org/abs/2501.12862)), generates mutants from a stated concern and then writes tests that kill them. The concern bugs in step 1 are that idea, done by hand inside the loop.
-- **Property tests where inputs have structure.** Work on agentic property-based testing ([arXiv:2510.09907](https://arxiv.org/abs/2510.09907)) has agents write property-based tests; step 6 uses them where inputs have structure, and says so when they don't apply.
+- **Property tests where inputs have structure.** Maaz et al., "Agentic Property-Based Testing: Finding Bugs Across the Python Ecosystem" ([arXiv:2510.09907](https://arxiv.org/abs/2510.09907), NeurIPS 2025 DL4C Workshop), has agents write property-based tests; step 6 uses them where inputs have structure, and says so when they don't apply.
 
 ## Files
 
