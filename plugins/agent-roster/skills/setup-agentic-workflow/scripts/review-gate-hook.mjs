@@ -2,6 +2,8 @@
 // PreToolUse hook for Bash and for the PR tools of MCP servers. Refuses to
 // open a PR (draft or not), take it out of draft, or merge it, unless its
 // body carries a complete `## Review` record (docs/agents/review-gate.md).
+// It always refuses a merge that bypasses branch protection: `gh pr merge
+// --admin`, and a REST merge through `gh api`.
 // The reviewers run on the branch before the PR exists. Ready and merge stay
 // gated too, for PRs opened outside the hook (the web UI, other tools) and
 // for bodies edited after the PR was opened.
@@ -242,7 +244,8 @@ const plain = (text) =>
 // between them (`pr -R o/r merge`), as parsePrArgs reads them. `gh <word>
 // <action>` counts too, so `gh $P merge` is seen. A token scan, not a regex.
 function prActions(text) {
-  const words = text.split(/\s+/);
+  // Commas and brackets split too, so python's ["gh","pr","merge"] is seen.
+  const words = text.split(/[\s,()[\]]+/);
   let found = 0;
   for (let i = 0; i < words.length; i++) {
     let j;
@@ -276,11 +279,11 @@ function expands(word) {
 const API = {
   graphql: /\/graphql$/,
   createPr: /\/pulls$/,
-  // Captures the repo (when the path names one) and the PR number.
-  mergePr: /(?:\/repos\/([\w.-]+\/[\w.-]+))?\/pulls\/([^/]+)\/merge$/,
+  mergePr: /\/pulls\/[^/]+\/merge$/,
   mergeBranch: /\/merges$/,
 };
-const PR_WRITE_PATHS = [API.createPr, API.mergePr, API.mergeBranch];
+// A merge path is refused earlier, as a bypass.
+const PR_WRITE_PATHS = [API.createPr, API.mergeBranch];
 // A flag given no value, or a value the gate cannot read.
 const MISSING = Object.freeze({ text: "", dynamic: true });
 const READ_METHOD = /^(?:GET|HEAD)$/i;
@@ -333,8 +336,16 @@ export const MCP_MATCHER = `mcp__.*__(${Object.keys(MCP_TOOLS).join("|")})`;
 // The words after `gh pr`: the action word, its flags { get, boolean } and
 // the PR selector. Flags may come before the action (`gh pr -R o/r merge 5`).
 // -R and --repo are one flag; like gh, the last one wins.
+// runtimeWords: the words after the action that the shell builds at run time
+// and that are not a flag's value. Any of them may expand to a flag (--admin).
+// splitValues: flag values the shell splits (`-t $T`, `-t $(cat f)`), which can
+// also become a flag. flagBeforeAction: a flag other than -R sat before the
+// action, where gh may read the next word as its value (`gh pr -t x merge`).
 function parsePrArgs(words) {
   const flags = new Map();
+  const runtimeWords = [];
+  const splitValues = [];
+  let flagBeforeAction = false;
   let selector = null;
   let action = null;
   for (let i = 0; i < words.length; i++) {
@@ -343,8 +354,14 @@ function parsePrArgs(words) {
     const name = eq === -1 ? text : text.slice(0, eq);
     const stored = REPO_FLAGS.includes(name) ? "--repo" : name;
     if ((VALUE_FLAGS[action?.text ?? "pr"] ?? VALUE_FLAGS.pr).has(name)) {
-      flags.set(stored, eq === -1 ? words[++i] ?? MISSING : { text: text.slice(eq + 1), dynamic });
-    } else if (text.startsWith("-")) {
+      const value = eq === -1 ? words[++i] ?? MISSING : { text: text.slice(eq + 1), dynamic, splits: words[i].splits };
+      if (value.splits) splitValues.push(value);
+      flags.set(stored, value);
+      continue;
+    }
+    if (action !== null && expands(words[i])) runtimeWords.push(words[i]);
+    if (text.startsWith("-")) {
+      if (action === null) flagBeforeAction = true;
       flags.set(stored, eq === -1 ? "true" : text.slice(eq + 1).toLowerCase());
     } else if (action === null) {
       action = words[i];
@@ -356,7 +373,13 @@ function parsePrArgs(words) {
     action,
     get: (...names) => names.map((n) => flags.get(REPO_FLAGS.includes(n) ? "--repo" : n)).find((v) => v !== undefined),
     boolean: (...names) => names.some((n) => flags.get(n) === "true"),
+    // Given at all, with any value: --admin=false is refused like --admin.
+    given: (name) => flags.has(name),
     selector,
+    runtimeWords,
+    splitValues,
+    flagBeforeAction,
+    words,
   };
 }
 
@@ -364,38 +387,62 @@ function parsePrArgs(words) {
 // GET unless it is given fields or --input; the last -X wins.
 const API_VALUE_FLAGS = new Set(["-X", "--method", "-f", "--raw-field", "-F", "--field", "-H", "--header", "--input",
   "-q", "--jq", "-t", "--template", "--hostname", "-p", "--preview", "--cache"]);
+// A flag's value as the rest of a word, from index `from`.
+const tail = (word, from) => ({ text: word.text.slice(from), dynamic: word.dynamic, splits: word.splits });
+// The first value flag in a glued short group, as gh reads it: -iXPUT and
+// -X=PUT both give { name: "-X", from } with `from` just past the letter (and
+// past one "="). null when the word is not a short group with a value flag.
+function shortValueFlag(text) {
+  if (!/^-[a-zA-Z]/.test(text)) return null;
+  for (let k = 1; k < text.length && /[a-zA-Z]/.test(text[k]); k++) {
+    if (API_VALUE_FLAGS.has(`-${text[k]}`)) return { name: `-${text[k]}`, from: text[k + 1] === "=" ? k + 2 : k + 1 };
+  }
+  return null;
+}
 function parseApiArgs(words) {
   let method = null;
   let endpoint = null;
   let input = false;
   let help = false;
   const fields = [];
+  // hidden: run-time words that may carry a flag (-X PUT) the gate cannot see.
+  const hidden = [];
   for (let i = 0; i < words.length; i++) {
     const word = words[i];
     const { text } = word;
     let name = text;
     let value;
     const eq = text.startsWith("--") ? text.indexOf("=") : -1;
+    const short = shortValueFlag(text);
     if (eq !== -1 && API_VALUE_FLAGS.has(text.slice(0, eq))) {
       name = text.slice(0, eq);
-      value = { text: text.slice(eq + 1), dynamic: word.dynamic };
+      value = tail(word, eq + 1);
     } else if (API_VALUE_FLAGS.has(text)) {
       value = words[++i] ?? MISSING;
-    } else if (/^-[a-zA-Z]./.test(text) && API_VALUE_FLAGS.has(text.slice(0, 2))) {
-      name = text.slice(0, 2); // glued: -XPUT, -Fquery=@q.graphql
-      value = { text: text.slice(2), dynamic: word.dynamic };
+    } else if (short !== null) {
+      name = short.name; // glued: -XPUT, -X=PUT, -Fquery=@q.graphql, -iXPUT
+      value = short.from < text.length ? tail(word, short.from) : words[++i] ?? MISSING;
     } else {
       if (text === "--help" || text === "-h") help = true;
-      else if (!text.startsWith("-") && endpoint === null) endpoint = word;
+      else if (!text.startsWith("-") && endpoint === null) {
+        endpoint = word;
+        if (word.splits) hidden.push(word);
+      } else if (!text.startsWith("-") && expands(endpoint ?? word) && endpoint !== null) {
+        // A run-time word before the endpoint was a flag, not the endpoint.
+        if (!hidden.includes(endpoint)) hidden.push(endpoint);
+      } else if (expands(word)) {
+        hidden.push(word);
+      }
       continue;
     }
+    if (value.splits) hidden.push(value);
     if (name === "-X" || name === "--method") method = value.dynamic ? "?" : value.text.toUpperCase();
     else if (name === "--input") input = true;
     else if (["-f", "--raw-field", "-F", "--field"].includes(name)) {
       fields.push({ ...value, fromFile: name === "-F" || name === "--field" });
     }
   }
-  return { method: method ?? (fields.length || input ? "POST" : "GET"), endpoint, fields, input, help };
+  return { method: method ?? (fields.length || input ? "POST" : "GET"), endpoint, fields, input, help, hidden };
 }
 
 // True when the gate can read the query of a `gh api graphql` call: no
@@ -516,6 +563,7 @@ function classifyHttp(request, call) {
     return refuse("it cannot read a GitHub GraphQL call made with an HTTP client. Use gh api graphql with the query inline: -f query='...'.");
   }
   if (!request.writes) return null;
+  if (request.urls.some((u) => API.mergePr.test(apiPath(u.text)))) return refuseRestMerge();
   if (request.urls.some((u) => PR_WRITE_PATHS.some((re) => re.test(apiPath(u.text))))) {
     return refuse("it cannot read an HTTP call that merges or opens a PR. Use gh pr merge or gh pr create.");
   }
@@ -529,32 +577,75 @@ function classifyHttp(request, call) {
 }
 
 // A refusal about how the command is written, not about the record.
-const refuse = (reason) => ({ kind: "refuse", reason });
+// bypass: a merge past branch protection, which no record or rewording clears.
+const refuse = (reason, bypass = false) => ({ kind: "refuse", reason, bypass });
+
+// A merge that bypasses branch protection. Never needed: when checks fail or a
+// branch rule blocks the merge, the agent stops and the owner decides.
+const BYPASS_NEXT = "Never bypass branch protection. If a plain `gh pr merge` is refused because checks fail or a branch rule blocks it, stop and ask the owner, and say what blocks it; do not look for another way around it. The owner can fix the check or the rule, or merge the PR themselves on GitHub.";
+const ADMIN_REASON = `\`gh pr merge --admin\` (even \`--admin=false\`) is refused: the flag merges past required checks and branch rules. Remove \`--admin\`. ${BYPASS_NEXT}`;
+const REST_MERGE_REASON = `a merge through the REST API skips the branch protection check that gh pr merge makes, the same bypass as \`--admin\`. Run a plain \`gh pr merge\` instead (no \`--admin\`). ${BYPASS_NEXT}`;
+const refuseAdmin = () => refuse(ADMIN_REASON, true);
+const refuseRestMerge = () => refuse(REST_MERGE_REASON, true);
+// True when text that names a PR merge also names --admin.
+const namesAdminMerge = (said) => /(?:^|[^\w-])--admin(?![\w-])/.test(said) && /\bmerge\b/.test(said);
 // A call the gate cannot read: { kind: "unread", what }. bashProblems refuses
 // it only when the line names a PR write the gate did not read elsewhere.
 const unread = (what) => ({ kind: "unread", what });
 
 // gh: `gh pr merge|ready|create|new`, and `gh api` merges, PR opens and GraphQL.
+// The words that may be the gh subcommand when flags come first. Each flag may
+// swallow one word as its value, so it is among the first (flags + 1) other
+// words; the value of -R/--repo is known, so it is skipped.
+function leadingSubcommandWords(args) {
+  const others = [];
+  let flags = 0;
+  for (let i = 0; i < args.length; i++) {
+    if (!args[i].text.startsWith("-")) others.push(args[i]);
+    else if (REPO_FLAGS.includes(args[i].text)) i++;
+    else flags++;
+  }
+  return others.slice(0, flags + 1);
+}
 function classifyGh(call) {
   const text = call.args.map((w) => w.text);
   if (text.length === 1 && (text[0] === "--help" || text[0] === "-h")) return null;
   if (call.args[0] && expands(call.args[0])) return refuse("it cannot read which gh command this is. Write the gh subcommand out in full.");
+  // gh finds the subcommand past leading flags (`gh -R o/r pr merge 5`), and the gate does not follow it.
+  if (text[0]?.startsWith("-") && leadingSubcommandWords(call.args).some((w) => w.text === "pr" || w.text === "api" || expands(w))) {
+    return refuse("it cannot tell which gh command this is when flags come before the subcommand. Write `gh pr ...` or `gh api ...` with the subcommand first and the flags after it.");
+  }
   if (call.wrappers.includes("xargs") && !(text[0] === "pr" || text[0] === "api")) return unread("the gh command xargs builds");
   if (text[0] === "pr") return classifyGhPr(call);
   if (text[0] === "api") return classifyGhApi(call);
   return null;
 }
 
+const unreadMergeWord = (word, why) =>
+  `it cannot read ${word.text ? `\`${word.text}\`` : "a word built at run time"} in this gh pr command: ${why}. Write the PR number and every flag out in full${word.splits && !/\$@|\[@\]/.test(word.text) ? ', or put a flag value in double quotes' : ''}.`;
+
 function classifyGhPr(call) {
   const pr = parsePrArgs(call.args.slice(1));
   if (pr.action && expands(pr.action)) {
     return refuse("it cannot read which gh pr action this is. Write the action (merge, view, ...) out in full.");
+  }
+  // `gh pr -t x merge`: gh may read the flag's next word as its value and still find the action.
+  if (pr.flagBeforeAction && !PR_ACTIONS.includes(pr.action?.text) && pr.words.some((w) => PR_ACTIONS.includes(w.text) || expands(w))) {
+    return refuse("it cannot tell where the gh pr action is when a flag comes before it. Write the action right after `gh pr`, then the flags.");
+  }
+  // The bypass reason wins over the rewrite reason, so --admin is checked before the unreadable words.
+  if (pr.action?.text === "merge" && pr.given("--admin") && !pr.boolean("--help", "-h")) return refuseAdmin();
+  if ((pr.action === null || pr.action.text === "merge") && pr.splitValues.length > 0) {
+    return refuse(unreadMergeWord(pr.splitValues[0], "the shell splits it and the parts may include `--admin`"));
   }
   if (!PR_ACTIONS.includes(pr.action?.text) || pr.boolean("--help", "-h")) return null;
   if (call.wrappers.includes("xargs")) {
     return refuse("it cannot read a PR command whose arguments come from xargs. Run gh with the PR number written out.");
   }
   const action = pr.action.text;
+  if (action === "merge") {
+    if (pr.runtimeWords.length > 0) return refuse(unreadMergeWord(pr.runtimeWords[0], "the shell builds it at run time and it may expand to `--admin`"));
+  }
   // A PR URL names its repo, whatever -R says.
   const url = pr.selector && !pr.selector.dynamic ? /^(.*github\.com\/[^/]+\/[^/]+)\/pull\/\d+/i.exec(pr.selector.text) : null;
   const fromUrl = url ? repoKey(url[1]) ?? url[1] : undefined;
@@ -572,7 +663,11 @@ function classifyGhApi(call) {
     return refuse("it cannot check a GraphQL mutation that merges, opens or readies a PR. Use gh pr merge, gh pr ready or gh pr create.");
   }
   const api = parseApiArgs(call.args.slice(1));
-  if (!api.endpoint || api.help) return null;
+  if (api.help) return null;
+  if (api.hidden.length > 0) {
+    return refuse(`it cannot read \`${api.hidden[0].text || "a word built at run time"}\` in this gh api call, and the shell may turn it into \`-X PUT\` or another flag. Write the method and the endpoint out in full, and quote any value.`);
+  }
+  if (!api.endpoint) return null;
   if (expands(api.endpoint)) {
     return api.method === "GET" ? null : refuse("it cannot tell which endpoint this gh api write goes to. Write the endpoint out in full.");
   }
@@ -584,16 +679,13 @@ function classifyGhApi(call) {
   if (api.method === "GET") return null;
   if (API.createPr.test(where)) return refuse("it cannot check a PR opened through gh api. Use gh pr create.");
   if (API.mergeBranch.test(where)) return refuse("it cannot check a branch merge through gh api. Use gh pr merge.");
-  const merge = API.mergePr.exec(where);
-  if (!merge) return null;
-  if (!/^\d+$/.test(merge[2])) return refuse("it cannot tell which PR this gh api merge names. Use gh pr merge <number>.");
-  return {
-    kind: "remote",
-    what: "A merge through gh api",
-    selector: { text: merge[2], dynamic: false },
-    repo: merge[1] ? { text: merge[1], dynamic: false } : null,
-    host: call.env.GH_HOST,
-  };
+  // gh pr merge refuses a merge that branch protection blocks unless given
+  // --admin; the REST endpoint has no such check, so with admin rights it is
+  // the same bypass.
+  if (API.mergePr.test(where)) {
+    return refuseRestMerge();
+  }
+  return null;
 }
 
 // Any other program: one that is handed a PR command as text (python -c,
@@ -602,9 +694,8 @@ function classifyOther(call, prog) {
   if (prog === null) return unread("a command whose program is built at run time");
   if (READERS.has(prog)) return null;
   const said = plain(wordsText(call));
-  return prActions(said) > 0 || MERGE_MUTATIONS.test(said)
-    ? refuse("it cannot read a PR command run through another program. Run gh directly.")
-    : null;
+  if (prActions(said) === 0 && !MERGE_MUTATIONS.test(said)) return null;
+  return namesAdminMerge(said) ? refuse(`${ADMIN_REASON} Run gh directly, not through another program.`, true) : refuse("it cannot read a PR command run through another program. Run gh directly.");
 }
 
 // The HTTP clients the gate reads, by program name.
@@ -616,7 +707,7 @@ const CLASSIFIERS = {
 
 // Classify one simple command into the PR operation it makes, or null:
 //   { kind: "create", pr, repo }               gh pr create / new, draft or not
-//   { kind: "remote", what, selector, repo }   a merge or ready of an existing PR
+//   { kind: "remote", what, selector, repo }   a gh pr merge or ready of an existing PR
 //   { kind: "refuse", reason }                 a form the gate cannot read
 //   { kind: "unread", what }                   a command the gate cannot read
 function classify(call, shell) {
@@ -653,8 +744,9 @@ function lineHints(command, shell) {
 }
 
 // A refusal the walk could not read: what it could not read, and the way out.
-const unreadRefusal = (what) =>
-  formRefusal(`it cannot read ${what}, and this line names a PR write that it did not read in a plain gh or HTTP call. Run that part in its own Bash call, then run any gh PR command on its own, written out in full. If the line has no PR write, the trigger is text that looks like one (a commit message, an echo): run that text in its own Bash call.`);
+// adminHidden: the line also names a `gh pr merge --admin`, which is never allowed.
+const unreadRefusal = (what, adminHidden = false) =>
+  formRefusal(`it cannot read ${what}, and this line names a PR write that it did not read in a plain gh or HTTP call. Run that part in its own Bash call, then run any gh PR command on its own, written out in full. If the line has no PR write, the trigger is text that looks like one (a commit message, an echo): run that text in its own Bash call.${adminHidden ? ` If the line runs \`gh pr merge --admin\`, that is never allowed. ${BYPASS_NEXT}` : ""}`);
 
 // "owner/name", lower case, for any spelling of a github.com repo: owner/name,
 // with a trailing .git or /, github.com/owner/name, an https or ssh URL, or
@@ -730,7 +822,7 @@ function createBody(pr, dir) {
 // The refusal for one operation, or null. dir is where it runs; when a cd
 // could not be followed it is null and the session's cwd stands in.
 function problemFor(op, dir, cwd) {
-  if (op.kind === "refuse") return formRefusal(op.reason);
+  if (op.kind === "refuse") return op.bypass ? bypassRefusal(op.reason) : formRefusal(op.reason);
   const where = dir ?? cwd;
   if (isAnotherRepo(op.repo, where)) return null;
   if (op.kind === "create") {
@@ -749,6 +841,8 @@ function problemFor(op, dir, cwd) {
 // A refusal about how a command is written. A Review record does not clear it.
 const formRefusal = (reason) =>
   `Refused by the review gate: ${reason}\nThis is about how the command is written; a complete Review record does not change it.`;
+
+const bypassRefusal = (reason) => `Refused by the review gate: ${reason}\nA Review record does not clear this, and neither does writing the bypass another way.`;
 
 // Every reason to refuse a Bash command. An empty list allows it.
 // shell is agent-hook-shell.mjs, passed in so it loads inside main's try.
@@ -782,9 +876,10 @@ export function bashProblems(command, cwd, shell) {
     .filter(({ step, op }) => op?.kind !== "unread" && CLASSIFIERS[shell.nameOf(step.call)])
     .reduce((n, { step }) => n + hintCount(readText(step.call)), 0);
   const hidden = total > read;
+  const adminHidden = namesAdminMerge(plain(command));
   const problems = ops
     .map(({ step, op }) => {
-      if (op?.kind === "unread") return hidden ? unreadRefusal(op.what) : null;
+      if (op?.kind === "unread") return hidden ? unreadRefusal(op.what, adminHidden) : null;
       return op && problemFor(op, step.dir, cwd);
     })
     .filter(Boolean);

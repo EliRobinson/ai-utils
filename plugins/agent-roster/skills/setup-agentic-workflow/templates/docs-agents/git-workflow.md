@@ -87,7 +87,7 @@ This line says who decides that a PR merges: `ask` or `auto`. The setup skill wr
 }
 ```
 
-The allow rule fits only this repo's merge command with the tested head named. It does not limit which agent runs it, so only the coordinator ever runs `gh pr merge`. The deny rules keep `--admin` (which skips branch protection) and `--auto` (which merges later, after the checks) blocked; they are worth adding under `ask` too. Do not put the allow rule in `~/.claude/settings.json`: it would also lift the classifier's check in every repo on `ask`. The review gate hook still runs before every merge. If `autoMode.classifyAllShell` is `true`, auto mode ignores the allow rule. These are facts about Claude Code as of agent-roster 1.12.0; if auto mode behaves differently, check Claude Code's permissions documentation.
+The allow rule fits only this repo's merge command with the tested head named. It does not limit which agent runs it, so only the coordinator ever runs `gh pr merge`. The deny rules keep `--admin` (see "Branch protection is never bypassed" below) and `--auto` (which merges later, after the checks) blocked; they are worth adding under `ask` too. Do not put the allow rule in `~/.claude/settings.json`: it would also lift the classifier's check in every repo on `ask`. The review gate hook still runs before every merge. If `autoMode.classifyAllShell` is `true`, auto mode ignores the allow rule. These are facts about Claude Code as of agent-roster 1.12.0; if auto mode behaves differently, check Claude Code's permissions documentation.
 
 **When auto mode blocks a merge.** The coordinator stops and tells the owner in chat, in one message: the PR, the rule above, and that the entries go in the main checkout's `.claude/settings.local.json`. The owner either adds them and says "retry N", or types "merge N" to approve that one PR. Either way the coordinator starts the merge steps again from step 1 on the current head. It never edits settings and never retries the merge another way.
 
@@ -100,3 +100,7 @@ Two hooks check commands: the main-checkout guard above and the [review gate](re
 ## Hooks are never bypassed
 
 Never run `git commit --no-verify`, `git push --no-verify` or `HUSKY=0`. If a hook fails, fix the cause. If the cause is outside your change, stop and report it.
+
+## Branch protection is never bypassed
+
+Never use `gh pr merge --admin`, and never merge through the REST API (`gh api -X PUT .../pulls/N/merge`). Both skip the branch protection check that a plain `gh pr merge` makes. If checks fail or a branch rule blocks a merge, stop and ask the owner what to do, and say what blocks it. The owner can fix the check or the rule, or merge the PR themselves on GitHub. The review gate hook refuses both forms ([review-gate.md](review-gate.md#the-hook)).
