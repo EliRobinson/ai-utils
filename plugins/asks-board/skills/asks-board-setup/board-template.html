@@ -59,13 +59,12 @@ a { color: var(--accent); text-underline-offset: 0.18em; }
 header { display: grid; gap: 6px; }
 h1 { font-weight: 700; font-size: 1.75rem; line-height: 1.2; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
 .summary { margin: 0; font-size: 1.0625rem; display: flex; flex-wrap: wrap; gap: 4px 14px; }
-.summary strong { font-variant-numeric: tabular-nums; }
+.summary strong, .chats strong { font-variant-numeric: tabular-nums; }
 .summary > span + span::before { content: "·"; margin-right: 14px; color: var(--muted); }
 .sub { color: var(--muted); margin: 0; font-size: 0.9375rem; max-width: 62ch; }
 /* Waiting in your chats: read-only, no controls. A stale count is muted and says so in words. */
 .chats { margin: 0; display: grid; gap: 2px; font-size: 0.9375rem; min-width: 0; }
 .chats p { margin: 0; }
-.chats strong { font-variant-numeric: tabular-nums; }
 .chats ul { margin: 0; padding-left: 1.3em; }
 .chats li { overflow-wrap: anywhere; }
 .chats .proj { font-weight: 700; }
@@ -499,26 +498,43 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
   // Waiting in your chats: each routes/<project> row may carry chatWaiting {count, updatedAt},
   // written only by that project's coordinator. The page only reads it. A count that is not
   // a whole number of 0 or more is ignored, and 0 shows nothing. A record older than
-  // STALE_MS, or with no readable updatedAt, is stale: it still shows, marked as such.
+  // STALE_MS, with no readable updatedAt, or dated more than AHEAD_MS in the future (a
+  // clock or typing error) is stale: it still shows, marked as such.
   const STALE_MS = 24 * 3600 * 1000;
+  const AHEAD_MS = 5 * 60 * 1000;
   function chatWaitingOf(d, now) {
     const w = d && d.data ? d.data.chatWaiting : null;
     if (!w || typeof w !== "object") return null;
     const count = w.count;
     if (typeof count !== "number" || !Number.isSafeInteger(count) || count <= 0) return null;
-    const at = typeof w.updatedAt === "string" ? Date.parse(w.updatedAt) : NaN;
+    const parsed = typeof w.updatedAt === "string" ? Date.parse(w.updatedAt) : NaN;
+    // A time in the future is as unreadable as no time: "update time unknown".
+    const at = isFinite(parsed) && parsed - now <= AHEAD_MS ? parsed : NaN;
     return {
+      id: String(d.id || ""),
       project: headerValue(d.data.project, headerValue(d.id, "general")),
       count,
       updatedAt: isFinite(at) ? new Date(at).toISOString() : "",
       stale: !isFinite(at) || now - at > STALE_MS,
     };
   }
-  // Every route with a count to show, in project name order, and their total.
+  // Every route with a count to show, in project name order (then doc id, so two routes
+  // with one name keep a fixed order), their total, and how much of it is stale.
   function chatWaiting(routes, now) {
     const list = (routes || []).map((d) => chatWaitingOf(d, now)).filter(Boolean)
-      .sort((x, y) => x.project.localeCompare(y.project));
-    return { total: list.reduce((n, w) => n + w.count, 0), list };
+      .sort((x, y) => x.project.localeCompare(y.project) || x.id.localeCompare(y.id));
+    const sum = (ws) => ws.reduce((n, w) => n + w.count, 0);
+    return { total: sum(list), staleTotal: sum(list.filter((w) => w.stale)), list };
+  }
+  // The headline after the bold total. It says when part of the total may be old.
+  function chatWaitingHead(cw) {
+    return " waiting on you in your chats" + (cw.staleTotal ? ", " + cw.staleTotal + " may be out of date" : "");
+  }
+  // The summary when nothing on the board needs you: "all caught up" only when no chat
+  // waits on you either.
+  function caughtUp(hasRows, chatTotal) {
+    if (chatTotal) return "Nothing to click here.";
+    return hasRows ? "You’re all caught up." : "Nothing yet.";
   }
   // The words after a project's count: when it was updated, and whether it may be old.
   function chatWaitingNote(w, now) {
@@ -528,6 +544,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
   // END pure
 
   let db = null, docs = null, comments = null, assets = null;
+  const rowsOf = (snap) => snap.docs.filter((s) => s.exists).map((s) => ({ id: s.id, data: s.data() }));
   // The routes rows, read only for chatWaiting (see drawChats). The page never writes them.
   let routes = null;
   let project = ALL, kind = ALL, lost = false;
@@ -1037,7 +1054,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     const box = $("chats"); box.replaceChildren();
     box.hidden = !cw.list.length;
     if (box.hidden) return;
-    box.append(el("p", { id: "chats-head" }, [el("strong", { text: String(cw.total) }), " waiting in your chats"]),
+    box.append(el("p", { id: "chats-head" }, [el("strong", { text: String(cw.total) }), chatWaitingHead(cw)]),
       el("ul", { "aria-labelledby": "chats-head" }, cw.list.map((w) => el("li", { class: w.stale ? "stale" : "" }, [
         el("span", { class: "proj", text: w.project }), ": " + w.count + " ",
         el("span", { class: "when", text: "(" + chatWaitingNote(w, now) + ")" }),
@@ -1053,12 +1070,12 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     project = view.project;
 
     // Summary across every project.
+    const cw = chatWaiting(routes, now);
     const sum = $("summary"); sum.replaceChildren();
-    if (!docs.length) sum.append("Nothing yet.");
-    else if (!all.open.length) sum.append("You’re all caught up.");
+    if (!all.open.length) sum.append(caughtUp(docs.length > 0, cw.total));
     else sum.append(el("span", {}, [el("strong", { text: String(all.open.length) }), all.open.length === 1 ? " needs you" : " need you"]));
     if (all.wait.length) sum.append(el("span", {}, [el("strong", { text: String(all.wait.length) }), " waiting for the chat"]));
-    drawChats(chatWaiting(routes, now), now);
+    drawChats(cw, now);
 
     // Project filter, shown when there is more than one project.
     const pBox = $("projects"); pBox.replaceChildren();
@@ -1139,7 +1156,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
       return;
     }
     db.collection("asks").onSnapshot((snap) => {
-      docs = snap.docs.filter((s) => s.exists).map((s) => ({ id: s.id, data: s.data() }));
+      docs = rowsOf(snap);
       if (lost) { lost = false; $("banner").replaceChildren(); }
       requestRender(false);
     }, () => {
@@ -1152,7 +1169,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     // Read only: the page never writes routes, and no click touches it. A failed read
     // hides the block.
     db.collection("routes").onSnapshot((snap) => {
-      routes = snap.docs.filter((s) => s.exists).map((s) => ({ id: s.id, data: s.data() }));
+      routes = rowsOf(snap);
       requestRender(false);
     }, () => { routes = null; requestRender(false); });
     setTimeout(() => {

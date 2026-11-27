@@ -12,10 +12,11 @@ Entries start at 1.3.0. Earlier changes are in the git history of `plugins/asks-
 
 **Changes:**
 
-- **"N waiting in your chats" in the board header** (#38). Chat-only asks (a merge, a ticket, a new PR) are not board rows, so the board did not show that a chat was waiting on you. Now the header shows how many are waiting, with each project's count and when it was updated.
+- **"N waiting on you in your chats" in the board header** (#38). Chat-only asks (a merge, a ticket, a new PR) are not board rows, so the board did not show that a chat was waiting on you. Now the header shows how many are waiting, with each project's count and when it was updated.
   - The count lives on the project's `routes` row as `chatWaiting: {count, updatedAt}`. Only that project's coordinator writes it: when it asks a chat-only question, when your typed answer arrives, and at each check-in.
   - It is read-only: no buttons, and the page never writes `routes`. It is plain text, not a live region, so it is never announced.
-  - Only counts above 0 show. A bad count (missing, not a number, negative, not whole) is ignored. A count older than 24 hours is muted and says "may be out of date".
+  - Only counts above 0 show. A bad count (missing, not a number, negative, not whole) is ignored. A count older than 24 hours, with no readable time, or dated more than 5 minutes ahead is muted and says "may be out of date"; the headline then says how many may be out of date. A coordinator that stops checking in leaves a stale line, not no line.
+  - While a chat waits on you, the summary says "Nothing to click here." instead of "You’re all caught up." when the board has nothing for you.
   - The Board Router ignores `chatWaiting`: it never pings, routes or reacts to it.
 - `scripts/check-board-page.mjs` tests the new display, checks that the page only reads `routes`, and checks that the router rules say to ignore `chatWaiting`.
 

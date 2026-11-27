@@ -7,7 +7,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const page = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "board-template.html"), "utf8");
+const here = dirname(fileURLToPath(import.meta.url));
+const page = readFileSync(join(here, "..", "board-template.html"), "utf8");
 const problems = [];
 const check = (ok, msg) => { if (!ok) problems.push(msg); };
 const show = (v) => JSON.stringify(v);
@@ -326,15 +327,19 @@ const body = (name) => { const m = page.match(new RegExp("\\n  (?:async )?functi
 // Waiting in your chats: routes/<project> rows with chatWaiting {count, updatedAt}.
 const FRESH = "2026-11-23T11:00:00.000Z", STALE = "2026-11-22T11:00:00.000Z";
 const route = (id, chatWaiting, extra) => row(id, Object.assign({ project: id, session: "X Coordinator" }, extra, chatWaiting === undefined ? {} : { chatWaiting }));
+const seen = (id, project, count, updatedAt, stale) => ({ id, project, count, updatedAt, stale });
 each("chatWaitingOf: a whole count above 0 shows, with its project, count, time and staleness", [
-  ["valid", route("web", { count: 2, updatedAt: FRESH }), { project: "web", count: 2, updatedAt: FRESH, stale: false }],
-  ["stale, past 24 hours", route("web", { count: 1, updatedAt: STALE }), { project: "web", count: 1, updatedAt: STALE, stale: true }],
-  ["exactly 24 hours is not stale", route("web", { count: 1, updatedAt: "2026-11-22T12:00:00.000Z" }), { project: "web", count: 1, updatedAt: "2026-11-22T12:00:00.000Z", stale: false }],
-  ["no updatedAt is stale", route("web", { count: 1 }), { project: "web", count: 1, updatedAt: "", stale: true }],
-  ["an unreadable updatedAt is stale", route("web", { count: 1, updatedAt: "soon" }), { project: "web", count: 1, updatedAt: "", stale: true }],
-  ["a non-text updatedAt is stale", route("web", { count: 1, updatedAt: 12345 }), { project: "web", count: 1, updatedAt: "", stale: true }],
-  ["no project field uses the doc id", row("api", { chatWaiting: { count: 3, updatedAt: FRESH } }), { project: "api", count: 3, updatedAt: FRESH, stale: false }],
-  ["an untrusted project name is one plain line", route("x", { count: 1, updatedAt: FRESH }, { project: "we|b\n<img>" }), { project: "we b img", count: 1, updatedAt: FRESH, stale: false }],
+  ["valid", route("web", { count: 2, updatedAt: FRESH }), seen("web", "web", 2, FRESH, false)],
+  ["stale, past 24 hours", route("web", { count: 1, updatedAt: STALE }), seen("web", "web", 1, STALE, true)],
+  ["exactly STALE_MS (24 hours) is not stale", route("web", { count: 1, updatedAt: new Date(NOWMS - STALE_MS).toISOString() }), seen("web", "web", 1, "2026-11-22T12:00:00.000Z", false)],
+  ["no updatedAt is stale", route("web", { count: 1 }), seen("web", "web", 1, "", true)],
+  ["an unreadable updatedAt is stale", route("web", { count: 1, updatedAt: "soon" }), seen("web", "web", 1, "", true)],
+  ["a non-text updatedAt is stale", route("web", { count: 1, updatedAt: 12345 }), seen("web", "web", 1, "", true)],
+  ["a future updatedAt is unknown and stale", route("web", { count: 1, updatedAt: "2026-11-23T13:00:00.000Z" }), seen("web", "web", 1, "", true)],
+  ["a minute ahead (clock skew) is not stale", route("web", { count: 1, updatedAt: "2026-11-23T12:01:00.000Z" }), seen("web", "web", 1, "2026-11-23T12:01:00.000Z", false)],
+  ["exactly AHEAD_MS ahead is not stale", route("web", { count: 1, updatedAt: new Date(NOWMS + AHEAD_MS).toISOString() }), seen("web", "web", 1, "2026-11-23T12:05:00.000Z", false)],
+  ["no project field uses the doc id", row("api", { chatWaiting: { count: 3, updatedAt: FRESH } }), seen("api", "api", 3, FRESH, false)],
+  ["an untrusted project name is one plain line", route("x", { count: 1, updatedAt: FRESH }, { project: "we|b\n<img>" }), seen("x", "we b img", 1, FRESH, false)],
 ], (_, d, want) => expect(chatWaitingOf(d, NOWMS), want));
 each("chatWaitingOf: a missing, zero or bad count shows nothing", [
   ["no chatWaiting", route("web")], ["chatWaiting null", route("web", null)], ["chatWaiting a number", route("web", 3)],
@@ -345,18 +350,29 @@ each("chatWaitingOf: a missing, zero or bad count shows nothing", [
   ["an object", route("web", { count: { n: 1 }, updatedAt: FRESH })], ["a row with no data", { id: "web" }], ["no row", null],
 ], (_, d) => expect(chatWaitingOf(d, NOWMS), null));
 const SEVERAL = [route("web", { count: 2, updatedAt: FRESH }), route("api", { count: 1, updatedAt: STALE }), route("zero", { count: 0, updatedAt: FRESH }), route("bad", { count: "9" }), route("docs", { count: 4, updatedAt: FRESH })];
+const TWINS = [route("web-b", { count: 1, updatedAt: FRESH }, { project: "web" }), route("web-a", { count: 2, updatedAt: FRESH }, { project: "web" })];
+const NONE = { total: 0, staleTotal: 0, list: [] };
 each("chatWaiting:", [
   ["lists projects with a count in name order", SEVERAL, (cw) => cw.list.map((w) => w.project), ["api", "docs", "web"]],
   ["totals every listed count, stale ones too", SEVERAL, (cw) => cw.total, 7],
-  ["no routes yet shows nothing", null, (cw) => cw, { total: 0, list: [] }],
-  ["routes with no counts show nothing", [route("web"), route("api", { count: 0 })], (cw) => cw, { total: 0, list: [] }],
+  ["totals the stale counts apart", SEVERAL, (cw) => cw.staleTotal, 1],
+  ["two routes with one name stay two lines, in doc id order", TWINS, (cw) => cw.list.map((w) => w.id), ["web-a", "web-b"]],
+  ["no routes yet shows nothing", null, (cw) => cw, NONE],
+  ["routes with no counts show nothing", [route("web"), route("api", { count: 0 })], (cw) => cw, NONE],
 ], (_, routes, pick, want) => expect(pick(chatWaiting(routes, NOWMS)), want));
+each("chatWaitingHead: says the count waits on you, and how much of it may be old", [
+  [{ total: 3, staleTotal: 0 }, " waiting on you in your chats"],
+  [{ total: 3, staleTotal: 1 }, " waiting on you in your chats, 1 may be out of date"],
+], (cw, want) => expect(chatWaitingHead(cw), want));
 each("chatWaitingNote: says when, and says a stale count may be out of date in words", [
   [{ updatedAt: FRESH, stale: false }, "updated 60 min ago"],
   [{ updatedAt: STALE, stale: true }, "updated 25 h ago, may be out of date"],
   [{ updatedAt: "", stale: true }, "update time unknown, may be out of date"],
 ], (w, want) => expect(chatWaitingNote(w, NOWMS), want));
-each("STALE_MS: a count is stale after 24 hours", [[]], () => expect(STALE_MS, 86400000));
+each("caughtUp: never says all caught up while a chat waits on you", [
+  [true, 0, "You’re all caught up."], [false, 0, "Nothing yet."],
+  [true, 2, "Nothing to click here."], [false, 2, "Nothing to click here."],
+], (hasRows, chatTotal, want) => expect(caughtUp(hasRows, chatTotal), want));
 // The page reads routes and never writes them; the block has no controls and no live region.
 each("tripwire: the page only reads routes, with one onSnapshot", [[]], () => {
   const uses = [...page.matchAll(/collection\("routes"\)(\.\w+\()?/g)].map((m) => m[1] || "");
@@ -368,10 +384,14 @@ each("tripwire: drawChats():", [
   ["is not a live region", /aria-live|role|say\(/],
   ["writes nothing", /\.(update|set|add|delete)\(/],
 ], (_, re) => (body("drawChats") && !re.test(body("drawChats")) ? null : "drawChats() is missing or matches " + re));
-each("tripwire: render() draws the chats block from chatWaiting(routes)", [[]], () =>
-  (/drawChats\(chatWaiting\(routes, now\), now\)/.test(body("render")) ? null : "missing"));
+each("tripwire: drawChats() hides an empty list, marks only stale lines, and uses the headline helper", [
+  [/box\.hidden = !cw\.list\.length;/], [/class: w\.stale \? "stale" : ""/], [/chatWaitingHead\(cw\)/],
+], (re) => (re.test(body("drawChats")) ? null : "missing " + re));
+each("tripwire: render() draws the chats block and the summary from one chatWaiting(routes)", [
+  [/const cw = chatWaiting\(routes, now\);/], [/drawChats\(cw, now\)/], [/caughtUp\(docs\.length > 0, cw\.total\)/],
+], (re) => (re.test(body("render")) ? null : "missing " + re));
 // The Board Router ignores chatWaiting: the skill's router section says so.
-const SKILL = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "asks-board", "SKILL.md"), "utf8");
+const SKILL = readFileSync(join(here, "..", "..", "asks-board", "SKILL.md"), "utf8");
 const routerSection = (SKILL.split("### If you are the Board Router")[1] || "").split("\n## ")[0];
 each("router rules: the Board Router ignores chatWaiting", [[]], () =>
   (/ignore `chatWaiting`/i.test(routerSection) ? null : "the router section does not say it ignores `chatWaiting`"));
