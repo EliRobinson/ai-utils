@@ -111,6 +111,21 @@ try {
   const ASK_OWNER = "stop and ask the owner";
   const mcp = (tool, input, expect) => ({ hook: "review", hookDir: path.join(tree, "scripts"), cwd: tree, tool, input, expect });
   const fromTree = path.join(tree, "scripts");
+  // The commands of "Cleanup after a merge" in the coordinator prompt, in order.
+  const CLEANUP = [
+    "gh pr view 5 -R o/r --json state,mergedAt,headRefName,headRefOid",
+    `git -C ${tree} branch --show-current`,
+    `git -C ${tree} status --porcelain`,
+    `git -C ${tree} fetch --prune origin`,
+    `git -C ${tree} fetch origin pull/5/head`,
+    `git -C ${tree} rev-list --count abc123..HEAD`,
+    `git -C ${tree} ls-remote --heads origin task`,
+    `git -C ${tree} push origin --delete task`,
+    `git -C ${tree} switch --detach abc123`,
+    `git -C ${tree} branch -d task`,
+    `git -C ${tree} worktree prune`,
+    `git -C ${tree} worktree remove ${tree}`,
+  ];
 
   const cases = [
     // The guard refuses writes in the main checkout.
@@ -498,6 +513,13 @@ try {
     mcp("mcp__github__create_pull_request_review", { body: "LGTM" }, "allow"),
     mcp("mcp__db__create_project", { name: "x" }, "allow"),
     mcp("mcp__github__get_pull_request_merge_status", {}, "allow"),
+    // Cleanup after a merge (coordinator prompt): run with `git -C <worktree>`,
+    // both hooks allow every command from the main checkout and from the
+    // worktree, with no override. The same writes without -C are refused in main.
+    ...CLEANUP.flatMap((command) =>
+      [main, tree].flatMap((cwd) => [guard(cwd, command, "allow"), reviewIn(cwd, command, "allow", { FAKE_PR_BODY: "" })])),
+    guard(main, "git branch -d task", "refuse"),
+    guard(main, "git worktree prune", "refuse"),
   ];
 
   let failed = 0;

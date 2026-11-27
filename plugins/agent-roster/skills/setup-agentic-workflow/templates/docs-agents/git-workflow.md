@@ -37,7 +37,7 @@ cd ../<repo>-<task>
 - Once the PR exists, `gh pr update-branch <N>` does the same merge on GitHub. Never add `--rebase`: it rewrites the pushed branch. There is nothing to push afterwards. Before your next commit, run `git pull --ff-only origin <branch>` in your worktree, or that push is refused. If it cannot fast-forward because you have commits you have not pushed, run `git merge origin/<branch>` and push normally. If `gh pr update-branch` reports conflicts, catch up with `git merge origin/main` as above.
 - [review-gate.md](review-gate.md) says when a catch-up needs review.
 - Review before you open the PR, drafts included: see [review-gate.md](review-gate.md).
-- Only the coordinator merges, and only as the merge policy below allows. It follows the merge steps in [coordinator-prompt.md](coordinator-prompt.md#merging): up to date with `main`, review record complete, test gate and CI passed on the exact head, merge lock, then `gh pr merge N --<style> --match-head-commit <sha>` in the merge style below.
+- Only the coordinator merges, and only as the merge policy below allows. It follows the merge steps in [coordinator-prompt.md](coordinator-prompt.md#merging): up to date with `main`, review record complete, test gate and CI passed on the exact head, merge lock, then `gh pr merge N --<style> --match-head-commit <sha>` in the merge style below. After the merge it deletes the branch and removes the worktree, as [coordinator-prompt.md](coordinator-prompt.md#cleanup-after-a-merge) says ("Cleanup after a merge"): only a merged PR's branch and a clean worktree its own agents created, never by force, and from the worktree, so the main-checkout hook needs no override.
 
 ## Merge style
 
