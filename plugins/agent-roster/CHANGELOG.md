@@ -14,13 +14,13 @@
 **Changes:**
 
 - **The review gate refuses `gh pr merge --admin`** (#40), which merges past required checks and branch rules. It refuses it in any flag position and spelling (`--admin`, `--admin=true`, even `--admin=false`), with any other flags, inside `eval`, `bash -c`, a pipe into a shell, `python3 -c` or an `alias`, in any repo, whatever the Review record says. The refusal says never to bypass branch protection, and to stop and ask the owner.
-- **A `gh pr merge` argument that the shell expands at run time is refused** (`gh pr merge 5 $FLAGS`), since it may expand to `--admin`. A quoted flag value (`--body "$B"`) still passes, except `"$@"` and `"${a[@]}"`, which split; an unquoted one (`--body $B`, `-t $(cat f)`) is refused, because the shell splits it.
-- **A flag before the `gh` subcommand or the `pr` action is refused** (`gh -R o/r pr merge 5`, `gh pr -t x merge 5 --admin`), because gh reads past it and the hook could not tell where the action is. Write the subcommand first and the flags after. The same goes for `gh -X PUT api ...`. `-R` and `--repo` before the action still pass.
-- **`gh api` run-time words and glued flag groups are read**: `gh api repos/o/r/pulls/5/merge $X` is refused, and `-iXPUT` is read as `-i` plus `-X PUT`.
+- **A `gh pr merge` argument that the shell expands at run time is refused** (`gh pr merge 5 $FLAGS`), since it may expand to `--admin`. A quoted flag value (`--body "$B"`) still passes, except `"$@"`, `"${a[@]}"` and zsh's `"${=x}"`, which split; an unquoted one (`--body $B`, `-t $(cat f)`) is refused, because the shell splits it.
+- **A flag before the `gh` subcommand or the `pr` action is refused** (`gh -R o/r pr merge 5`, `gh pr -t x merge 5 --admin`), because gh reads past it and the hook could not tell where the action is. Write the subcommand first and the flags after. The same goes for `gh -X PUT api ...`. `-R` and `--repo` between `pr` and the action (`gh pr -R o/r merge 5`) still pass; before `pr` they are refused.
+- **`gh api` run-time words and glued flag groups are read**: `gh api repos/o/r/pulls/5/merge $X` is refused, and `-iXPUT` and `-X=PUT` are read as `-X PUT`. A `gh api` read with an unquoted variable (`gh api repos/o/r/pulls/$N`) is refused too; quote it.
 - **python's list form is read** (`subprocess.run(["gh","pr","merge","5"])`).
 - **A `gh api` merge of `pulls/N/merge` is refused**, in any repo. That endpoint skips the branch protection check `gh pr merge` makes, so with admin rights it is the same bypass. Before, it passed with a complete record. Use `gh pr merge`.
 - `git-workflow.md` has a new section, "Branch protection is never bypassed", `review-gate.md` lists the new refusals, and the coordinator prompt's merge step says never to add `--admin` and to stop and ask the owner when GitHub refuses a merge.
-- `check-agent-hooks.mjs` has 65 new cases (and one old allow case now refuses): each refused form, with a check that the refusal tells the agent to stop and ask the owner, and the reads, plain merges and text naming `--admin` that still pass. A case can now name a phrase its refusal must contain.
+- `check-agent-hooks.mjs` has 80 new cases (and one old allow case now refuses): each refused form, with a check that the refusal tells the agent to stop and ask the owner, and the reads, plain merges and text naming `--admin` that still pass. A case can now name a phrase its refusal must contain.
 
 ## 1.14.0
 

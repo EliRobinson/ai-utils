@@ -23,12 +23,14 @@ import { fileURLToPath } from "node:url";
 
 const WORD_END = /[\s;&|<>()]/;
 
+const QUOTED_SPLIT = /\$(?:@|\{[(=@]|\{!?\w*\[@\]|\{!\w+@|\w+\[@\])/y;
+
 // Lex a command line into items:
 //   { type: "cmd", words, heredocs }  a simple command
 //   { type: "push" } / { type: "pop" } a ( ) subshell or a $(...) scope
 // A word is { text, dynamic, splits }. dynamic is true when the shell builds it at
-// run time ($VAR, $(...), globs, ~). splits is true when that happens outside
-// double quotes, so the result may split into several words. Commands inside $(...) and backticks run
+// run time ($VAR, $(...), globs, ~). splits is true when the result may split into
+// several words: outside double quotes, or inside them for "$@" and "${a[@]}". Commands inside $(...) and backticks run
 // before the command that holds them, so they come first, in their own scope.
 // `$(cat <<'X' ... X)` with a quoted delimiter is read as its literal body.
 // Throws on an unterminated quote, $( or backtick.
@@ -229,8 +231,9 @@ export function lex(line) {
           } else {
             if (line[i] === "$") {
               word.dynamic = true;
-              // "$@" and "${a[@]}" still split into one word per element.
-              if (/^\$(?:@|\{@|\{!?\w*\[@\])/.test(line.slice(i, i + 40))) word.splits = true;
+              // These still split inside double quotes: "$@", "${a[@]}", and zsh's "${=x}", "${(f)x}", "$a[@]".
+              QUOTED_SPLIT.lastIndex = i;
+              if (QUOTED_SPLIT.test(line)) word.splits = true;
             }
             word.text += line[i];
             i++;

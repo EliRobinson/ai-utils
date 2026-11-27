@@ -387,6 +387,18 @@ function parsePrArgs(words) {
 // GET unless it is given fields or --input; the last -X wins.
 const API_VALUE_FLAGS = new Set(["-X", "--method", "-f", "--raw-field", "-F", "--field", "-H", "--header", "--input",
   "-q", "--jq", "-t", "--template", "--hostname", "-p", "--preview", "--cache"]);
+// A flag's value as the rest of a word, from index `from`.
+const tail = (word, from) => ({ text: word.text.slice(from), dynamic: word.dynamic, splits: word.splits });
+// The first value flag in a glued short group, as gh reads it: -iXPUT and
+// -X=PUT both give { name: "-X", from } with `from` just past the letter (and
+// past one "="). null when the word is not a short group with a value flag.
+function shortValueFlag(text) {
+  if (!/^-[a-zA-Z]/.test(text)) return null;
+  for (let k = 1; k < text.length && /[a-zA-Z]/.test(text[k]); k++) {
+    if (API_VALUE_FLAGS.has(`-${text[k]}`)) return { name: `-${text[k]}`, from: text[k + 1] === "=" ? k + 2 : k + 1 };
+  }
+  return null;
+}
 function parseApiArgs(words) {
   let method = null;
   let endpoint = null;
@@ -400,24 +412,27 @@ function parseApiArgs(words) {
     const { text } = word;
     let name = text;
     let value;
-    // A glued short group (-iXPUT, -if k=v): boolean letters, then the first value letter takes the rest of the group, or the next word.
-    const group = /^-[a-zA-Z]{2,}/.test(text) && !text.startsWith("--") ? [...text.slice(1)].findIndex((c) => API_VALUE_FLAGS.has(`-${c}`)) : -1;
     const eq = text.startsWith("--") ? text.indexOf("=") : -1;
+    const short = shortValueFlag(text);
     if (eq !== -1 && API_VALUE_FLAGS.has(text.slice(0, eq))) {
       name = text.slice(0, eq);
-      value = { text: text.slice(eq + 1), dynamic: word.dynamic };
+      value = tail(word, eq + 1);
     } else if (API_VALUE_FLAGS.has(text)) {
       value = words[++i] ?? MISSING;
-    } else if (group !== -1) {
-      name = `-${text[group + 1]}`; // glued: -XPUT, -Fquery=@q.graphql, -iXPUT
-      const rest = text.slice(group + 2);
-      value = rest ? { text: rest, dynamic: word.dynamic, splits: word.splits } : words[++i] ?? MISSING;
+    } else if (short !== null) {
+      name = short.name; // glued: -XPUT, -X=PUT, -Fquery=@q.graphql, -iXPUT
+      value = short.from < text.length ? tail(word, short.from) : words[++i] ?? MISSING;
     } else {
       if (text === "--help" || text === "-h") help = true;
       else if (!text.startsWith("-") && endpoint === null) {
         endpoint = word;
         if (word.splits) hidden.push(word);
-      } else if (expands(word)) hidden.push(word);
+      } else if (!text.startsWith("-") && expands(endpoint ?? word) && endpoint !== null) {
+        // A run-time word before the endpoint was a flag, not the endpoint.
+        if (!hidden.includes(endpoint)) hidden.push(endpoint);
+      } else if (expands(word)) {
+        hidden.push(word);
+      }
       continue;
     }
     if (value.splits) hidden.push(value);
@@ -579,14 +594,25 @@ const namesAdminMerge = (said) => /(?:^|[^\w-])--admin(?![\w-])/.test(said) && /
 const unread = (what) => ({ kind: "unread", what });
 
 // gh: `gh pr merge|ready|create|new`, and `gh api` merges, PR opens and GraphQL.
+// The words that may be the gh subcommand when flags come first. Each flag may
+// swallow one word as its value, so it is among the first (flags + 1) other
+// words; the value of -R/--repo is known, so it is skipped.
+function leadingSubcommandWords(args) {
+  const others = [];
+  let flags = 0;
+  for (let i = 0; i < args.length; i++) {
+    if (!args[i].text.startsWith("-")) others.push(args[i]);
+    else if (REPO_FLAGS.includes(args[i].text)) i++;
+    else flags++;
+  }
+  return others.slice(0, flags + 1);
+}
 function classifyGh(call) {
   const text = call.args.map((w) => w.text);
   if (text.length === 1 && (text[0] === "--help" || text[0] === "-h")) return null;
   if (call.args[0] && expands(call.args[0])) return refuse("it cannot read which gh command this is. Write the gh subcommand out in full.");
   // gh finds the subcommand past leading flags (`gh -R o/r pr merge 5`), and the gate does not follow it.
-  // Each flag may swallow one word as its value, so the subcommand is among the first (flags + 1) other words.
-  const subcommandWords = call.args.filter((w) => !w.text.startsWith("-")).slice(0, text.length - call.args.filter((w) => !w.text.startsWith("-")).length + 1);
-  if (text[0]?.startsWith("-") && subcommandWords.some((w) => w.text === "pr" || w.text === "api" || expands(w))) {
+  if (text[0]?.startsWith("-") && leadingSubcommandWords(call.args).some((w) => w.text === "pr" || w.text === "api" || expands(w))) {
     return refuse("it cannot tell which gh command this is when flags come before the subcommand. Write `gh pr ...` or `gh api ...` with the subcommand first and the flags after it.");
   }
   if (call.wrappers.includes("xargs") && !(text[0] === "pr" || text[0] === "api")) return unread("the gh command xargs builds");
@@ -596,7 +622,7 @@ function classifyGh(call) {
 }
 
 const unreadMergeWord = (word, why) =>
-  `it cannot read ${word.text ? `\`${word.text}\`` : "a word built at run time"} in this gh pr command: ${why}. Write the PR number and every flag out in full${word.splits ? ', or put a flag value in double quotes' : ''}.`;
+  `it cannot read ${word.text ? `\`${word.text}\`` : "a word built at run time"} in this gh pr command: ${why}. Write the PR number and every flag out in full${word.splits && !/\$@|\[@\]/.test(word.text) ? ', or put a flag value in double quotes' : ''}.`;
 
 function classifyGhPr(call) {
   const pr = parsePrArgs(call.args.slice(1));
@@ -607,6 +633,7 @@ function classifyGhPr(call) {
   if (pr.flagBeforeAction && !PR_ACTIONS.includes(pr.action?.text) && pr.words.some((w) => PR_ACTIONS.includes(w.text) || expands(w))) {
     return refuse("it cannot tell where the gh pr action is when a flag comes before it. Write the action right after `gh pr`, then the flags.");
   }
+  // The bypass reason wins over the rewrite reason, so --admin is checked before the unreadable words.
   if (pr.action?.text === "merge" && pr.given("--admin") && !pr.boolean("--help", "-h")) return refuseAdmin();
   if ((pr.action === null || pr.action.text === "merge") && pr.splitValues.length > 0) {
     return refuse(unreadMergeWord(pr.splitValues[0], "the shell splits it and the parts may include `--admin`"));
@@ -617,7 +644,6 @@ function classifyGhPr(call) {
   }
   const action = pr.action.text;
   if (action === "merge") {
-    if (pr.given("--admin")) return refuseAdmin();
     if (pr.runtimeWords.length > 0) return refuse(unreadMergeWord(pr.runtimeWords[0], "the shell builds it at run time and it may expand to `--admin`"));
   }
   // A PR URL names its repo, whatever -R says.

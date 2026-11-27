@@ -99,9 +99,9 @@ When checks fail or a branch rule blocks a plain `gh pr merge`, the agent stops 
 
 It also refuses, always, merge forms it cannot read, because they may hide `--admin` or a REST merge. Rewrite the command with everything written out:
 
-- `gh pr merge` with a word built at run time that is not a flag's value (`gh pr merge 5 $FLAGS`, `"$F"`), or a flag's value the shell would split (`-t $T`, `-t $(cat f)`, `-t "$@"`; a quoted `"$T"` passes). Write the PR number and every flag out in full.
-- A flag before the `gh` subcommand or before the `pr` action (`gh -R o/r pr merge 5`, `gh pr -t x merge 5`), because gh reads past it and the hook cannot tell where the action is. `-R` and `--repo` before the action still pass. Write the subcommand and action first, then the flags.
-- `gh api` with a run-time word that may carry a flag (`gh api repos/o/r/pulls/5/merge $X`) or a glued flag group the hook cannot read as one. Write the method and endpoint out in full.
+- `gh pr merge` with a word built at run time that is not a flag's value (`gh pr merge 5 $FLAGS`, `"$F"`), or a flag's value the shell would split (`-t $T`, `-t $(cat f)`, `-t "$@"`, `-t "${a[@]}"`, zsh's `"${=x}"`; a quoted `"$T"` passes). Write the PR number and every flag out in full.
+- A flag before the `gh` subcommand or before the `pr` action (`gh -R o/r pr merge 5`, `gh pr -t x merge 5`), because gh reads past it and the hook cannot tell where the action is. `-R` and `--repo` between `pr` and the action (`gh pr -R o/r merge 5`) still pass; before `pr` they are refused. Write the subcommand and action first, then the flags.
+- `gh api` with a run-time word that may carry a flag (`gh api repos/o/r/pulls/5/merge $X`, `gh api "$E" repos/o/r/pulls/5/merge`). This includes plain reads with an unquoted variable (`gh api repos/o/r/pulls/$N`); quote it (`"repos/o/r/pulls/$N"`). Write the method and endpoint out in full.
 
 It also refuses these three forms, whatever the record says, because they would skip the record check:
 
