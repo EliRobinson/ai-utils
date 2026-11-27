@@ -506,7 +506,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     const w = d && d.data ? d.data.chatWaiting : null;
     if (!w || typeof w !== "object") return null;
     const count = w.count;
-    if (typeof count !== "number" || !Number.isSafeInteger(count) || count <= 0) return null;
+    if (!Number.isSafeInteger(count) || count <= 0) return null;
     const parsed = typeof w.updatedAt === "string" ? Date.parse(w.updatedAt) : NaN;
     // A time in the future is as unreadable as no time: "update time unknown".
     const at = isFinite(parsed) && parsed - now <= AHEAD_MS ? parsed : NaN;
@@ -520,20 +520,22 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
   }
   // Every route with a count to show, in project name order (then doc id, so two routes
   // with one name keep a fixed order), their total, and how much of it is stale.
-  function chatWaiting(routes, now) {
+  function chatWaitingTotals(routes, now) {
     const list = (routes || []).map((d) => chatWaitingOf(d, now)).filter(Boolean)
       .sort((x, y) => x.project.localeCompare(y.project) || x.id.localeCompare(y.id));
     const sum = (ws) => ws.reduce((n, w) => n + w.count, 0);
     return { total: sum(list), staleTotal: sum(list.filter((w) => w.stale)), list };
   }
-  // The headline after the bold total. It says when part of the total may be old.
+  // The headline after the bold total. It says when part or all of the total may be old.
   function chatWaitingHead(cw) {
-    return " waiting on you in your chats" + (cw.staleTotal ? ", " + cw.staleTotal + " may be out of date" : "");
+    const old = !cw.staleTotal ? "" : cw.staleTotal === cw.total ? ", all of them may be out of date" : ", " + cw.staleTotal + " of them may be out of date";
+    return " waiting on you in your chats" + old;
   }
   // The summary when nothing on the board needs you: "all caught up" only when no chat
-  // waits on you either.
-  function caughtUp(hasRows, chatTotal) {
-    if (chatTotal) return "Nothing to click here.";
+  // waits on you either, as far as the page knows (chatsMayWait: a count shows, or the
+  // routes read failed).
+  function caughtUp(hasRows, chatsMayWait) {
+    if (chatsMayWait) return "Nothing to click here.";
     return hasRows ? "You’re all caught up." : "Nothing yet.";
   }
   // The words after a project's count: when it was updated, and whether it may be old.
@@ -546,7 +548,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
   let db = null, docs = null, comments = null, assets = null;
   const rowsOf = (snap) => snap.docs.filter((s) => s.exists).map((s) => ({ id: s.id, data: s.data() }));
   // The routes rows, read only for chatWaiting (see drawChats). The page never writes them.
-  let routes = null;
+  let routes = null, routesLost = false;
   let project = ALL, kind = ALL, lost = false;
   const openDetails = new Set();
   // Note boxes: row id -> { draft, pics }. Open while the id is in the map.
@@ -1070,9 +1072,9 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     project = view.project;
 
     // Summary across every project.
-    const cw = chatWaiting(routes, now);
+    const cw = chatWaitingTotals(routes, now);
     const sum = $("summary"); sum.replaceChildren();
-    if (!all.open.length) sum.append(caughtUp(docs.length > 0, cw.total));
+    if (!all.open.length) sum.append(caughtUp(docs.length > 0, cw.total > 0 || routesLost));
     else sum.append(el("span", {}, [el("strong", { text: String(all.open.length) }), all.open.length === 1 ? " needs you" : " need you"]));
     if (all.wait.length) sum.append(el("span", {}, [el("strong", { text: String(all.wait.length) }), " waiting for the chat"]));
     drawChats(cw, now);
@@ -1171,7 +1173,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     db.collection("routes").onSnapshot((snap) => {
       routes = rowsOf(snap);
       requestRender(false);
-    }, () => { routes = null; requestRender(false); });
+    }, () => { routes = null; routesLost = true; requestRender(false); });
     setTimeout(() => {
       if (docs || lost) return;
       showOpen(empty("Still loading your asks", "This is taking longer than usual.", reloadBtn()));

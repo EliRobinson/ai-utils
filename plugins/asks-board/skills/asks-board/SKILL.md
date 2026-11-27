@@ -21,7 +21,7 @@ Data: the artifact's `db`, read and written with the `ArtifactData` tool (load i
 
 - Only **coordinator chats** (the chats the user talks to directly) add or change asks.
 - Subagents never write to the board. They report the ask to their coordinator, and the coordinator adds it.
-- `routes`: each coordinator writes only its own project's row (`session`, `sessionId`, `chatWaiting`), always with `update`. The Board Router writes only `sessionId`. The page never writes it.
+- `routes`: each coordinator writes only its own project's row (`session`, `sessionId`, `chatWaiting`), with `update` once the row exists (add a missing row with `set`). The Board Router writes only `sessionId`. The page never writes `routes`.
 
 ## Add an ask
 
@@ -57,6 +57,7 @@ Chat-only asks are not board rows, so the board header shows a read-only count o
 
 - The count lives on your project's `routes` row, as `chatWaiting: {"count": <whole number>, "updatedAt": "<UTC ISO now>"}`. `count` is how many chat-only asks you have put to the user that have no typed answer yet.
 - Only project coordinators write it, and only on their own project's route. Subagents never write it.
+- If your route is missing, add it first (see the route rule under "If you are a project coordinator").
 - Set it each time you ask a chat-only question (the new count), as soon as the user's typed answer arrives (the new count, `0` when none are left), and at every check-in (see "Check in" step 5).
 - Write it with `update` and the row's `if_version`, changing only `chatWaiting`, so `session` and `sessionId` stay as they are. On a conflict, `get` the row again and write it again.
 - The page only reads it, and marks a count older than 24 hours "may be out of date". So keep `updatedAt` fresh: an old count tells the user nothing.
@@ -125,7 +126,7 @@ Each time the user ticks an ask, presses an option, marks it "Not needed" or sen
 
 - Watch the board with auto-replies armed (`ArtifactComments` `action: "watch"` list shows it). You are the only watcher.
 - On each ping: read the thread, take `project` and `ask` from the first line, look up `routes/<project>` with `ArtifactData` `get`.
-  - **Send by session id first.** `SendMessage` with `to` = the route's `sessionId` (a `local_...` id) wakes the chat even when it is closed or asleep: the result says "its turn has started". If `sessionId` is missing, find the chat by its exact title with `mcp__ccd_session_mgmt__list_sessions`, send to its id, and save `sessionId` on the route.
+  - **Send by session id first.** `SendMessage` with `to` = the route's `sessionId` (a `local_...` id) wakes the chat even when it is closed or asleep: the result says "its turn has started". If `sessionId` is missing, find the chat by its exact title with `mcp__ccd_session_mgmt__list_sessions`, send to its id, and save `sessionId` on the route with `update`.
   - Fallback only when the id send fails (archived, deleted, or another computer): run `ListAgents` and find every row with the route's chat name. Never send to an `offline` row when an online row (`idle` or `busy`) has the same name: send to the online one, as `<name> [ref]`, the newest if several. If all rows are `offline`, send to the newest (it queues) and say "Queued for <chat name>. That chat is closed now; it gets this when it opens." in the thread.
   - Message text: the first line, the event line and the note text if any, plus "Read the row, act, close it (status closed and ackAt in one write) or mark a note handled as the asks-board skill says, reply in thread <threadId> and resolve it. Do not reply to this message." Several pings for one chat can go in one message.
   - Then reply in the thread: "Sent to <chat name>." Nothing more.
