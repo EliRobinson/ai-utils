@@ -130,6 +130,7 @@ AGENT_ROSTER_README = AGENT_ROSTER / "README.md"
 ISSUE_TRACKER = SETUP_SKILL / "templates" / "docs-agents" / "issue-tracker.md"
 REPO_ISSUE_TRACKER = ROOT / "docs" / "agents" / "issue-tracker.md"
 REPO_MULTI_AGENT = ROOT / "docs" / "agents" / "multi-agent.md"
+HOOK_CHECK = SETUP_SKILL / "scripts" / "check-agent-hooks.mjs"
 REPO_CI_DOC = ROOT / "docs" / "agents" / "ci.md"
 PLACEHOLDER = re.compile(r"\{\{([A-Z_]+)\}\}")
 LEADING_COMMENT = re.compile(r"\A<!--(.*?)-->", re.S)
@@ -435,9 +436,11 @@ BRANCH_RULE_TERMS = {
 # The post-merge cleanup (#55): its section and its no-force guards stay in the
 # coordinator prompt and its filled copy, and the docs that link to it keep the link.
 CLEANUP_LINK = "coordinator-prompt.md#cleanup-after-a-merge"
-CLEANUP_TERMS = ["### cleanup after a merge", "if any check fails, delete nothing", "no `git branch -d`",
-                 "no `git worktree remove --force`", "git -c '<wt>' switch --detach <head>",
-                 "git -c '<wt>' status --porcelain --ignored"]
+CLEANUP_TERMS = ["### cleanup after a merge", "if any check fails, delete nothing", "no `git worktree remove --force`"]
+# Matched with case: the force delete `-D` must not turn into the `-d` that D4 runs.
+CLEANUP_NO_FORCE_DELETE = "no `git branch -D`"
+# The hook self-check's `CLEANUP` list holds the prompt's cleanup commands word for word.
+CLEANUP_LIST = re.compile(r"const CLEANUP = \[(.*?)\]\.map\(fill\);", re.S)
 CLEANUP_RULE_TERMS = {
     COORDINATOR_PROMPT: CLEANUP_TERMS,
     REPO_COORDINATOR_PROMPT: CLEANUP_TERMS,
@@ -468,7 +471,26 @@ def check_terms(table: dict[Path, list[str]], rule: str) -> None:
 
 def check_branch_rule_stated() -> None:
     check_terms(BRANCH_RULE_TERMS, "same-branch rule")
+
+
+def check_cleanup_rule_stated() -> None:
+    """The cleanup section keeps its guards, and still gives each command the hook self-check tests."""
     check_terms(CLEANUP_RULE_TERMS, "post-merge cleanup rule")
+    for path in (COORDINATOR_PROMPT, REPO_COORDINATOR_PROMPT):
+        if CLEANUP_NO_FORCE_DELETE not in (read_or_fail(path) or CLEANUP_NO_FORCE_DELETE):
+            fail(f"{rel(path)}: must contain {CLEANUP_NO_FORCE_DELETE!r} (with this case), part of the post-merge cleanup rule")
+    hooks = read_or_fail(HOOK_CHECK)
+    prompt = read_or_fail(COORDINATOR_PROMPT)
+    if hooks is None or prompt is None:
+        return
+    found = CLEANUP_LIST.search(hooks)
+    commands = re.findall(r'"([^"]+)"', found.group(1)) if found else []
+    if not commands:
+        fail(f"{rel(HOOK_CHECK)}: needs its `const CLEANUP = [...].map(fill);` list of the cleanup commands")
+    for command in commands:
+        if command not in prompt:
+            fail(f"{rel(COORDINATOR_PROMPT)}: must give the cleanup command {command!r} that "
+                 f"{rel(HOOK_CHECK)} tests; change both together")
 
 
 def default_merge_style() -> str | None:
@@ -1060,6 +1082,7 @@ def main() -> int:
 
     check_agent_roster_templates()
     check_branch_rule()
+    check_cleanup_rule_stated()
     check_unit_test_rule()
     agents = load_agents()
     check_agent_tool_policy(agents)

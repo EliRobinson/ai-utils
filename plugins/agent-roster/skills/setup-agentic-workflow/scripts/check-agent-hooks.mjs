@@ -120,23 +120,26 @@ try {
   const mcp = (tool, input, expect) => ({ hook: "review", hookDir: path.join(tree, "scripts"), cwd: tree, tool, input, expect });
   const fromTree = path.join(tree, "scripts");
   // The commands of "Cleanup after a merge" in the coordinator prompt, in order,
-  // with its quoting. Keep this list in step with the prompt.
+  // written exactly as the prompt writes them; validate-plugins.py checks that the
+  // prompt still has each one. `fill` turns a template into a command to run.
   const wt = `'${tree}'`;
+  const fill = (template) => template.replaceAll("'<wt>'", wt).replaceAll("<head>", HEAD).replaceAll("<branch>", BRANCH)
+    .replaceAll(" N ", " 5 ").replaceAll("/N/", "/5/").replaceAll("{{GITHUB_REPO}}", "o/r");
   const CLEANUP = [
-    "gh pr view 5 -R o/r --json state,headRefName,headRefOid,isCrossRepository",
-    `git -C ${wt} worktree list --porcelain`,
-    `git -C ${wt} status --porcelain --ignored`,
-    `git -C ${wt} fetch --prune origin`,
-    `git -C ${wt} fetch origin pull/5/head`,
-    `git -C ${wt} rev-list --count ${HEAD}..HEAD`,
-    `git -C ${wt} ls-remote origin 'refs/heads/${BRANCH}'`,
-    `git -C ${wt} push origin --delete '${BRANCH}'`,
-    `git -C ${wt} switch --detach ${HEAD}`,
-    `git -C ${wt} rev-parse --verify --quiet '${BRANCH}@{upstream}'`,
-    `git -C ${wt} branch --unset-upstream '${BRANCH}'`,
-    `git -C ${wt} branch -d '${BRANCH}'`,
-    `git -C ${wt} worktree remove ${wt}`,
-  ];
+    "gh pr view N -R {{GITHUB_REPO}} --json state,headRefName,headRefOid,baseRefName,isCrossRepository",
+    "git -C '<wt>' worktree list --porcelain",
+    "git -C '<wt>' status --porcelain --ignored",
+    "git -C '<wt>' fetch --prune origin",
+    "git -C '<wt>' fetch origin pull/N/head",
+    "git -C '<wt>' rev-list --count <head>..HEAD",
+    "git -C '<wt>' ls-remote origin 'refs/heads/<branch>'",
+    "git -C '<wt>' push origin --delete '<branch>'",
+    "git -C '<wt>' switch --detach <head>",
+    "git -C '<wt>' rev-parse --verify --quiet '<branch>@{upstream}'",
+    "git -C '<wt>' branch --unset-upstream '<branch>'",
+    "git -C '<wt>' branch -d '<branch>'",
+    "git -C '<wt>' worktree remove '<wt>'",
+  ].map(fill);
 
   const cases = [
     // The guard refuses writes in the main checkout.

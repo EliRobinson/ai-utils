@@ -34,7 +34,7 @@ Your own work is: split and route items, brief agents, track what they report, k
 
 ## Ownership
 
-Before an agent starts, add a row for its item to the ownership registry at `~/.claude/projects/<project-slug>/ACTIVE-OWNERSHIP.md`: ticket, branch, worktree and the files it will edit. Read the registry first, and message the owner of any row that overlaps. Remove the row after the merge and its cleanup ("Merging", step 8).
+Before an agent starts, add a row for its item to the ownership registry at `~/.claude/projects/<project-slug>/ACTIVE-OWNERSHIP.md`: ticket, branch, worktree and the files it will edit. Read the registry first, and message the owner of any row that overlaps. Remove the row when the cleanup after its merge is done ("Cleanup after a merge").
 
 ## Merging
 
@@ -55,7 +55,7 @@ The steps:
 5. Merge in the repo's merge style (squash; `docs/agents/git-workflow.md` names it), naming the head you tested: `gh pr merge N --squash --match-head-commit <sha> -R EliRobinson/ai-utils`. Never add `--admin`, which bypasses branch protection, and never merge another way. If GitHub refuses the merge because checks fail or a branch rule blocks it, stop and ask Eli, and say what blocks it; never retry it another way on your own.
 6. Check it worked: the PR shows merged, the ticket it closes is closed (if `docs/agents/issue-tracker.md` says the merge does not close it, have `ticket-writer` close it), the test gate still passes on `main`, and the `validate` run for the commit the merge made on `main` (`<merge-sha>`; a squash makes a new commit, so get it with `gh pr view N -R EliRobinson/ai-utils --json mergeCommit -q .mergeCommit.oid`) passed: find it with `gh run list -R EliRobinson/ai-utils -w ci -c <merge-sha> --json databaseId,status,conclusion`, then wait for it with `gh run watch <id> -R EliRobinson/ai-utils --exit-status`. If it fails, tell Eli in this chat and ask for a yes to file a ticket, and merge nothing else until `main` is green again.
 7. Clean up the item's branch and worktree, as "Cleanup after a merge" below says. Clean up even if `main` is red after the merge: the fix goes on a new branch.
-8. Remove the item's registry row, unless the cleanup kept it. Tell Eli in one or two lines, naming the head sha you merged, and put the cleanup line from "Cleanup after a merge" in the same message.
+8. Tell Eli in one or two lines, naming the head sha you merged, and put the cleanup line from "Cleanup after a merge" in the same message. The cleanup removes the item's registry row when it is done.
 
 ### Cleanup after a merge
 
@@ -67,30 +67,40 @@ Run every git command in the item's worktree with `git -C '<wt>'` (`<wt>` is its
 
 Run every check first. If any check fails, delete nothing.
 
-- **C1.** `gh pr view N -R EliRobinson/ai-utils --json state,headRefName,headRefOid,isCrossRepository`: `state` is `MERGED`, and `headRefName` is the branch the registry row names. Call it `<branch>`, and call `headRefOid` `<head>`: the PR's last commit, the one the merge took.
-- **C2.** The names are safe to put in a command: `<branch>` has only letters, digits and `. _ / -`, and does not start with `-`; `<head>` is 40 hex characters; `<wt>` is an absolute path with no `'` in it. Write `<wt>` and `<branch>` in single quotes in every command, as below.
+- **C1.** `gh pr view N -R EliRobinson/ai-utils --json state,headRefName,headRefOid,baseRefName,isCrossRepository`: `state` is `MERGED`, and `headRefName` is the branch the registry row names. Call it `<branch>`, and call `headRefOid` `<head>`: the PR's last commit, the one the merge took.
+- **C2.** The names are safe to put in a command: `<branch>` has only letters, digits and `. _ / -`, does not start with `-`, and is not `main` or the PR's `baseRefName`; `<head>` is 40 hex characters; `<wt>` is an absolute path with no `'`, newline or other control character in it. Write `<wt>` and `<branch>` in single quotes in every command, as below.
 - **C3.** `git -C '<wt>' worktree list --porcelain`: the first entry is the main checkout, and a later entry is `worktree <wt>` followed by `branch refs/heads/<branch>`. This proves `<wt>` is a linked worktree of this repo, on `<branch>`, and not the main checkout.
-- **C4.** `git -C '<wt>' status --porcelain --ignored` prints nothing but `!!` lines for files a build or install makes again (such as `node_modules/` or a build folder): no uncommitted changes and no untracked files. `worktree remove` deletes ignored files too, so a local `.env` file or notes file fails this check.
+- **C4.** `git -C '<wt>' status --porcelain --ignored` prints nothing, or only `!!` lines for files a build or install can make again (such as `node_modules/` or a build folder). Any uncommitted change, untracked file or other ignored file (a local `.env` file, a notes file) fails this check, because `worktree remove` deletes ignored files too.
 - **C5.** `git -C '<wt>' fetch --prune origin`, then `git -C '<wt>' fetch origin pull/N/head`, then `git -C '<wt>' rev-list --count <head>..HEAD` prints `0`: every commit in the worktree is in the merged PR. A commit made after the merge, pushed or not, shows up here.
 - **C6.** Skip this check for a PR from a fork (`isCrossRepository` is `true`): its branch is not on `origin`. Otherwise `git -C '<wt>' ls-remote origin 'refs/heads/<branch>'` prints nothing (GitHub already deleted the branch) or one line that starts with `<head>`. Any other sha means someone pushed to the branch after the merge.
 
 Then delete, in this order:
 
-- **D1.** If C6 printed a line: `git -C '<wt>' push origin --delete '<branch>'`.
-- **D2.** `git -C '<wt>' switch --detach <head>`. If `git -C '<wt>' rev-parse --verify --quiet '<branch>@{upstream}'` prints a sha, run `git -C '<wt>' branch --unset-upstream '<branch>'`. Then `git -C '<wt>' branch -d '<branch>'`. A squash or rebase merge puts new commits on `main`, so the branch is not in `main`. `-d` checks a branch against its upstream when that still exists, and `git worktree add -b` often sets the upstream to `origin/main`, so `-d` would refuse. With no upstream, `-d` checks the branch against `HEAD`, which is now `<head>`. C5 proved the branch is in `<head>`, so `-d` deletes it. If it still refuses, it found work that is not in the PR.
-- **D3.** `git -C '<wt>' worktree remove '<wt>'`. It refuses a worktree with changes: the last guard.
+- **D1.** If C6 printed a line: `git -C '<wt>' push origin --delete '<branch>'`. If it says the remote ref does not exist, GitHub deleted the branch in the meantime: go on to D2.
+- **D2.** `git -C '<wt>' switch --detach <head>`.
+- **D3.** If `git -C '<wt>' rev-parse --verify --quiet '<branch>@{upstream}'` prints a sha, run `git -C '<wt>' branch --unset-upstream '<branch>'`.
+- **D4.** `git -C '<wt>' branch -d '<branch>'`. If it refuses, it found work that is not in the PR.
+- **D5.** `git -C '<wt>' worktree remove '<wt>'`. It refuses a worktree with changes: the last guard.
+
+Why D2 and D3: after a squash or rebase merge, `<branch>` is not in `main`. `-d` compares a branch with its upstream when that still exists, and `git worktree add -b` often sets the upstream to `origin/main`, so `-d` would refuse. Detached at `<head>` with no upstream, `-d` compares `<branch>` with `<head>`, which C5 proved holds every commit.
 
 If a check fails or a command fails, stop. Add a `do` row to the Asks board that names the PR, `<branch>` and `<wt>`, and says what to do next:
 
-- C1, C3: "PR N cleanup stopped: the registry row and the PR disagree: <what differs>. Fix the row, then tick."
-- C2: "PR N cleanup stopped: <the name> is not safe to put in a command. Clean up `<branch>` and `<wt>` by hand, then tick."
-- C4, C5: "PR N cleanup stopped: `<wt>` has <the files or commits>, which are not in the PR. Save them somewhere else, such as a new branch and PR. Then put `<wt>` back on `<branch>` at `<head>` with nothing else in it, and tick."
-- C6: "PR N cleanup stopped: someone pushed `<sha>` to `<branch>` after the merge. Check with them, then tick."
-- D1 to D3: "PR N cleanup stopped at D<n>: `<command>` said <error>. Done so far: <steps>. Fix the cause, then tick."
+- C1, not merged: "PR N cleanup stopped: the PR shows `<state>`, not merged. Nothing was deleted. Check the merge, then tick."
+- C1, other branch: "PR N cleanup stopped: the registry row names `<row branch>`, but the PR's branch is `<branch>`. Fix the row, then tick."
+- C2: "PR N cleanup stopped: <the name> is not safe to put in a command. Delete `<branch>` here and on GitHub and remove `<wt>` by hand, then tick."
+- C3: "PR N cleanup stopped: `<wt>` is not a linked worktree of this repo on `<branch>`. `git worktree list` shows <what it shows>. Check the registry row and the worktree, then tick."
+- C4, C5: "PR N cleanup stopped: `<wt>` holds <the files or commits>, and the PR does not have them. Keep them somewhere else, such as a new branch and PR. Then leave `<wt>` on the same branch or commit, with no extra files or commits, and tick."
+- C6: "PR N cleanup stopped: someone pushed `<sha>` to `<branch>` on GitHub after the merge. Move that work to a new branch and PR if it is wanted, then delete `<branch>` on GitHub or reset it to `<head>`, and tick."
+- D1 to D5: "PR N cleanup stopped at D<n>: `<command>` said <error>. Done so far: <steps>. Fix the cause, then tick." When D5 says the worktree contains submodules, it cannot be removed without force: the row asks Eli to check that each submodule has nothing unpushed and to remove `<wt>` themselves.
 
-Keep the item's registry row until the cleanup is done, with `cleanup pending` and the step it stopped at in its notes: the row is what lets you clean up. When the row on the board is ticked, start again from C1 after a failed check. After a failed delete, run C4 and C5 again, then go on from the step that failed.
+Keep the item's registry row until the cleanup is done, with `cleanup pending` and the step it stopped at in its notes: the row is what lets you clean up. When the board row is ticked:
 
-The cleanup line for Eli: "Cleaned up PR N: `<branch>` is gone from GitHub and here, and `<wt>` is removed." or "PR N cleanup stopped: <why>. It is on the Asks board."
+- After a failed check (C1 to C6, with no delete done yet): start again from C1.
+- After a ticked C2 row: run no checks. The owner cleaned up by hand.
+- After a failed delete D<n>: resume. Run C4 and C5 again (and C6 too, if it stopped at D1), then go on from D<n>. From D2 on, `<wt>` is detached at `<head>`, and from D4 on, `<branch>` is gone: that is expected, so skip C3. If C4 or C5 fails now, add its row, keep D<n> in the notes, and resume the same way after the next tick. After a ticked D5 submodule row, check that `<wt>` is gone.
+
+When the cleanup is done, first time or after a resume, remove the registry row and send the cleanup line. The cleanup line for Eli: "Cleaned up PR N: `<branch>` is gone from GitHub and here, and `<wt>` is removed." For a PR from a fork: "Cleaned up PR N: `<branch>` is gone here and `<wt>` is removed. The branch on the fork is left to its owner." After a ticked C2 row: "PR N was cleaned up by hand." If it stopped: "PR N cleanup stopped: <why>. It is on the Asks board."
 
 ## The job
 

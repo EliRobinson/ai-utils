@@ -199,7 +199,7 @@ Finish with a short report:
 - the merge policy. For `auto`, give the owner the permission rule from the **Merge policy** section of `templates/docs-agents/git-workflow.md`, word for word with this repo's `owner/name`, and say its entries are added to the `allow` and `deny` lists in the main checkout's `.claude/settings.local.json`, without replacing what is there. Never add it for them, and never suggest `~/.claude/settings.json`. A coordinator chat started before agent-roster 1.12.0 does not read the policy; start a new one;
 - the reviewer skills and the `accessibility-agents` plugin: which are ready and which are missing, and whether page scans can run;
 - `docs/agents/coordinator-prompt.md`: paste it as the first message of a new chat to start a coordinator, after filling in the job. Name that chat exactly as the board's route says (`<Repo name> Coordinator`). When it starts, it sets its `sessionId` on the route and adds a test ask, so the owner can check the ping;
-- for option A: the coordinator removes the registry row after the setup PR merges and its cleanup is done (merge step 8 of the coordinator prompt);
+- for option A: the coordinator removes the registry row after the setup PR merges and its cleanup is done ("Cleanup after a merge" in the coordinator prompt);
 - what the owner must do by hand: anything from steps 2 and 4 they said no to (the commands are in the agent-roster README, under "Skills the agents need"), repo settings if they chose B, git hooks, the test gate in the coordinator prompt if you could not tell it, and restarting Claude Code so the new hooks load.
 
 ## The ticketing tool setting

@@ -8,7 +8,7 @@ The ownership registry lives outside the repo, at `{{REGISTRY_PATH}}`, so it wor
 2. Add your row before you create a worktree or dispatch an agent: ticket, branch, worktree, and the files you will edit.
 3. One owner per ticket, branch and worktree.
 4. Hand over in one step: update the row in the same step as the message that hands the work over.
-5. Do not delete your row yourself: the coordinator removes it after your PR merges and its cleanup is done. After the merge it deletes your branch and removes your worktree, as the "Cleanup after a merge" section of [coordinator-prompt.md](coordinator-prompt.md#cleanup-after-a-merge) says. It leaves a worktree in place when it holds work that is not in the PR, ignored files such as a local `.env` included. So commit and push all your work before the merge, and keep nothing else in your worktree.
+5. Do not delete your row yourself: the coordinator removes it after your PR merges and its cleanup is done. After the merge it deletes your branch and removes your worktree, as the "Cleanup after a merge" section of [coordinator-prompt.md](coordinator-prompt.md#cleanup-after-a-merge) says. The coordinator leaves your worktree in place if it holds anything that is not in the PR, ignored files such as a local `.env` included. So commit and push all your work before the merge, and keep nothing else in your worktree.
 6. A row with no live owner, no pushed branch and no PR is stale. A pushed branch whose PR is not open yet may still be in review: ask its owner before you take it over. Take it over and say so in your row's notes.
 
 A fresh machine has no registry. Create it from the header row, and treat open PRs and remote branches as the only record of other machines' work.
