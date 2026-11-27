@@ -1047,7 +1047,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
       else if (mine.open.length) box.append(empty("No " + KIND_LABEL[kind].toLowerCase() + " asks" + where, "",
         el("button", { class: "btn line", type: "button", "data-k": "empty-all",
           onclick: () => { focusNext = ALL_KINDS; setKind(ALL); } }, ["Show all kinds"])));
-      else box.append(empty("Nothing here needs you" + where, "New click asks show up here as soon as a chat adds them. Asks that need a typed answer come up in your chats."));
+      else box.append(empty("Nothing here needs you" + where, "New asks show up here as soon as a chat adds them. Asks that need a typed answer come up in your chats."));
     }
 
     // Waiting for the chat, and Closed (the newest 40; the count says when there are more).
