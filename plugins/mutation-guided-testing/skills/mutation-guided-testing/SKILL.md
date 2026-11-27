@@ -25,25 +25,26 @@ Do this for each commit-sized change, while you develop. It is not a review you 
 4. **Prove each concern.** Apply each bug, run the narrowest test command, see a failure, then revert. Fill in "caught by". A bug no test catches means a missing test, not a finished task: write or strengthen one and repeat. After the last revert, `git diff` must show only your intended changes.
 5. **Run the tool on the diff only.**
    ```bash
-   python3 <skill-dir>/scripts/diff_scope.py --json /tmp/scope.json   # prints the commands to run
+   S="$(git rev-parse --absolute-git-dir)/mgt-scope.json"   # one scope per worktree
+   python3 <skill-dir>/scripts/diff_scope.py --json "$S"    # prints the commands to run
    ```
-   The scope is the merge base against the default branch, plus uncommitted and untracked files, without tests, stories, fixtures and generated code. Run the commands it prints. Per language: [Go](reference/go.md), [Python](reference/python.md), [TypeScript](reference/typescript.md). Then rank the survivors:
+   The scope is the merge base against the default branch, plus uncommitted and untracked files, without tests, stories, fixtures and generated code. Run the commands it prints; for Python it prints the `[tool.mutmut]` config, then follow the Python reference. Per language: [Go](reference/go.md), [Python](reference/python.md), [TypeScript](reference/typescript.md). Then rank the survivors:
    ```bash
-   python3 <skill-dir>/scripts/survivors.py --scope /tmp/scope.json --gremlins DIR=report.json ...
+   python3 <skill-dir>/scripts/survivors.py --scope "$S" --gremlins DIR=report.json ...
    ```
-   It keeps mutants on changed lines, drops Tailwind/CSS class-string noise, ranks by risk, and shows at most **7 × changed source files**.
+   It keeps mutants on changed lines, drops Tailwind/CSS class-string noise, ranks by risk, shows at most **7 × changed source files**, and lists every changed line no test runs.
 6. **Triage every survivor shown.** A kill counts only if a test calls the code's public API, or renders and uses the component, and asserts the outcome. Each survivor ends one way:
    - **Killed:** preferably a stronger assertion in an existing test, or a new case in its table. Write a new test file only when no test covers the behaviour at all.
    - **Equivalent:** one line on why no input can tell the mutant from the original.
    - **Not worth testing:** one line naming the behaviour and why a wrong value is harmless, such as log wording.
 
-   Class-string mutants are visual-only: report the count, don't list them. Then re-run the tool on the files you touched to confirm the kills.
+   Class-string mutants are visual-only: report the count, don't list them. Then confirm the kills: if you changed source lines, re-run `diff_scope.py` first, then the tool on the files you touched.
 7. **Property-based tests** when the change touches parsing, serialization, money, dates, ranking or data transforms: Hypothesis (Python), fast-check (TypeScript), rapid (Go). When they don't apply (most UI components), say so.
 8. **Report** (in the PR body or the hand-off):
    - the concern table
    - the survivors and what happened to each
    - the diff mutation score, marked "not a gate"
-   - coverage only as a list of changed lines no test runs (the tool's "no coverage")
+   - coverage only as a list of changed lines no test runs (the "No coverage" line `survivors.py` prints)
    - existing tests that look tautological, with reasons. Never delete them in passing.
 
 ## Gates
@@ -70,7 +71,7 @@ Do this for each commit-sized change, while you develop. It is not a review you 
 
 | Thought | Reality |
 |---|---|
-| "Coverage is 98%, so it's tested" | A component library measured 98% line coverage and a 29% mutation score. |
+| "Coverage is 98%, so it's tested" | Line coverage can be high while most mutants survive. Coverage says a line ran, not that a test checked it. |
 | "The spec didn't ask about tenant or error cases" | Concerns come from the risk checklist, not only from the spec. |
 | "This survivor is equivalent", with no reason | Then it isn't. Name why no input tells them apart, or kill it. |
 | "I'll grep the source or pin the constant so the mutant dies" | That's a change detector. Test the behaviour the constant drives, or mark it "not worth testing". |

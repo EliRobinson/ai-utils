@@ -11,6 +11,7 @@ import copy
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,9 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS = os.path.dirname(HERE)
 FIXTURES = os.path.join(HERE, "fixtures")
+sys.path.insert(0, SCRIPTS)
+import survivors  # noqa: E402  (the pure helpers; the scripts themselves run as processes)
+
 # Keep the user's git config (signing, hooks, templates) out of the test repos.
 GIT_ENV = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
@@ -47,8 +51,8 @@ def fixture(name):
 class Repo:
     """A git repo whose `origin/main` is a base commit holding `base_files`."""
 
-    def __init__(self, test, base_files):
-        self.dir = os.path.realpath(tempfile.mkdtemp(prefix="mgt-test-"))
+    def __init__(self, test, base_files, prefix="mgt-test-"):
+        self.dir = os.path.realpath(tempfile.mkdtemp(prefix=prefix))
         test.addCleanup(shutil.rmtree, self.dir)
         run(self.dir, "git", "init", "-q", "-b", "main")
         self.commit(base_files)
@@ -60,18 +64,29 @@ class Repo:
         run(self.dir, "git", "add", "-A")
         run(self.dir, "git", "commit", "-qm", "change", "--allow-empty")
 
+    def scratch(self, name):
+        """A path under .git/, so test output never shows up in the diff."""
+        return os.path.join(self.dir, ".git", name)
+
     def diff_scope(self, *args, check=True):
         return run(self.dir, sys.executable, os.path.join(SCRIPTS, "diff_scope.py"), *args,
                    check=check)
 
     def scope(self):
-        out = os.path.join(self.dir, ".git", "scope.json")
+        out = self.scratch("scope.json")
         self.diff_scope("--base", "origin/main", "--json", out)
         with open(out) as f:
             return json.load(f)
 
+    def commands(self):
+        """diff_scope.py's suggested command lines, split as a shell would."""
+        out = self.diff_scope("--base", "origin/main").stdout
+        return [shlex.split(line, comments=True) for line in out.splitlines()
+                if line.startswith("  ") and not line.lstrip().startswith(("#", "go ", "ts ",
+                                                                             "python "))]
+
     def save(self, name, data):
-        path = os.path.join(self.dir, ".git", name)
+        path = self.scratch(name)
         with open(path, "w") as f:
             f.write(data if isinstance(data, str) else json.dumps(data))
         return path
@@ -81,15 +96,16 @@ class Repo:
                    "--scope", self.save("scope-in.json", scope), *args, check=check)
 
     def triage(self, scope, *args):
-        """survivors.py's --json result for these report arguments."""
-        out = os.path.join(self.dir, ".git", "triage.json")
-        self.survivors(scope, *args, "--json", out)
+        """survivors.py's --json result for these report arguments, and the process."""
+        out = self.scratch("triage.json")
+        proc = self.survivors(scope, *args, "--json", out)
         with open(out) as f:
-            return json.load(f)
+            return json.load(f), proc
 
 
 GO_BASE = {"svc/go.mod": "module example.com/svc\n\ngo 1.22\n",
            "svc/auth/auth.go": "package auth\n\nfunc A() int { return 1 }\n"}
+VITEST_PKG = '{"devDependencies":{"vitest":"5"}}'
 
 
 class DiffScopeTest(unittest.TestCase):
@@ -110,6 +126,7 @@ class DiffScopeTest(unittest.TestCase):
             "svc/auth/auth_test.go": "package auth\n",
             "web/src/Button.test.tsx": "x\n",
             "web/src/Button.stories.tsx": "x\n",
+            "web/src/types.d.mts": "x\n",
             "web/node_modules/lib/index.js": "x\n",
             "py/tests/test_load.py": "x\n",
             "py/conftest.py": "x\n",
@@ -124,10 +141,21 @@ class DiffScopeTest(unittest.TestCase):
         self.repo.commit({"py/scope.py": '# Skips files headed "DO NOT EDIT" or @generated.\nX = 1\n'})
         self.assertEqual(self.paths(), ["py/scope.py"])
 
+    def test_esm_and_cjs_typescript_files_are_targets(self):
+        self.repo.commit({"web/a.mts": "export const a = 1;\n", "web/b.cts": "exports.b = 1;\n"})
+        self.assertEqual(self.paths(), ["web/a.mts", "web/b.cts"])
+
     def test_records_only_added_or_changed_lines(self):
         self.repo.commit({"svc/auth/auth.go":
                           "package auth\n\nfunc A() int { return 2 }\n\nfunc B() {}\n"})
         self.assertEqual(self.repo.scope()["files"][0]["lines"], [[3, 5]])
+
+    def test_git_diff_prefix_settings_do_not_change_the_paths(self):
+        for key in ("diff.noprefix", "diff.mnemonicPrefix"):
+            with self.subTest(key):
+                run(self.repo.dir, "git", "config", key, "true")
+                self.repo.commit({"svc/auth/auth.go": f"package auth\n\n// {key}\n"})
+                self.assertEqual(self.paths(), ["svc/auth/auth.go"])
 
     def test_pure_deletion_leaves_nothing_to_mutate(self):
         self.repo.commit({"svc/auth/auth.go": "package auth\n"})
@@ -137,10 +165,6 @@ class DiffScopeTest(unittest.TestCase):
         self.repo.commit({"svc/auth/auth.go": "package auth\n\nfunc A() int { return 3 }\n"})
         f = self.repo.scope()["files"][0]
         self.assertEqual((f["root"], f["package"]), ("svc", "./auth"))
-
-    def test_survivor_cap_is_seven_per_changed_file(self):
-        self.repo.commit({f"svc/auth/f{i}.go": "package auth\n" for i in range(3)})
-        self.assertEqual(self.repo.scope()["survivor_cap"], 21)
 
     def test_ts_file_gets_runner_from_package_json(self):
         cases = [({"devDependencies": {"vitest": "5"}}, "vitest"),
@@ -154,11 +178,10 @@ class DiffScopeTest(unittest.TestCase):
                 self.assertEqual(f["runner"], runner)
 
     def test_ts_root_is_where_the_runner_or_stryker_config_lives(self):
-        vitest = '{"devDependencies":{"vitest":"5"}}'
         cases = [
-            ("runner one level up", {"ui/package.json": vitest, "ui/react/package.json": "{}"},
+            ("runner one level up", {"ui/package.json": VITEST_PKG, "ui/react/package.json": "{}"},
              "ui"),
-            ("stryker config wins", {"ui/package.json": vitest, "ui/react/package.json": "{}",
+            ("stryker config wins", {"ui/package.json": VITEST_PKG, "ui/react/package.json": "{}",
                                      "ui/react/stryker.config.mjs": "export default {}"},
              "ui/react"),
             ("no runner anywhere", {"ui/package.json": "{}", "ui/react/package.json": "{}"},
@@ -171,11 +194,31 @@ class DiffScopeTest(unittest.TestCase):
                 self.assertEqual(repo.scope()["files"][0]["root"], root)
 
     def test_stryker_command_runs_only_the_files_own_tests(self):
-        self.repo.commit({"web/package.json": '{"devDependencies":{"vitest":"5"}}',
+        self.repo.commit({"web/package.json": VITEST_PKG,
                           "web/src/a.ts": "export const a = 1;\n",
                           "web/src/a.test.ts": "x\n"})
-        out = self.repo.diff_scope("--base", "origin/main").stdout
-        self.assertIn('--testFiles "src/a.test.ts"', out)
+        argv = self.repo.commands()[0]
+        self.assertEqual(argv[argv.index("--testFiles") + 1], "src/a.test.ts")
+
+    def test_file_names_reach_the_command_as_literal_arguments(self):
+        name = "src/a$(touch pwned) '\"b.ts"
+        self.repo.commit({"web/package.json": VITEST_PKG, f"web/{name}": "export const a = 1;\n"})
+        argv = self.repo.commands()[0]
+        self.assertEqual(argv[argv.index("--mutate") + 1], f"{name}:1-1")
+
+    def test_notes_what_the_suggested_commands_lack(self):
+        cases = {
+            "ts file without its own tests": ({"web/package.json": VITEST_PKG,
+                                               "web/src/a.ts": "export const a = 1;\n"},
+                                              "no sibling tests for web/src/a.ts"),
+            "python file without pyproject": ({"py/pkg/m.py": "X = 1\n"},
+                                              "no pyproject.toml above py/pkg/m.py"),
+        }
+        for name, (files, note) in cases.items():
+            with self.subTest(name):
+                repo = Repo(self, {})
+                repo.commit(files)
+                self.assertIn(note, repo.diff_scope("--base", "origin/main").stdout)
 
     def test_without_base_uses_origin_main(self):
         self.repo.commit({"svc/auth/a.go": "package auth\n"})
@@ -213,51 +256,70 @@ class GremlinsSurvivorsTest(unittest.TestCase):
         self.repo.commit({"svc/auth/auth.go": AUTH_GO})
         self.scope = self.repo.scope()
 
-    def triage(self, report=None, **scope_changes):
+    def triage(self, report=None, *args, **scope_changes):
         rep = self.repo.save("grem.json", report or fixture("gremlins-report.json"))
-        return self.repo.triage(dict(self.scope, **scope_changes), "--gremlins", f"svc/auth={rep}")
+        return self.repo.triage(dict(self.scope, **scope_changes),
+                                "--gremlins", f"svc/auth={rep}", *args)
 
     def test_killed_and_timed_out_count_as_killed_and_not_viable_is_left_out(self):
-        t = self.triage()
+        t, _ = self.triage()
         self.assertEqual((t["on_diff"], t["killed"]), (4, 2))
 
     def test_not_covered_is_a_survivor_with_no_coverage(self):
-        t = self.triage()
+        t, _ = self.triage()
         self.assertIn((11, "no coverage"), [(m["line"], m["status"]) for m in t["alive"]])
+
+    def test_not_covered_lines_are_listed_in_full(self):
+        t, proc = self.triage(None, "--cap", "0")
+        shown = {"JSON": t["no_coverage"], "printed": re.findall(r"svc/auth/auth\.go:11",
+                                                                 proc.stdout)}
+        for where, found in shown.items():
+            with self.subTest(where):
+                self.assertEqual(found, ["svc/auth/auth.go:11"])
 
     def test_mutants_outside_the_diff_are_ignored(self):
         run(self.repo.dir, "git", "update-ref", "refs/remotes/origin/main", "HEAD")
         self.repo.commit({"svc/auth/auth.go": AUTH_GO.replace("n + 1", "n + 2")})
         self.scope = self.repo.scope()
-        self.assertEqual([m["line"] for m in self.triage()["alive"]], [11])
+        self.assertEqual([m["line"] for m in self.triage()[0]["alive"]], [11])
+
+    def test_two_mutants_of_one_kind_on_one_line_count_separately(self):
+        rep = fixture("gremlins-report.json")
+        rep["files"][0]["mutations"] = [
+            {"type": "CONDITIONALS_BOUNDARY", "status": status, "line": 7, "column": col}
+            for status, col in (("KILLED", 9), ("LIVED", 13))]
+        self.assertEqual([m["column"] for m in self.triage(rep)[0]["alive"]], [13])
 
     def test_stronger_mutator_ranks_first(self):
-        self.assertEqual([m["line"] for m in self.triage()["alive"]], [7, 11])
+        self.assertEqual([m["line"] for m in self.triage()[0]["alive"]], [7, 11])
 
     def test_same_mutation_ranks_first_on_a_risky_line(self):
         rep = fixture("gremlins-report.json")
         rep["files"][0]["mutations"] = [
             {"type": "CONDITIONALS_NEGATION", "status": "LIVED", "line": ln, "column": 5}
             for ln in (4, 7)]  # `if !ok {` vs `return org != ""`
-        self.assertEqual([m["line"] for m in self.triage(rep)["alive"]], [7, 4])
+        self.assertEqual([m["line"] for m in self.triage(rep)[0]["alive"]], [7, 4])
+
+    def test_survivor_cap_is_seven_per_changed_file(self):
+        t, _ = self.triage(None, files=self.scope["files"] * 3)
+        self.assertEqual(t["cap"], 21)
 
     def test_list_is_capped(self):
-        scope = dict(self.scope, survivor_cap=1)
-        out = os.path.join(self.repo.dir, ".git", "capped.json")
-        rep = self.repo.save("grem.json", fixture("gremlins-report.json"))
-        printed = self.repo.survivors(scope, "--gremlins", f"svc/auth={rep}", "--json", out).stdout
-        with open(out) as f:
-            shown = {"JSON list": len(json.load(f)["alive"]),
-                     "printed table": len(re.findall(r"^\| \d+ \|", printed, re.M))}
+        t, proc = self.triage(None, "--cap", "1")
+        shown = {"JSON list": len(t["alive"]),
+                 "printed table": len(re.findall(r"^\| \d+ \|", proc.stdout, re.M))}
         for name, count in shown.items():
             with self.subTest(name):
                 self.assertEqual(count, 1)
 
-    def test_warns_when_kills_are_too_fast_to_be_real(self):
+    def test_kills_too_fast_to_be_real_mark_the_score_suspect(self):
         rep = dict(fixture("gremlins-report.json"), mutants_lived=0, elapsed_time=0.05)
-        path = self.repo.save("fast.json", rep)
-        out = self.repo.survivors(self.scope, "--gremlins", f"svc/auth={path}")
-        self.assertIn("build failures", out.stderr)
+        _, proc = self.triage(rep)
+        cases = {"warning": "build is failing" in proc.stderr,
+                 "score line": bool(re.search(r"^Diff mutation score.*suspect", proc.stdout, re.M))}
+        for where, found in cases.items():
+            with self.subTest(where):
+                self.assertTrue(found, proc)
 
 
 class StrykerSurvivorsTest(unittest.TestCase):
@@ -288,25 +350,48 @@ class StrykerSurvivorsTest(unittest.TestCase):
         return sorted((m["line"], m["mutator"], m["status"]) for m in t["alive"])
 
     def test_survivors_and_no_coverage_are_listed_and_the_rest_are_not(self):
-        self.assertEqual(self.alive(self.triage()), [
+        self.assertEqual(self.alive(self.triage()[0]), [
             (1, "BlockStatement", "no coverage"),
             (3, "StringLiteral", "survived"),
             (4, "ConditionalExpression", "survived"),
         ])
 
     def test_class_string_survivors_are_counted_as_noise(self):
-        self.assertEqual(self.triage()["noise"], 1)
+        self.assertEqual(self.triage()[0]["noise"], 1)
 
     def test_a_mutant_killed_by_either_test_set_counts_once_as_killed(self):
         stories = self.with_status("2", "Killed")
-        t = self.triage(self.report, stories)
+        t, _ = self.triage(self.report, stories)
         self.assertNotIn((4, "ConditionalExpression", "survived"), self.alive(t))
 
     def test_absolute_file_names_map_to_repo_paths(self):
         rep = copy.deepcopy(self.report)
         rep["files"] = {os.path.join(self.repo.dir, "web/src/select.tsx"):
                         rep["files"]["src/select.tsx"]}
-        self.assertEqual(self.alive(self.triage(rep)), self.alive(self.triage()))
+        self.assertEqual(self.alive(self.triage(rep)[0]), self.alive(self.triage()[0]))
+
+    def test_file_names_outside_the_repo_are_left_out_with_a_warning(self):
+        rep = copy.deepcopy(self.report)
+        rep["files"] = {"../../outside.tsx": rep["files"]["src/select.tsx"]}
+        t, proc = self.triage(rep)
+        self.assertEqual((t["alive"], "outside the repo" in proc.stderr), ([], True))
+
+
+class ClassStringTest(unittest.TestCase):
+    CASES = [
+        ('"h-8 px-2 text-sm"', True),
+        ("'flex items-center gap-2'", True),
+        ('"Choose one"', False),       # words, no utility class
+        ('"org-admin"', False),        # one hyphenated value
+        ('"x-api-key"', False),
+        ('"aria-disabled"', False),
+        ('"2024-01-01"', False),
+    ]
+
+    def test_only_class_lists_are_noise(self):
+        for literal, noise in self.CASES:
+            with self.subTest(literal):
+                self.assertEqual(survivors.is_class_string("StringLiteral", literal), noise)
 
 
 PRICES_PY = '''
@@ -329,22 +414,45 @@ class MutmutSurvivorsTest(unittest.TestCase):
     def setUp(self):
         self.repo = Repo(self, {"py/pyproject.toml": "[project]\nname='x'\n"})
 
-    def survivors(self, source):
+    def survivors(self, source, show=None):
         self.repo.commit({"py/pkg/prices.py": source})
-        show = self.repo.save("show.txt", fixture("mutmut-show.txt"))
-        out = os.path.join(self.repo.dir, ".git", "t.json")
-        proc = self.repo.survivors(self.repo.scope(), "--mutmut", f"py={show}", "--json", out)
-        with open(out) as f:
-            return json.load(f), proc
+        path = self.repo.save("show.txt", show or fixture("mutmut-show.txt"))
+        return self.repo.triage(self.repo.scope(), "--mutmut", f"py={path}")
 
     def test_function_relative_hunks_map_to_file_lines(self):
         t, _ = self.survivors(PRICES_PY)
         self.assertEqual(sorted((m["line"], m["status"]) for m in t["alive"]),
                          [(9, "survived"), (11, "no coverage")])
 
+    def test_each_status_maps_to_its_outcome(self):
+        cases = {"suspicious": [(9, "survived")], "timeout": [], "not checked": [],
+                 "skipped": []}
+        for status, alive in cases.items():
+            with self.subTest(status):
+                show = fixture("mutmut-show.txt").replace(": survived", f": {status}")
+                t, _ = self.survivors(PRICES_PY, show)
+                self.assertEqual([(m["line"], m["status"]) for m in t["alive"]
+                                  if m["line"] == 9], alive)
+
+    def test_score_is_not_given_for_a_survivors_only_report(self):
+        _, proc = self.survivors(PRICES_PY)
+        self.assertIn("score for mutmut: n/a", proc.stdout)
+
     def test_a_mutant_whose_function_is_gone_is_reported_not_dropped_silently(self):
         _, proc = self.survivors(PRICES_PY.replace("def infer_price", "def median_price"))
         self.assertIn("cannot find the function", proc.stderr)
+
+
+class DefLineTest(unittest.TestCase):
+    LINES = ("class Foo:", "    def validate(self):", "        pass",
+             "class Bar:", "    def validate(self):", "        pass",
+             "def validate():", "    pass")
+
+    def test_finds_the_def_mutmut_names(self):
+        cases = {"Barǁvalidate": 5, "Fooǁvalidate": 2, "validate": 7, "Bazǁvalidate": None}
+        for func, line in cases.items():
+            with self.subTest(func):
+                self.assertEqual(survivors.def_line(self.LINES, func), line)
 
 
 class SurvivorsInputTest(unittest.TestCase):
@@ -352,16 +460,19 @@ class SurvivorsInputTest(unittest.TestCase):
         repo = Repo(self, GO_BASE)
         scope = repo.scope()
         bad_json = repo.save("bad.json", "{not json")
+        rep = ["--gremlins", f"svc/auth={repo.save('g.json', fixture('gremlins-report.json'))}"]
         cases = {
-            "no report": [],
-            "missing file": ["--gremlins", "svc/auth=/no/such/report.json"],
-            "invalid JSON": ["--stryker", f"web={bad_json}"],
-            "no ROOT=": ["--gremlins", bad_json],
+            "no report": (scope, []),
+            "missing file": (scope, ["--gremlins", "svc/auth=/no/such/report.json"]),
+            "invalid JSON": (scope, ["--stryker", f"web={bad_json}"]),
+            "no ROOT=": (scope, ["--gremlins", bad_json]),
+            "not a scope file": (fixture("stryker-report.json"), rep),
+            "another repo's scope": (dict(scope, repo="/elsewhere"), rep),
         }
-        for name, args in cases.items():
+        for name, (scope_in, args) in cases.items():
             with self.subTest(name):
-                out = repo.survivors(scope, *args, check=False)
-                self.assertEqual((out.returncode, "Traceback" in out.stderr), (1, False))
+                out = repo.survivors(scope_in, *args, check=False)
+                self.assertEqual((out.returncode, "Traceback" in out.stderr), (1, False), out)
 
 
 GO_MODULES = {
@@ -376,6 +487,8 @@ GO_MODULES = {
                          "func Over(n int) bool { return n > lib.One() }\n"),
     "svc/calc/a.go": "package calc\n\nfunc a() int { return 1 }\n",
     "svc/calc/data.go": "package calc\n\nfunc data() int { return 2 }\n",
+    "svc/calc/util.go": "package calc\n\nfunc util() int { return 3 }\n",
+    "svc/calc/sub/util.go": "package sub\n\nfunc Util() int { return 4 }\n",
     "svc/calc/calc_test.go": ("package calc\n\nimport \"testing\"\n\n"
                               "func TestOver(t *testing.T) {\n"
                               "\tif !Over(5) || Over(0) { t.Fatal() }\n}\n"),
@@ -383,43 +496,50 @@ GO_MODULES = {
 }
 
 
+def go_mutate(repo_dir, out, *args, env=None):
+    return run(repo_dir, "bash", os.path.join(SCRIPTS, "go_mutate.sh"), "svc",
+               "--out", out, *args, check=False, env=env)
+
+
 class GoMutateTest(unittest.TestCase):
-    """go_mutate.sh against fixtures/fake-gremlins, which logs each call."""
+    """go_mutate.sh against fixtures/fake-gremlins, which logs each call. The
+    repo path has a space in it, as some home folders do."""
 
     def setUp(self):
-        self.repo = Repo(self, GO_MODULES)
-        bin_dir = os.path.join(self.repo.dir, ".git", "bin")
-        os.makedirs(bin_dir)
-        self.gremlins = os.path.join(bin_dir, "gremlins")
+        self.repo = Repo(self, GO_MODULES, prefix="mgt test-")
+        os.makedirs(self.repo.scratch("bin"))
+        self.gremlins = self.repo.scratch("bin/gremlins")
         shutil.copy(os.path.join(FIXTURES, "fake-gremlins"), self.gremlins)
         os.chmod(self.gremlins, 0o755)
-        self.log = os.path.join(self.repo.dir, ".git", "gremlins.log")
-        self.out = os.path.join(self.repo.dir, ".git", "out")
+        self.log = self.repo.scratch("gremlins.log")
+        self.out = self.repo.scratch("out")
 
-    def go_mutate(self, *args, report=None):
+    def go_mutate(self, *args, report=None, env=None):
         report = report or os.path.join(FIXTURES, "gremlins-report.json")
-        return run(self.repo.dir, "bash", os.path.join(SCRIPTS, "go_mutate.sh"), "svc",
-                   "--out", self.out, *args, check=False,
-                   env={"GREMLINS": self.gremlins, "FAKE_LOG": self.log, "FAKE_REPORT": report})
+        return go_mutate(self.repo.dir, self.out, *args,
+                         env={"GREMLINS": self.gremlins, "FAKE_LOG": self.log,
+                              "FAKE_REPORT": report, **(env or {})})
 
-    def calls(self, *args):
-        self.go_mutate(*args)
+    def calls(self, *args, env=None):
+        self.go_mutate(*args, env=env)
         with open(self.log) as f:
             return [json.loads(line) for line in f]
 
     def test_relative_replace_paths_are_absolute_in_the_copy_gremlins_builds(self):
         gomod = self.calls("./calc")[0]["gomod"]
-        cases = {"replace line": f"=> {self.repo.dir}/lib\n",
+        cases = {"replace line": f'=> "{self.repo.dir}/lib"\n',
                  "replace block": f'=> "{self.repo.dir}/svc/third_party/other"\n'}
         for name, wanted in cases.items():
             with self.subTest(name):
                 self.assertIn(wanted, gomod)
 
     def test_passes_the_trap_workarounds_to_gremlins(self):
-        call = self.calls("./calc")[0]
+        call = self.calls("./calc", env={"GOFLAGS": "-mod=mod"})[0]
         argv = " ".join(call["argv"])
         cases = {
             "no cached test results": "-count=1" in call["goflags"].split(),
+            "user's GOFLAGS kept": "-mod=mod" in call["goflags"].split(),
+            "no go.work": call["gowork"] == "off",
             "wide timeout": "--timeout-coefficient 10" in argv,
             "logical mutator on": "--invert-logical" in call["argv"],
         }
@@ -431,39 +551,49 @@ class GoMutateTest(unittest.TestCase):
         self.assertIn("--integration", self.calls("./untested")[0]["argv"])
 
     def test_only_unchanged_files_are_excluded(self):
-        argv = self.calls("--files", "calc/data.go", "./calc")[0]["argv"]
+        argv = self.calls("--files", "calc/data.go calc/sub/util.go", "./calc")[0]["argv"]
         patterns = [argv[i + 1] for i, a in enumerate(argv) if a == "--exclude-files"]
-        cases = {"calc/a.go": True, "calc/calc.go": True, "calc/data.go": False}
+        cases = {"calc/a.go": True, "calc/calc.go": True, "calc/util.go": True,
+                 "calc/data.go": False, "calc/sub/util.go": False}
         for path, excluded in cases.items():
             with self.subTest(path):
                 self.assertEqual(any(re.search(p, path) for p in patterns), excluded, patterns)
 
-    def test_prints_the_survivors_argument(self):
-        out = self.go_mutate("./calc").stdout
-        self.assertEqual(out.strip(), f"--gremlins svc/calc={os.path.realpath(self.out)}/calc.json")
+    def test_prints_one_survivors_argument_per_package(self):
+        out = self.go_mutate("./calc", "./untested").stdout
+        self.assertEqual([shlex.split(line) for line in out.splitlines()],
+                         [["--gremlins", f"svc/calc={self.out}/1-calc.json"],
+                          ["--gremlins", f"svc/untested={self.out}/2-untested.json"]])
 
-    def test_a_run_where_no_mutant_ran_fails(self):
-        rep = fixture("gremlins-report.json")
-        for m in rep["files"][0]["mutations"]:
+    def test_a_run_that_does_not_count_fails(self):
+        none_ran = fixture("gremlins-report.json")
+        for m in none_ran["files"][0]["mutations"]:
             m["status"] = "NOT COVERED"
-        out = self.go_mutate("./calc", report=self.repo.save("none-ran.json", rep))
-        self.assertEqual((out.returncode, "Runnable: 0" in out.stderr), (1, True))
+        cases = {"no mutant ran": (none_ran, "Runnable: 0"),
+                 "unreadable report": ("{not json", "cannot read the report")}
+        for name, (report, message) in cases.items():
+            with self.subTest(name):
+                out = self.go_mutate("./calc", report=self.repo.save(f"{name}.json", report))
+                self.assertEqual((out.returncode, message in out.stderr), (1, True), out.stderr)
 
 
 @unittest.skipUnless(os.environ.get("GREMLINS") and shutil.which("go"),
                      "set GREMLINS to a gremlins binary (and install go) to run real Gremlins")
 class RealGremlinsTest(unittest.TestCase):
-    def test_relative_replace_does_not_turn_every_mutant_into_a_kill(self):
-        repo = Repo(self, {k: v for k, v in GO_MODULES.items()
-                           if not k.startswith("svc/third_party")}
-                    | {"svc/go.mod": GO_MODULES["svc/go.mod"].split("\nreplace (")[0]})
-        out_dir = os.path.join(repo.dir, ".git", "out")
-        out = run(repo.dir, "bash", os.path.join(SCRIPTS, "go_mutate.sh"), "svc",
-                  "--out", out_dir, "./calc", check=False)
-        with open(os.path.join(out_dir, "calc.json")) as f:
-            rep = json.load(f)
-        # `n > 1` -> `n >= 1` survives (no test at n == 1); a build failure would kill it.
-        self.assertGreaterEqual(rep["mutants_lived"], 1, out.stderr)
+    def test_a_real_survivor_reaches_the_triage_list(self):
+        base = {k: v for k, v in GO_MODULES.items()
+                if not k.startswith("svc/third_party") and k != "svc/calc/calc.go"}
+        base["svc/go.mod"] = GO_MODULES["svc/go.mod"].split("\nreplace (")[0]
+        repo = Repo(self, base)
+        repo.commit({"svc/calc/calc.go": GO_MODULES["svc/calc/calc.go"]})
+        out_dir = repo.scratch("out")
+        proc = go_mutate(repo.dir, out_dir, "--files", "calc/calc.go", "./calc")
+        arg = proc.stdout.split()[-1]
+        t, _ = repo.triage(repo.scope(), "--gremlins", arg)
+        # `n > 1` -> `n >= 1` survives (no test at n == 1); a build failure would kill it,
+        # and a file name survivors.py can't map would drop it.
+        self.assertIn(("svc/calc/calc.go", 5), [(m["file"], m["line"]) for m in t["alive"]],
+                      proc.stderr)
 
 
 if __name__ == "__main__":

@@ -16,17 +16,14 @@ import argparse
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 
-SURVIVOR_CAP_PER_FILE = 7
-
-LANG_BY_EXT = {
-    ".go": "go",
-    ".py": "python",
-    ".ts": "ts", ".tsx": "ts", ".js": "ts", ".jsx": "ts", ".mjs": "ts", ".cjs": "ts",
-}
+TS_EXTS = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs")
+LANG_BY_EXT = {".go": "go", ".py": "python", **{ext: "ts" for ext in TS_EXTS}}
 ROOT_MARKER = {"go": "go.mod", "python": "pyproject.toml"}
+TEST_SUFFIXES = (".test", ".spec")
 
 # Paths that are never mutation targets, whatever their extension.
 EXCLUDE_PATTERNS = [
@@ -34,8 +31,8 @@ EXCLUDE_PATTERNS = [
     r"(^|/)(test|tests|__tests__|testdata|fixtures|__mocks__|e2e)/",
     r"_test\.go$",
     r"(^|/)(test_[^/]*|[^/]*_test|conftest)\.py$",
-    r"\.(test|spec|stories|story)\.[cm]?[jt]sx?$",
-    r"\.d\.ts$",
+    r"(%s)\.[cm]?[jt]sx?$" % "|".join(re.escape(s) for s in (*TEST_SUFFIXES, ".stories", ".story")),
+    r"\.d\.[cm]?ts$",
     r"(^|/)[^/]*\.config\.[cm]?[jt]s$",
     r"(^|/)(migrations|codemods)/",
 ]
@@ -51,7 +48,6 @@ GENERATED_RE = re.compile(
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 STRYKER_CONFIGS = ("stryker.config.mjs", "stryker.config.js", "stryker.config.json",
                    "stryker.conf.json", "stryker.conf.js", "stryker.conf.mjs")
-TEST_SUFFIXES = (".test", ".spec")
 
 
 def git(repo, *args):
@@ -70,13 +66,23 @@ def default_base(repo):
     sys.exit("diff_scope: no origin/HEAD, origin/main or origin/master; pass --base")
 
 
+def diff_path(field):
+    """The path on a `+++ ` line, or None for /dev/null. Unquotes a C-quoted
+    name, and drops the `b/` prefix and the tab git adds after a name with a space."""
+    if field.startswith('"'):
+        raw = field[1:field.rindex('"')]
+        field = raw.encode("utf-8").decode("unicode_escape").encode("latin-1").decode("utf-8")
+    else:
+        field = field.split("\t", 1)[0]
+    return None if field == "/dev/null" else field[2:]
+
+
 def parse_hunks(diff_text):
     """Map each file in a `git diff -U0` to its added or changed line ranges."""
     ranges, current = {}, None
     for line in diff_text.splitlines():
         if line.startswith("+++ "):
-            path = line[4:]
-            current = None if path == "/dev/null" else path[2:]
+            current = diff_path(line[4:])
             if current is not None:
                 ranges.setdefault(current, [])
         elif current is not None:
@@ -104,112 +110,107 @@ def is_target(repo, rel):
     return not GENERATED_RE.search(head)
 
 
-def nearest(repo, rel, marker):
-    """Repo-relative dir of the closest ancestor holding `marker`, or None."""
+def nearest(repo, rel, pred):
+    """Repo-relative dir of the closest ancestor of `rel` for which
+    `pred(absolute dir)` holds, or None."""
     d = os.path.dirname(rel)
     while True:
-        if os.path.isfile(os.path.join(repo, d, marker)):
+        if pred(os.path.join(repo, d)):
             return d or "."
         if not d:
             return None
         d = os.path.dirname(d)
 
 
-def ts_runner(repo, root):
-    """vitest or jest when package.json declares it, else Stryker's command runner."""
+def has(*names):
+    return lambda here: any(os.path.isfile(os.path.join(here, n)) for n in names)
+
+
+def ts_runner(here):
+    """vitest or jest when here/package.json declares it, else Stryker's command runner."""
     try:
-        with open(os.path.join(repo, root, "package.json")) as f:
+        with open(os.path.join(here, "package.json")) as f:
             pkg = json.load(f)
     except (OSError, ValueError):
         return "command"
     deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
-    for runner in ("vitest", "jest"):
-        if runner in deps:
-            return runner
-    return "command"
+    return next((r for r in ("vitest", "jest") if r in deps), "command")
 
 
 def ts_root(repo, rel):
     """Where to run Stryker: the closest ancestor with a Stryker config, else the
     closest package.json that declares a test runner, else the closest package.json.
     Workspaces often keep the runner one level above the package that holds the file."""
-    first = runner_root = None
-    d = os.path.dirname(rel)
-    while True:
-        here = os.path.join(repo, d)
-        if any(os.path.isfile(os.path.join(here, c)) for c in STRYKER_CONFIGS):
-            return d or "."
-        if os.path.isfile(os.path.join(here, "package.json")):
-            first = first or (d or ".")
-            if runner_root is None and ts_runner(repo, d or ".") != "command":
-                runner_root = d or "."
-        if not d:
-            return runner_root or first or "."
-        d = os.path.dirname(d)
+    return (nearest(repo, rel, has(*STRYKER_CONFIGS))
+            or nearest(repo, rel, lambda here: ts_runner(here) != "command")
+            or nearest(repo, rel, has("package.json")))
 
 
 def own_tests(repo, rel):
     """The file's own test files next to it: a.ts -> a.test.ts, a.spec.tsx, ..."""
     stem, _ = os.path.splitext(rel)
-    found = []
-    for suffix in TEST_SUFFIXES:
-        for ext in LANG_BY_EXT:
-            if LANG_BY_EXT[ext] == "ts" and os.path.isfile(os.path.join(repo, stem + suffix + ext)):
-                found.append(stem + suffix + ext)
-    return found
+    return [stem + suffix + ext for suffix in TEST_SUFFIXES for ext in TS_EXTS
+            if os.path.isfile(os.path.join(repo, stem + suffix + ext))]
 
 
 def describe(repo, rel, lines):
     lang = LANG_BY_EXT[os.path.splitext(rel)[1]]
-    root = ts_root(repo, rel) if lang == "ts" else (nearest(repo, rel, ROOT_MARKER[lang]) or ".")
-    entry = {"path": rel, "lang": lang, "lines": lines, "root": root}
+    root = ts_root(repo, rel) if lang == "ts" else nearest(repo, rel, has(ROOT_MARKER[lang]))
+    entry = {"path": rel, "lang": lang, "lines": lines, "root": root or ".",
+             "root_found": root is not None}
     if lang == "go":
-        pkg = os.path.relpath(os.path.dirname(rel) or ".", root)
+        pkg = os.path.relpath(os.path.dirname(rel) or ".", entry["root"])
         entry["package"] = "./" + pkg if pkg != "." else "."
     if lang == "ts":
-        entry["runner"] = ts_runner(repo, root)
+        entry["runner"] = ts_runner(os.path.join(repo, entry["root"]))
         entry["tests"] = own_tests(repo, rel)
     return entry
 
 
 def build_scope(repo, base):
     merge_base = git(repo, "merge-base", "HEAD", base).strip()
+    # Explicit prefixes, because diff.noprefix or diff.mnemonicPrefix would change them.
     ranges = parse_hunks(git(repo, "diff", "-U0", "--no-color", "--no-ext-diff",
+                             "--src-prefix=a/", "--dst-prefix=b/",
                              "--diff-filter=AMR", merge_base))
-    for rel in git(repo, "ls-files", "--others", "--exclude-standard").splitlines():
-        if os.path.isfile(os.path.join(repo, rel)):
+    for rel in git(repo, "ls-files", "-z", "--others", "--exclude-standard").split("\0"):
+        if rel and os.path.isfile(os.path.join(repo, rel)):
             ranges[rel] = [[1, max(1, line_count(os.path.join(repo, rel)))]]
     files = [describe(repo, rel, lines) for rel, lines in sorted(ranges.items())
              if lines and is_target(repo, rel)]
-    return {
-        "repo": repo,
-        "base": base,
-        "merge_base": merge_base,
-        "files": files,
-        "survivor_cap": SURVIVOR_CAP_PER_FILE * len(files),
-    }
+    return {"repo": repo, "base": base, "merge_base": merge_base, "files": files}
 
 
 def commands(scope, here):
-    """Suggested commands, one per language root."""
+    """Suggested commands and notes, one group per language root. Every path is
+    shell-quoted: file names come from the diff, and the agent runs these lines."""
+    q = shlex.quote
     out, groups = [], {}
     for f in scope["files"]:
         groups.setdefault((f["lang"], f["root"]), []).append(f)
     for (lang, root), fs in sorted(groups.items()):
+        rel = [os.path.relpath(f["path"], root) for f in fs]
         if lang == "go":
-            pkgs = " ".join(sorted({f["package"] for f in fs}))
-            files = " ".join(os.path.relpath(f["path"], root) for f in fs)
-            out.append(f"bash {here}/go_mutate.sh {root} --files '{files}' {pkgs}")
+            pkgs = " ".join(q(p) for p in sorted({f["package"] for f in fs}))
+            out.append(f"bash {q(here + '/go_mutate.sh')} {q(root)} "
+                       f"--files {q(' '.join(rel))} {pkgs}")
         elif lang == "python":
-            paths = ", ".join(f'"{os.path.relpath(f["path"], root)}"' for f in fs)
-            out.append(f"# {root}: [tool.mutmut] source_paths = [{paths}]  (see reference/python.md)")
+            if not fs[0]["root_found"]:
+                out.append(f"# no pyproject.toml above {fs[0]['path']}; mutmut needs one "
+                           "(see reference/python.md)")
+            paths = ", ".join(json.dumps(p) for p in rel)
+            out.append(f"# {root}/pyproject.toml: [tool.mutmut] source_paths = [{paths}], "
+                       "then follow reference/python.md")
         else:
-            spans = ",".join(f'{os.path.relpath(f["path"], root)}:{a}-{b}'
-                             for f in fs for a, b in f["lines"])
+            spans = ",".join(f"{r}:{a}-{b}" for r, f in zip(rel, fs) for a, b in f["lines"])
             tests = ",".join(os.path.relpath(t, root) for f in fs for t in f["tests"])
-            test_flag = f' --testFiles "{tests}"' if tests else ""
-            out.append(f"cd {root} && npx stryker run --ignoreStatic --mutate \"{spans}\"{test_flag}"
+            test_flag = f" --testFiles {q(tests)}" if tests else ""
+            out.append(f"cd {q(root)} && npx --no-install stryker run --ignoreStatic "
+                       f"--mutate {q(spans)}{test_flag}"
                        f"  # runner: {fs[0]['runner']} (see reference/typescript.md)")
+            out += [f"# no sibling tests for {f['path']}: add --testFiles with the tests "
+                    "that import it, or this run uses the whole suite"
+                    for f in fs if not f["tests"]]
     return out
 
 
@@ -225,8 +226,7 @@ def main():
         with open(a.json_out, "w") as f:
             json.dump(scope, f, indent=2)
     print(f"merge base {scope['merge_base'][:10]} ({scope['base']}); "
-          f"{len(scope['files'])} changed source file(s); "
-          f"survivor cap {scope['survivor_cap']}")
+          f"{len(scope['files'])} changed source file(s)")
     for f in scope["files"]:
         spans = ", ".join(f"{a}-{b}" if a != b else str(a) for a, b in f["lines"])
         print(f"  {f['lang']:6} {f['path']}  lines {spans}")

@@ -34,15 +34,17 @@ export default {
 ## Run on the diff
 
 ```bash
-python3 <skill-dir>/scripts/diff_scope.py --json /tmp/scope.json     # prints --mutate spans and --testFiles
-cd <project> && npx stryker run --ignoreStatic \
+S="$(git rev-parse --absolute-git-dir)/mgt-scope.json"
+python3 <skill-dir>/scripts/diff_scope.py --json "$S"     # prints --mutate spans and --testFiles
+cd <project> && npx --no-install stryker run --ignoreStatic \
   --mutate "src/a.tsx:40-58,src/b.ts:10-12" \
   --testFiles "src/a.test.tsx,src/b.test.ts"
-python3 <skill-dir>/scripts/survivors.py --scope /tmp/scope.json --stryker <project>=<project>/reports/mutation/mutation.json
+python3 <skill-dir>/scripts/survivors.py --scope "$S" --stryker <project>=<project>/reports/mutation/mutation.json
 ```
 
+- **`npx --no-install`:** without it, a missing local Stryker makes npx offer the unrelated, old `stryker` package from npm.
 - **`--mutate "file:start-end"`** comes from the diff, so only changed lines are mutated.
-- **`--testFiles`:** run the changed files' own tests. That gave the same kills as the "related" tests at about a fifth of the dry-run cost. `diff_scope.py` adds the sibling `*.test.*` and `*.spec.*` files it finds.
+- **`--testFiles`:** run the changed files' own tests. That gave the same kills as the "related" tests at about a fifth of the dry-run cost. `diff_scope.py` adds the sibling `*.test.*` and `*.spec.*` files it finds, and says so when a file has none.
 - **`--ignoreStatic`:** static mutants (module-level constants, `cva(...)` calls) cost most of the run time and are mostly class strings. When you change a module-level `cva(...)` call, run once without it, because it also hides `defaultVariants` mutants.
 - **`--incremental`** reuses results, but the dry run always re-runs in full, so it saves less than `--testFiles`.
 
@@ -59,7 +61,7 @@ python3 <skill-dir>/scripts/survivors.py --scope /tmp/scope.json --stryker <proj
 - **Storybook play tests:** a unit-runner Stryker run can't see them, so a survivor may already be killed by a story. Say so in the report; don't count it as killed. To count them, run Stryker a second time with a Storybook Vitest config and pass both reports to `survivors.py` (two `--stryker <project>=…` arguments): a mutant counts as killed if either run killed it.
 - **Layout:** jsdom can't observe layout (popup placement, sizes). Mark those survivors "browser-only".
 
-## Runtime guide (laptop, November 2026)
+## Runtime guide (indicative: one laptop, November 2026)
 
 | Target | Mutants | Time |
 |---|---|---|

@@ -27,8 +27,8 @@ It extends the Superpowers `test-driven-development` skill and its `writing-good
 
 - **Coverage is a weak signal.** Inozemtseva and Holmes, "Coverage Is Not Strongly Correlated with Test Suite Effectiveness" ([ICSE 2014](https://doi.org/10.1145/2568225.2568271)), found that coverage correlates only weakly with how many faults a suite finds once suite size is controlled for. So coverage here is a map of untested code, never a target.
 - **Mutate only the diff, cap the survivors, don't chase a score.** Petrović, Ivanković, Fraser and Just, "Practical Mutation Testing at Scale: A view from Google" ([arXiv:2102.11378](https://arxiv.org/abs/2102.11378)), shows that surfacing a few mutants on changed lines during code review is what makes mutation testing usable, rather than a whole-program mutation score.
-- **Mutants from a plain-English concern.** Meta's ACH, "Mutation-Guided LLM-based Test Generation at Meta" ([arXiv:2501.12862](https://arxiv.org/abs/2501.12862)), generates mutants from a stated concern and then writes tests that kill them. The concern bugs in step 1 are that idea, done by hand inside the loop.
-- **Property tests where inputs have structure.** Maaz et al., "Agentic Property-Based Testing: Finding Bugs Across the Python Ecosystem" ([arXiv:2510.09907](https://arxiv.org/abs/2510.09907), NeurIPS 2025 DL4C Workshop), has agents write property-based tests; step 6 uses them where inputs have structure, and says so when they don't apply.
+- **Mutants from a plain-English concern.** Meta's ACH, "Mutation-Guided LLM-based Test Generation at Meta" ([arXiv:2501.12862](https://arxiv.org/abs/2501.12862)), generates mutants from a stated concern and then writes tests that kill them. The concern bugs named before the code are that idea, done by hand inside the loop.
+- **Property tests where inputs have structure.** Maaz et al., "Agentic Property-Based Testing: Finding Bugs Across the Python Ecosystem" ([arXiv:2510.09907](https://arxiv.org/abs/2510.09907), NeurIPS 2025 DL4C Workshop), has agents write property-based tests; the skill's property-based step uses them where inputs have structure, and says so when they don't apply.
 
 ## Files
 
@@ -44,12 +44,12 @@ skills/mutation-guided-testing/
                               language root; suggested commands; JSON out
   scripts/survivors.py        reads tool reports, keeps changed lines, drops class-string
                               noise, ranks, caps, prints a triage table
-  scripts/go_mutate.sh        Gremlins wrapper that handles its traps (below)
+  scripts/go_mutate.sh        Gremlins wrapper that handles its traps
   scripts/tests/              runs the scripts against throwaway git repos and recorded
                               report samples
 ```
 
-`go_mutate.sh` copies the module and makes relative `replace` paths absolute (otherwise every failed build counts as a kill: a false 100%), excludes unchanged files, sets `GOFLAGS=-count=1` and `--timeout-coefficient 10`, turns on `--invert-logical` and the other off-by-default mutators, adds `--integration` for a package with no tests, and fails when no mutant ran ("Runnable: 0").
+`go_mutate.sh` works round Gremlins' traps, such as relative `replace` paths that turn every failed build into a false kill; `reference/go.md` lists them under "The traps".
 
 ## Your per-repo notes
 
@@ -65,7 +65,7 @@ Start from `reference/local.example.md`. This repo's `.gitignore` keeps a `local
 - Python 3.9 or later, git, bash and rsync. The scripts use only the Python standard library.
 - Mutation tools are installed per repo or in a scratch location, never globally:
   - **Gremlins** 0.6.x in a local `GOBIN`.
-  - **mutmut** 3.x through `uv run --with mutmut` in a scratch copy.
+  - **mutmut** 3.x through `uv run --with 'mutmut>=3,<4'` in a scratch copy.
   - **StrykerJS** 10.x as a dev dependency on your branch.
 
 ## Tests

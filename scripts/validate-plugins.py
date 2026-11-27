@@ -875,7 +875,24 @@ def run_unit_tests() -> None:
              f"`python3 -m unittest discover -s {rel(TESTS_DIR)} -p '{TEST_PATTERN}'`")
 
 
-SKILL_TESTS_GLOB = "plugins/*/skills/*/scripts/tests"
+SKILL_SCRIPTS_GLOB = "plugins/*/skills/*/scripts"
+SKILL_TESTS_GLOB = f"{SKILL_SCRIPTS_GLOB}/tests"
+GATE_TIMEOUT_SECONDS = 300
+
+
+def tail(text: str, n: int = 15) -> str:
+    """The last `n` lines of a process's output, for a failure message."""
+    return "\n".join(text.strip().splitlines()[-n:])
+
+
+def run_gate_process(cmd: list[str], where: str, cwd: Path | None = None):
+    """Run one gate step in its own process; on a timeout, fail and return None."""
+    try:
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
+                              timeout=GATE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        fail(f"{where}: did not finish in {GATE_TIMEOUT_SECONDS} seconds")
+        return None
 
 
 def run_skill_tests() -> None:
@@ -887,16 +904,14 @@ def run_skill_tests() -> None:
     for tests in sorted(p for p in ROOT.glob(SKILL_TESTS_GLOB) if p.is_dir()):
         where = f"{rel(tests)}/{TEST_PATTERN}"
         cmd = [sys.executable, "-m", "unittest", "discover", "-s", str(tests), "-p", TEST_PATTERN]
-        try:
-            run = subprocess.run(cmd, cwd=tests, capture_output=True, text=True, timeout=300)
-        except subprocess.TimeoutExpired:
-            fail(f"{where}: tests did not finish in 300 seconds")
+        run = run_gate_process(cmd, where, cwd=tests)
+        if run is None:
             continue
         if re.search(r"^Ran 0 tests", run.stderr, re.M):
             fail(f"{where}: found no tests; add them or remove the folder")
         elif run.returncode != 0:
-            tail = "\n".join(run.stderr.strip().splitlines()[-15:])
-            fail(f"{where}: tests failed; run `python3 -m unittest discover -s {rel(tests)}`\n{tail}")
+            fail(f"{where}: tests failed; run `python3 -m unittest discover -s {rel(tests)}`\n"
+                 f"{tail(run.stderr)}")
 
 
 def run_self_checks() -> None:
@@ -905,7 +920,7 @@ def run_self_checks() -> None:
     Skipped, with a note, when node is not installed; in CI (`CI` set) a
     missing node fails instead, so CI never skips them.
     """
-    checks = sorted(ROOT.glob("plugins/*/skills/*/scripts/check-*.mjs"))
+    checks = sorted(ROOT.glob(f"{SKILL_SCRIPTS_GLOB}/check-*.mjs"))
     if not checks:
         return
     if shutil.which("node") is None:
@@ -916,14 +931,9 @@ def run_self_checks() -> None:
         print(f"note: node not found, skipped {len(checks)} self-check(s)", file=sys.stderr)
         return
     for check in checks:
-        try:
-            run = subprocess.run(["node", str(check)], capture_output=True, text=True, timeout=300)
-        except subprocess.TimeoutExpired:
-            fail(f"{check.relative_to(ROOT)}: self-check did not finish in 300 seconds")
-            continue
-        if run.returncode != 0:
-            tail = "\n".join((run.stdout + run.stderr).strip().splitlines()[-15:])
-            fail(f"{check.relative_to(ROOT)}: self-check failed\n{tail}")
+        run = run_gate_process(["node", str(check)], f"{check.relative_to(ROOT)}: self-check")
+        if run is not None and run.returncode != 0:
+            fail(f"{check.relative_to(ROOT)}: self-check failed\n{tail(run.stdout + run.stderr)}")
 
 
 MARKETPLACE_REL = ".claude-plugin/marketplace.json"

@@ -21,13 +21,14 @@
 #   - Cached test results shrink Gremlins' timeouts: GOFLAGS=-count=1.
 #   - The default timeout coefficient is too tight for fast packages.
 #   - A run where no mutant ran ("Runnable: 0") is a failure, not a clean result.
+#   - A go.work above the module would pull in other modules: GOWORK=off.
 #
-# Prints the --gremlins arguments to pass to survivors.py.
+# Prints the --gremlins arguments to pass to survivors.py, shell-quoted.
 # Env: GREMLINS (binary path), MGT_WORKERS (default 4), MGT_TIMEOUT
 #      (timeout coefficient, default 10), MGT_GOFLAGS (extra GOFLAGS, e.g. -short).
 set -euo pipefail
 
-usage() { sed -n '2,16p' "$0" >&2; exit 2; }
+usage() { sed -n '2,16s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 [ $# -ge 2 ] || usage
 
 module=$1; shift
@@ -47,15 +48,15 @@ while [ $# -gt 0 ]; do
 done
 [ ${#pkgs[@]} -gt 0 ] || usage
 
+here=$(cd "$(dirname "$0")" && pwd)
 repo=$(git rev-parse --show-toplevel)
 src="$repo/$module"
 [ -f "$src/go.mod" ] || { echo "go_mutate: no go.mod in $src" >&2; exit 2; }
 
 gremlins=${GREMLINS:-$(command -v gremlins || true)}
 if [ -z "$gremlins" ] || [ ! -x "$gremlins" ]; then
-  echo "go_mutate: gremlins not found. Install it into a local GOBIN, not globally:" >&2
-  echo "  GOBIN=\$PWD/.tools/bin go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0" >&2
-  echo "and set GREMLINS=\$PWD/.tools/bin/gremlins (see reference/go.md)" >&2
+  echo "go_mutate: gremlins not found. Install it into a local GOBIN, not globally," >&2
+  echo "and point GREMLINS at it: see \"Install\" in reference/go.md." >&2
   exit 2
 fi
 
@@ -67,11 +68,19 @@ trap 'rm -rf "$work"' EXIT
 
 # 1. Copy the module and make every relative replace path absolute.
 rsync -a --exclude .git --exclude node_modules "$src/" "$work/mod/"
-python3 - "$src" "$work/mod/go.mod" <<'PY'
+python3 -I - "$src" "$work/mod/go.mod" <<'PY'
 import os, re, sys
 src, gomod = sys.argv[1], sys.argv[2]
 # `=> ./x` or `=> ../x`, quoted or not, on a replace line or in a replace block.
 target = re.compile(r'(=>\s*)("?)(\.\.?/[^\s"]*)\2')
+
+
+def absolute(m):
+    path = os.path.normpath(os.path.join(src, m.group(3)))
+    quote = m.group(2) or ('"' if re.search(r"\s", path) else "")
+    return m.group(1) + quote + path + quote
+
+
 out, in_block = [], False
 with open(gomod) as f:
     for line in f:
@@ -81,16 +90,16 @@ with open(gomod) as f:
         elif in_block and code == ")":
             in_block = False
         elif in_block or code.startswith("replace "):
-            line = target.sub(lambda m: m.group(1) + m.group(2)
-                              + os.path.normpath(os.path.join(src, m.group(3))) + m.group(2), line)
+            line = target.sub(absolute, line)
         out.append(line)
 with open(gomod, "w") as f:
     f.writelines(out)
 PY
 
 # 2. Mutate each package, changed files only.
-status=0
+status=0 i=0
 for pkg in "${pkgs[@]}"; do
+  i=$((i + 1))
   rel=${pkg#./}
   [ "$rel" = "." ] && rel=""
   dir="$work/mod${rel:+/$rel}"
@@ -102,21 +111,21 @@ for pkg in "${pkgs[@]}"; do
     flags+=(--integration)
   fi
   if [ -n "$files" ]; then
-    for f in "$dir"/*.go; do
-      [ -e "$f" ] || continue
-      case $f in *_test.go) continue ;; esac
+    # Module-relative patterns, subpackages included, so an unchanged
+    # pkg/util.go never hides a changed pkg/sub/util.go.
+    while IFS= read -r -d '' f; do
       relf=${f#"$work/mod/"}
       case " $files " in
         *" $relf "*) ;;
-        *) base=$(basename "$f"); flags+=(--exclude-files "(^|/)${base//./\\.}\$") ;;
+        *) flags+=(--exclude-files "(^|/)$(printf '%s' "$relf" | sed 's/[][\.*^$+?(){}|]/\\&/g')\$") ;;
       esac
-    done
+    done < <(find "$dir" -name '*.go' ! -name '*_test.go' -print0)
   fi
-  name=$(echo "${rel:-root}" | tr '/' '_')
+  name="$i-$(echo "${rel:-root}" | tr '/' '_')"
   report="$out/$name.json"
   echo "== gremlins $pkg (${flags[*]})" >&2
   start=$(date +%s)
-  if ! (cd "$work/mod" && GOFLAGS="-count=1 ${MGT_GOFLAGS:-}" "$gremlins" unleash "${flags[@]}" ${extra[@]+"${extra[@]}"} -o "$report" "./$rel") >&2; then
+  if ! (cd "$work/mod" && GOWORK=off GOFLAGS="${GOFLAGS:-} -count=1 ${MGT_GOFLAGS:-}" "$gremlins" unleash "${flags[@]}" ${extra[@]+"${extra[@]}"} -o "$report" "./$rel") >&2; then
     status=1
   fi
   echo "   took $(( $(date +%s) - start ))s" >&2
@@ -126,17 +135,17 @@ for pkg in "${pkgs[@]}"; do
     continue
   fi
   # "Runnable: 0": nothing was mutated, or no test reached the mutants.
-  ran=$(python3 -c '
-import json, sys
-rep = json.load(open(sys.argv[1]))
-print(sum(m.get("status") in ("KILLED", "LIVED", "TIMED OUT")
-          for f in rep.get("files") or [] for m in f.get("mutations") or []))
-' "$report")
+  if ! ran=$(python3 -I -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import survivors
+print(survivors.gremlins_ran(json.load(open(sys.argv[2]))))' "$here" "$report"); then
+    echo "go_mutate: cannot read the report for $pkg ($report)" >&2
+    status=1
+    continue
+  fi
   if [ "$ran" = 0 ]; then
     echo "go_mutate: no mutant ran for $pkg (Runnable: 0). Check --files, or use --integration" \
          "or the package that tests it; this is not a clean result." >&2
     status=1
   fi
-  echo "--gremlins $module${rel:+/$rel}=$report"
+  printf -- '--gremlins %q\n' "$module${rel:+/$rel}=$report"
 done
 exit $status

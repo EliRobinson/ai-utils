@@ -2,7 +2,7 @@
 """Stands in for `gremlins unleash` in the go_mutate.sh tests.
 
 Appends what it was called with to $FAKE_LOG (one JSON line: argv, cwd,
-GOFLAGS, the go.mod it would build) and copies $FAKE_REPORT to the -o path.
+GOFLAGS, GOWORK, the go.mod it would build) and copies $FAKE_REPORT to the -o path.
 """
 import json
 import os
@@ -14,5 +14,6 @@ with open(os.environ["FAKE_LOG"], "a") as log:
     with open("go.mod") as f:
         gomod = f.read()
     log.write(json.dumps({"argv": args, "cwd": os.getcwd(),
-                          "goflags": os.environ.get("GOFLAGS", ""), "gomod": gomod}) + "\n")
+                          "goflags": os.environ.get("GOFLAGS", ""),
+                          "gowork": os.environ.get("GOWORK", ""), "gomod": gomod}) + "\n")
 shutil.copy(os.environ["FAKE_REPORT"], args[args.index("-o") + 1])
