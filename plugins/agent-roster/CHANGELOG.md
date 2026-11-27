@@ -2,6 +2,27 @@
 
 1.8.0 is the first version published in this public repo. Earlier entries are kept for reference.
 
+## 1.17.0
+
+**Upgrade steps:**
+
+1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
+2. Rerun `setup-agentic-workflow` in each repo set up before 1.17.0, and merge its setup PR. It refreshes `scripts/review-gate-hook.mjs`, `scripts/check-agent-hooks.mjs`, `docs/agents/git-workflow.md` and `docs/agents/review-gate.md`.
+3. If your repo keeps hash-pinned verbatim copies of these files, refresh the copies and their hash list in a later change of its own.
+
+**Changes:**
+
+- **The review gate refuses GitHub API writes that change a branch, its protection or the repository's settings**, in any repo, whatever the Review record says. This covers writes through `gh api` or an HTTP client (`curl`, `wget`, `http`, `xh`) to `git/refs`, branch protection, branch rename, rulesets, `contents`, `merge-upstream`, `transfer`, Actions permissions and the repository itself (these also set the default branch), and the GraphQL mutations that do the same. [review-gate.md](skills/setup-agentic-workflow/templates/docs-agents/review-gate.md#the-hook) has the full list. Reads (`GET`, `HEAD`) of the same paths pass, and so do writes to the repository's other endpoints (issues, labels, comments). The refusal says how to push and delete branches with git, and to ask the owner for any protection, ruleset or settings change. A local path that only looks like one of these (`.github/rulesets`, `src/rename`) is not counted.
+- A `gh api -X HEAD` call counts as a read everywhere, including with an endpoint built at run time.
+- **The review gate refuses `gh alias set`, `gh alias import` and `gh alias delete`**, a `gh` command whose first word is not one of gh's own commands (`gh co 5`, any other alias or extension name), also after leading flags (`gh -R o/r co 5`), and a `gh` command whose subcommand, `gh pr` action or `gh api` arguments come from `xargs`. `gh alias list` and gh's own commands pass. The list of gh's own commands is gh 2.103's.
+- **The review gate refuses a git alias whose value is a shell command** (has a `!`) or sets another alias, set through `git -c` or `git config`, any alias set through `--config-env`, and one whose value is built at run time. It also refuses a git config value that git runs (`core.pager`, `core.sshCommand`, `core.editor`) when it names a gh write. Plain git aliases pass.
+- **The review gate asks the user first before a `gh repo` command that changes or removes the repository**: `gh repo edit`, `rename`, `delete`, `archive` and `unarchive`, also after leading flags, inside `eval`, `bash -c`, a wrapper, `xargs` or another program, and when the action is built at run time or comes after another flag. A line with a call the gate cannot read that names one of these commands asks too. The hook returns the permission decision `ask` with a reason, so Claude Code shows a prompt. Reads (`gh repo view`, `list`, `clone`) and `set-default` pass without one, and a refusal on the same line wins. A leading `--repo=o/r` is now read like `-R o/r`.
+- These forms count as PR writes for a line with a call the gate cannot read (`eval "$X"`, `| bash`, `python3 -c`), so such a line is refused too.
+- **Setup step 7 (repo settings) gives the owner the ruleset and merge-method commands to run in their own terminal**, because the review gate now refuses those API writes from an agent.
+- Each `gh repo` prompt says what that action does (a delete says it cannot be undone).
+- `git-workflow.md` ("Branch protection is never bypassed") lists the rules, and `review-gate.md` lists the exact forms the hook refuses or asks about, and what to do when the prompt is denied.
+- `check-agent-hooks.mjs` has new cases for each refused form, each form that asks, and the reads, local paths and plain commands that still pass.
+
 ## 1.16.0
 
 **Upgrade steps:**
