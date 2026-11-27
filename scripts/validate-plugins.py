@@ -735,6 +735,8 @@ TICKET_WRITER_YES_TERMS = [
     "quoted in the brief",
     "one standing yes: after round 2 of the review gate, `pr-finisher` files each open non-blocker finding as a ticket",
     "it is the only exception",
+    "never an open security-critic finding; that goes to the owner",
+    "the coordinator asks, never you",
     "refuse: report the drafts, file nothing",
 ]
 CHAT_ASK_RULE_TERMS = {  # a template and its filled copy share one list

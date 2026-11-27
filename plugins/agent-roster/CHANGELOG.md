@@ -7,8 +7,8 @@
 **Upgrade steps:**
 
 1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
-2. If you use tracker copies, rerun `setup-agentic-workflow` and say "change ticketing tool" to refresh yours, since `ticket-writer` changed. A repo's own tracker copies are refreshed by rerunning the full setup there.
-3. If your repo keeps hash-pinned verbatim copies of agent-roster files, refresh any copy of `ticket-writer.md` and its hash in a later change of its own; its hash changes.
+2. If you use your own tracker copies (an MCP ticketing tool), rerun `setup-agentic-workflow` and say "change ticketing tool", since `ticket-writer` changed. A repo's own copies come from rerunning the full setup in that repo.
+3. If your repo keeps hash-pinned verbatim copies of agent-roster files, refresh any copy of `ticket-writer.md` and its hash in a separate later PR.
 
 **Changes:**
 

@@ -601,14 +601,15 @@ class TicketWriterYes(unittest.TestCase):
     """ticket-writer states the ticket yes rule in the rule sources' words (#41)."""
 
     def test_ticket_writer_is_held_to_the_ticket_yes_rule(self):
-        self.assertLessEqual(set(vp.TICKET_YES_TERMS), set(vp.CHAT_ASK_RULE_TERMS[vp.TICKET_WRITER]))
+        self.assertEqual({p for p, t in vp.CHAT_ASK_RULE_TERMS.items() if set(vp.TICKET_YES_TERMS) <= set(t)},
+                         {vp.ISSUE_TRACKER, vp.REPO_ISSUE_TRACKER, vp.TICKET_WRITER})
 
-    def test_the_old_paragraph_misses_each_added_term(self):
+    def test_the_old_paragraph_misses_each_term(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "ticket-writer.md"
             path.write_text(OLD_TICKET_WRITER_YES)
             with mock.patch.multiple(vp, ROOT=Path(tmp), problems=[]):
-                vp.check_terms({path: vp.TICKET_WRITER_YES_TERMS}, "ticket yes rule")
+                vp.check_chat_asks({path: vp.TICKET_WRITER_YES_TERMS})
                 self.assertEqual(len(vp.problems), len(vp.TICKET_WRITER_YES_TERMS))
 
 
