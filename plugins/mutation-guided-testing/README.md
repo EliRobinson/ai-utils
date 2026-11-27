@@ -65,7 +65,7 @@ Start from `reference/local.example.md`. This repo's `.gitignore` keeps a `local
 - Python 3.9 or later, git, bash and rsync. The scripts use only the Python standard library.
 - Mutation tools are installed per repo or in a scratch location, never globally:
   - **Gremlins** 0.6.x in a local `GOBIN`.
-  - **mutmut** 3.x through `uv run --with 'mutmut>=3,<4'` in a scratch copy.
+  - **mutmut** pinned to 3.8.1 through `uv run --with 'mutmut==3.8.1'` in a scratch copy. `reference/python.md` says how to update the pin.
   - **StrykerJS** 10.x as a dev dependency on your branch.
 
 ## Tests

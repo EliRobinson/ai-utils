@@ -1,12 +1,12 @@
 # Python: mutmut
 
-Verified with mutmut 3.x under uv (November 2026).
+Verified with mutmut 3.x under uv (November 2026). The recipe pins mutmut to exactly **3.8.1**, the latest 3.x release on PyPI when this was written, so a new release never runs on your code unreviewed. To update it, check the release notes, change the version in the `mm()` line below and in the plugin README, and rerun the recipe once on a small change.
 
-mutmut writes a `mutants/` directory and reads its config from `[tool.mutmut]` in `pyproject.toml`. Run it in a scratch copy, so neither ends up in a commit, and run it through `uv run --with 'mutmut>=3,<4'` (or a throwaway venv), never a global install.
+mutmut writes a `mutants/` directory and reads its config from `[tool.mutmut]` in `pyproject.toml`. Run it in a scratch copy, so neither ends up in a commit, and run it through `uv run --with 'mutmut==3.8.1'` (or a throwaway venv with that version), never a global install.
 
 ```bash
 S="$(git rev-parse --absolute-git-dir)/mgt-scope.json"   # diff_scope.py wrote it
-mm() { uv run --with 'mutmut>=3,<4' mutmut "$@"; }         # the one place the mutmut pin lives
+mm() { uv run --with 'mutmut==3.8.1' mutmut "$@"; }        # the pinned version (see above)
 P=$(mktemp -d); rsync -a --exclude .git --exclude .venv --exclude __pycache__ --exclude mutants <project>/ $P/
 (
 cd $P && cat >> pyproject.toml <<'EOF'
