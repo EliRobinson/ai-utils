@@ -3,7 +3,12 @@
 // open a PR (draft or not), take it out of draft, or merge it, unless its
 // body carries a complete `## Review` record (docs/agents/review-gate.md).
 // It always refuses a merge that bypasses branch protection: `gh pr merge
-// --admin`, and a REST merge through `gh api`.
+// --admin`, and a REST merge through `gh api`. It always refuses a GitHub API
+// write that moves, deletes or renames a branch, commits to it directly,
+// changes branch protection or rulesets, or changes the repository's own
+// settings, and a gh or git alias it cannot read. It asks the user first
+// (permissionDecision "ask") before a gh repo command that changes or
+// removes the repository: edit, rename, delete, archive, unarchive.
 // The reviewers run on the branch before the PR exists. Ready and merge stay
 // gated too, for PRs opened outside the hook (the web UI, other tools) and
 // for bodies edited after the PR was opened.
@@ -218,6 +223,11 @@ function refusal(what, problems, next = "Run them on the branch before you open 
 const PR_ACTIONS = ["merge", "ready", "create", "new"];
 const MERGE_MUTATIONS =
   /\b(mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|markPullRequestReadyForReview|createPullRequest|mergeBranch)\b/;
+// GraphQL mutations that move, delete or create a branch, commit to it
+// directly, change branch protection or rulesets, or change the repository's
+// settings (its default branch among them).
+const BRANCH_MUTATIONS =
+  /\b(createRef|updateRefs?|deleteRef|createCommitOnBranch|(?:create|update|delete)BranchProtectionRule|(?:create|update|delete)RepositoryRuleset|updateRepository|(?:un)?archiveRepository)\b/;
 // The last part of the GitHub API paths that merge, open a PR or run GraphQL.
 // API below holds the exact paths; PR_HINT and MAY_CONCERN only need the names.
 const API_SEGMENTS = ["pulls", "merges", "graphql"];
@@ -229,25 +239,90 @@ const PR_HINT = new RegExp(
     "\\bapi\\s+graphql\\b",
     "\\bmutation\\b",
     MERGE_MUTATIONS.source,
+    BRANCH_MUTATIONS.source,
   ].join("|"),
   "g",
 );
 // A line worth walking at all. Tested on plain(line).
-const MAY_CONCERN = new RegExp(`\\bgh\\b|\\bpr\\b|${API_SEGMENTS.join("|")}|mutation|github`, "i");
+const MAY_CONCERN = new RegExp(`\\bgh\\b|\\bpr\\b|${API_SEGMENTS.join("|")}|mutation|github|\\balias\\b`, "i");
 // A line longer than this that may concern a PR is refused unwalked.
 const MAX_LINE = 20000;
 // Text with quotes, backslashes and $'...' openers taken out and %XX decoded,
 // so `gh pr "merge"`, `gh pr $'merge'` and `pull%73` read as what runs.
 const plain = (text) =>
   text.replace(/\$'|['"\\]/g, "").replace(/%([0-9a-f]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+// The words of text as a token scan reads them (commas and brackets split
+// too, so python's ["gh","pr","merge"] is seen), and for each word whether a
+// command may start there: first, after a comma or bracket, after a word
+// that ends in ; & | = or a backtick, after an assignment (`GH_REPO=x gh`),
+// or after a word that runs the next one with its options and their values
+// (`timeout 60 gh`, `sudo -u x gh`, `env X=1 gh`, `if gh`).
+const RUNS_NEXT = new Set(["xargs", "exec", "env", "command", "nohup", "sudo", "doas", "eval", "then", "do", "else",
+  "if", "elif", "while", "until", "time", "!", "{", "timeout", "nice",
+  "ionice", "stdbuf", "setsid", "caffeinate", "watch", "parallel", "chronic", "flock", "builtin"]);
+// Options whose next word is a command, wherever they stand (`bash -c gh`, `find -exec gh`).
+const OPTION_RUNS_NEXT = new Set(["-c", "-exec", "-execdir", "-ok", "-okdir"]);
+function scanWords(text) {
+  const parts = text.split(/([\s,()[\]]+)/);
+  const words = [];
+  const atStart = [];
+  let next = true; // the next word may start a command
+  let wrapper = false; // inside a RUNS_NEXT word's options
+  let optionValue = false; // the word after an option may be its value
+  for (let i = 0; i < parts.length; i += 2) {
+    const word = parts[i];
+    const prev = words.at(-1);
+    const start = next || /[,([]/.test(parts[i - 1] ?? "") || /[;&|`=]$/.test(prev ?? "");
+    atStart.push(start);
+    words.push(word);
+    if (word === "") continue;
+    const option = wrapper && (word.startsWith("-") || /^\d/.test(word) || optionValue);
+    optionValue = option && word.startsWith("-") && !word.includes("=");
+    // An assignment's value counts too, so X='timeout 9 gh m' is read like the command it holds.
+    const runsNext = start && RUNS_NEXT.has(word.replace(/^[A-Za-z_]\w*=/, ""));
+    if (runsNext) wrapper = true;
+    else if (!option) wrapper = false;
+    next = runsNext || (start && /^[A-Za-z_]\w*=/.test(word)) || option || OPTION_RUNS_NEXT.has(word);
+  }
+  return { words, atStart };
+}
+// A word that runs gh: gh itself, a path to it, or X=gh, ;gh, `gh.
+const GH_START = /(?:^|[=;&|`/])gh$/;
+// How many words a -R/--repo flag takes: 2 with its value, 1 for --repo=x,
+// 0 for any other word.
+const repoFlagWords = (word) => (REPO_FLAGS.includes(word) ? 2 : word.startsWith("--repo=") ? 1 : 0);
+// The indexes of the words from start on that may be a gh subcommand. Flags
+// may come first; each may take the next word as its value, so a word may be
+// the subcommand when no more words than flags come before it. The value of
+// -R/--repo is known, so it is skipped. A word no flag can take is the
+// subcommand, and the scan stops there. classifyGh and the token scans share it.
+function subcommandAt(words, start) {
+  const found = [];
+  let flags = 0;
+  for (let i = start; i < words.length; i++) {
+    const skip = repoFlagWords(words[i]);
+    if (skip) i += skip - 1;
+    else if (words[i].startsWith("-")) flags++;
+    else if (found.push(i) > flags) break; // no flag left to take this word as its value
+  }
+  return found;
+}
 // How many `pr <action>` the text names, skipping flags and their values
 // between them (`pr -R o/r merge`), as parsePrArgs reads them. `gh <word>
-// <action>` counts too, so `gh $P merge` is seen. A token scan, not a regex.
+// <action>` counts too, so `gh $P merge` is seen, and so does a gh command
+// that runs or changes an alias (runsAlias). A token scan, not a regex.
+// An alias counts only where a command may start, so text that only names gh
+// (`brew install gh jq`, a commit message) does not count.
 function prActions(text) {
-  // Commas and brackets split too, so python's ["gh","pr","merge"] is seen.
-  const words = text.split(/[\s,()[\]]+/);
+  const { words, atStart } = scanWords(text);
   let found = 0;
   for (let i = 0; i < words.length; i++) {
+    const bare = words[i] === "gh" || words[i].endsWith("/gh");
+    const startsGh = GH_START.test(words[i]) && (!bare || atStart[i]);
+    if (startsGh && runsAlias(words, subcommandAt(words, i + 1))) {
+      found++;
+      continue;
+    }
     let j;
     if (words[i] === "pr" && words[i - 1] !== "gh") j = i + 1;
     else if (words[i] === "gh" && words[i + 1] !== undefined) j = i + 2;
@@ -257,9 +332,26 @@ function prActions(text) {
   }
   return found;
 }
+// How many GitHub API paths that API.branchWrite matches the text names. A
+// path starts with repos/, repositories/ or orgs/, after a URL's host or
+// none, and after a character that is not part of a path, so a local path
+// such as src/rename, .github/rulesets or docs/repos/... does not count.
+const API_PATH = /(?:^|[^\w./-])((?:(?:[a-z][a-z0-9+.-]*:)?\/\/[^/\s]*|[\w.-]*github[\w.-]*)?\/?(?:repos|repositories|orgs)\/[^\s"'`,()[\]]*)/gi;
+function branchPaths(said) {
+  let found = 0;
+  for (const match of said.matchAll(API_PATH)) {
+    if (API.branchWrite.test(apiPath(match[1]))) found++;
+  }
+  return found;
+}
+// True when a call's text names a PR or branch write. A branch path counts
+// only next to the word gh or GitHub.
+const namesWrite = (said) =>
+  prActions(said) > 0 || MERGE_MUTATIONS.test(said) || BRANCH_MUTATIONS.test(said)
+  || (branchPaths(said) > 0 && /\bgh\b|github/i.test(said));
 const hintCount = (text) => {
   const said = plain(text);
-  return prActions(said) + (said.match(PR_HINT)?.length ?? 0);
+  return prActions(said) + (said.match(PR_HINT)?.length ?? 0) + branchPaths(said);
 };
 // The words of a call as the program sees them, program name first.
 const wordsText = (call) => [call.program, ...call.args].map((w) => w.text).join(" ");
@@ -281,6 +373,12 @@ const API = {
   createPr: /\/pulls$/,
   mergePr: /\/pulls\/[^/]+\/merge$/,
   mergeBranch: /\/merges$/,
+  // Writes here move, delete, create or rename a branch, commit to it
+  // directly (contents), sync a fork's branch, or change branch protection
+  // or rulesets, or write to the repository itself (its default branch and
+  // settings, Actions permissions among them), or move it to another owner.
+  // A branch name may hold slashes.
+  branchWrite: /\/git\/refs?(?:\/|$)|\/branches\/.+\/(?:protection(?:\/.*)?|rename)$|\/rulesets(?:\/|$)|\/merge-upstream$|\/repos\/[^/]+\/[^/]+\/(?:contents(?:\/|$)|transfer$|actions\/permissions(?:\/|$))|\/repos\/[^/]+\/[^/]+$|\/repositories\/[^/]+$/i,
 };
 // A merge path is refused earlier, as a bypass.
 const PR_WRITE_PATHS = [API.createPr, API.mergeBranch];
@@ -317,6 +415,67 @@ const VALUE_FLAGS = {
     "-T", "--template"]),
 };
 VALUE_FLAGS.new = VALUE_FLAGS.create;
+// gh's own commands and their short names, as of gh 2.103. gh refuses an
+// alias with one of these names, so any other first word is an alias or an
+// extension, which may run a PR or branch write the gate cannot see. `co` is
+// left out: it is an alias, and can be redefined. When gh adds a command,
+// add it here.
+const GH_COMMANDS = new Set(["agent-task", "agent-tasks", "agent", "agents", "alias", "api", "attestation", "at",
+  "auth", "browse", "cache", "codespace", "cs", "completion", "config", "copilot", "credits", "discussion",
+  "extension", "extensions", "ext", "gist", "gpg-key", "help", "issue", "label", "licenses", "org", "pr", "preview",
+  "project", "release", "repo", "ruleset", "rs", "run", "search", "secret", "skill", "skills", "ssh-key", "status",
+  "variable", "version", "workflow", "accessibility", "a11y", "actions", "environment", "exit-codes", "formatting",
+  "mintty", "reference", "telemetry"]);
+// `gh alias` actions that only read.
+const ALIAS_READS = new Set(["list", "ls"]);
+const wantsHelp = (texts) => texts.some((t) => t === "--help" || t === "-h");
+// True when the words after `gh alias` set, import or delete an alias.
+const changesAlias = (rest) => rest.length > 0 && !ALIAS_READS.has(rest[0]) && !wantsHelp(rest);
+// True when a gh command whose subcommand may be any of words[at] runs an
+// alias or an extension, or changes an alias. The token scans read only the
+// alias action, not the rest of the line.
+const runsAlias = (words, at) => at.some((k) => /^[a-z][\w-]*$/i.test(words[k])
+  && (!GH_COMMANDS.has(words[k]) || (words[k] === "alias" && changesAlias(words.slice(k + 1, k + 2)))));
+// `gh repo` actions that change or remove the repository, and what each
+// does. The gate asks the user before them, rather than refusing them.
+const REPO_ADMIN_DOES = {
+  edit: "changes the repository's settings (its default branch, visibility and merge methods among them)",
+  rename: "renames the repository, which changes its URL",
+  delete: "deletes the repository for good; it cannot be undone",
+  archive: "archives the repository, which makes it read-only",
+  unarchive: "unarchives the repository, which makes it writable again",
+};
+const REPO_ADMIN = new Set(Object.keys(REPO_ADMIN_DOES));
+// Where the `gh repo` action is in texts, from start on: { at, flagFirst }.
+// flagFirst: a flag other than -R/--repo came first, and gh may take the
+// next word as its value (`gh repo --description x edit`).
+function repoAction(texts, start) {
+  let at = start;
+  let flagFirst = false;
+  while (at < texts.length && texts[at].startsWith("-")) {
+    const skip = repoFlagWords(texts[at]);
+    if (!skip) flagFirst = true;
+    at += skip || 1;
+  }
+  return { at, flagFirst };
+}
+// How many `gh repo <action>` in plain text may change or remove the
+// repository: an action from REPO_ADMIN, or one after another flag. A token
+// scan like prActions. It counts `--help` too, since the rest of the line is
+// not this command's.
+function repoAdminCount(said) {
+  const { words } = scanWords(said);
+  let found = 0;
+  for (let i = 0; i < words.length; i++) {
+    if (!GH_START.test(words[i])) continue;
+    const repo = subcommandAt(words, i + 1).find((k) => words[k] === "repo");
+    if (repo === undefined) continue;
+    const { at, flagFirst } = repoAction(words, repo + 1);
+    if (flagFirst || REPO_ADMIN.has(words[at])) found++;
+  }
+  return found;
+}
+const repoAdminHints = (text) => repoAdminCount(plain(text));
 // Programs that only print or record their words, so `pr merge` in them runs nothing.
 const READERS = new Set(["echo", "printf", "cat", "grep", "rg", "man", "less", "head", "tail", "git"]);
 
@@ -556,15 +715,17 @@ function httpieRequest(call) {
 // PR, and any GitHub GraphQL call, are refused. The gate cannot read an HTTP
 // body, and gh does all three in a form it can check. A write whose URL it
 // cannot read is refused when the URL names GitHub, and otherwise counts as
-// unread (bashProblems refuses it when the line names a PR write).
+// unread (bashCheck refuses it when the line names a PR write).
 function classifyHttp(request, call) {
   const github = (u) => /github/i.test(u.text) || request.headers.some((h) => /github/i.test(h.text));
   if (request.urls.some((u) => API.graphql.test(apiPath(u.text)) && (u.dynamic || github(u)))) {
     return refuse("it cannot read a GitHub GraphQL call made with an HTTP client. Use gh api graphql with the query inline: -f query='...'.");
   }
   if (!request.writes) return null;
-  if (request.urls.some((u) => API.mergePr.test(apiPath(u.text)))) return refuseRestMerge();
-  if (request.urls.some((u) => PR_WRITE_PATHS.some((re) => re.test(apiPath(u.text))))) {
+  const hits = (re) => request.urls.some((u) => re.test(apiPath(u.text)));
+  if (hits(API.mergePr)) return refuseRestMerge();
+  if (hits(API.branchWrite)) return refuseBranchWrite();
+  if (PR_WRITE_PATHS.some(hits)) {
     return refuse("it cannot read an HTTP call that merges or opens a PR. Use gh pr merge or gh pr create.");
   }
   const unreadUrls = request.urls.filter((u) => expands(u) || /[{[]/.test(u.text));
@@ -576,8 +737,14 @@ function classifyHttp(request, call) {
     : null;
 }
 
+// A call the user approves first: { kind: "ask", reason }.
+const ask = (reason) => ({ kind: "ask", reason });
+const REPO_ASK = (action) => `\`gh repo ${action}\` ${REPO_ADMIN_DOES[action]}, so the review gate asks you first.`;
+const REPO_UNREAD_ASK = (what) => `The review gate cannot read ${what}, and it may be a \`gh repo\` command that changes or removes the repository (edit, rename, delete, archive or unarchive), so it asks you first.`;
+
 // A refusal about how the command is written, not about the record.
-// bypass: a merge past branch protection, which no record or rewording clears.
+// bypass: a write past branch protection or around it (an admin or REST
+// merge, a branch or settings write), which no record or rewording clears.
 const refuse = (reason, bypass = false) => ({ kind: "refuse", reason, bypass });
 
 // A merge that bypasses branch protection. Never needed: when checks fail or a
@@ -585,40 +752,59 @@ const refuse = (reason, bypass = false) => ({ kind: "refuse", reason, bypass });
 const BYPASS_NEXT = "Never bypass branch protection. If a plain `gh pr merge` is refused because checks fail or a branch rule blocks it, stop and ask the owner, and say what blocks it; do not look for another way around it. The owner can fix the check or the rule, or merge the PR themselves on GitHub.";
 const ADMIN_REASON = `\`gh pr merge --admin\` (even \`--admin=false\`) is refused: the flag merges past required checks and branch rules. Remove \`--admin\`. ${BYPASS_NEXT}`;
 const REST_MERGE_REASON = `a merge through the REST API skips the branch protection check that gh pr merge makes, the same bypass as \`--admin\`. Run a plain \`gh pr merge\` instead (no \`--admin\`). ${BYPASS_NEXT}`;
+const BRANCH_WRITE_REASON = "a GitHub API write that moves, deletes or renames a branch, commits to it directly, or changes branch protection, a ruleset or the repository's settings. Push with git from your worktree, delete a remote branch with `git push origin --delete <branch>`, and land changes through a PR merged with a plain `gh pr merge`. Protection, rulesets and repository settings are the owner's: if you need a change there, stop and ask the owner, and say what you need. Never bypass branch protection.";
+const ALIAS_REASON = "a gh alias change (`gh alias set`, `import` or `delete`). An alias runs a gh command the gate cannot see, which may merge a PR past it. Write every gh command out in full. If you need an alias, stop and ask the owner.";
+const NOT_GH_COMMAND = (word) => `\`gh ${word}\` is not a gh command, so gh runs it as an alias or an extension, which may merge a PR past the gate. Write the gh command out in full (\`gh pr checkout 5\`, not \`gh co 5\`). If you need an alias or an extension, stop and ask the owner; the owner can run it outside the agent. If \`${word}\` is a gh command newer than gh 2.103, tell the owner, because the gate's command list needs it.`;
 const refuseAdmin = () => refuse(ADMIN_REASON, true);
 const refuseRestMerge = () => refuse(REST_MERGE_REASON, true);
+const refuseBranchWrite = () => refuse(BRANCH_WRITE_REASON, true);
 // True when text that names a PR merge also names --admin.
 const namesAdminMerge = (said) => /(?:^|[^\w-])--admin(?![\w-])/.test(said) && /\bmerge\b/.test(said);
-// A call the gate cannot read: { kind: "unread", what }. bashProblems refuses
+// A call the gate cannot read: { kind: "unread", what }. bashCheck refuses
 // it only when the line names a PR write the gate did not read elsewhere.
 const unread = (what) => ({ kind: "unread", what });
 
 // gh: `gh pr merge|ready|create|new`, and `gh api` merges, PR opens and GraphQL.
-// The words that may be the gh subcommand when flags come first. Each flag may
-// swallow one word as its value, so it is among the first (flags + 1) other
-// words; the value of -R/--repo is known, so it is skipped.
-function leadingSubcommandWords(args) {
-  const others = [];
-  let flags = 0;
-  for (let i = 0; i < args.length; i++) {
-    if (!args[i].text.startsWith("-")) others.push(args[i]);
-    else if (REPO_FLAGS.includes(args[i].text)) i++;
-    else flags++;
-  }
-  return others.slice(0, flags + 1);
-}
 function classifyGh(call) {
   const text = call.args.map((w) => w.text);
-  if (text.length === 1 && (text[0] === "--help" || text[0] === "-h")) return null;
+  if (text.length === 1 && wantsHelp(text)) return null;
   if (call.args[0] && expands(call.args[0])) return refuse("it cannot read which gh command this is. Write the gh subcommand out in full.");
-  // gh finds the subcommand past leading flags (`gh -R o/r pr merge 5`), and the gate does not follow it.
-  if (text[0]?.startsWith("-") && leadingSubcommandWords(call.args).some((w) => w.text === "pr" || w.text === "api" || expands(w))) {
-    return refuse("it cannot tell which gh command this is when flags come before the subcommand. Write `gh pr ...` or `gh api ...` with the subcommand first and the flags after it.");
+  // xargs adds words gh reads: the subcommand, an alias action, or a gh api method or endpoint.
+  const xargs = call.wrappers.includes("xargs");
+  if (xargs && (text.length === 0 || (text[0] === "alias" && text.length === 1) || (text[0] === "api" && !wantsHelp(text)))) {
+    return refuse("it cannot read which gh command xargs builds. Write the gh command out in full.");
   }
-  if (call.wrappers.includes("xargs") && !(text[0] === "pr" || text[0] === "api")) return unread("the gh command xargs builds");
+  // gh finds the subcommand past leading flags (`gh -R o/r pr merge 5`), and the gate does not follow it.
+  const leading = text[0]?.startsWith("-") ? subcommandAt(text, 0) : null;
+  if (leading?.some((k) => ["pr", "api", "alias"].includes(text[k]) || !GH_COMMANDS.has(text[k]) || expands(call.args[k]))) {
+    return refuse("it cannot tell which gh command this is when flags come before the subcommand. Write the subcommand first and the flags after it (`gh pr merge 5 -R o/r`).");
+  }
+  if (text[0] === "alias" && changesAlias(text.slice(1))) return refuse(ALIAS_REASON);
+  if (text[0] !== undefined && !text[0].startsWith("-") && !GH_COMMANDS.has(text[0])) return refuse(NOT_GH_COMMAND(text[0]));
+  // `gh repo` after any leading flags (`gh -R o/r repo delete`).
+  const sub = leading ? leading[0] : 0;
+  if (call.args[sub]?.text === "repo") {
+    const found = classifyGhRepo(call.args.slice(sub + 1), xargs);
+    if (found) return found;
+  }
+  if (xargs && !(text[0] === "pr" || text[0] === "api")) return unread("the gh command xargs builds");
   if (text[0] === "pr") return classifyGhPr(call);
   if (text[0] === "api") return classifyGhApi(call);
   return null;
+}
+
+// The words after `gh repo`: an ask when the action changes or removes the
+// repository, or cannot be read (built at run time, left to xargs, or after
+// a flag that may take it as its value).
+function classifyGhRepo(words, xargs) {
+  const texts = words.map((w) => w.text);
+  if (wantsHelp(texts)) return null;
+  const { at, flagFirst } = repoAction(texts, 0);
+  const action = words[at];
+  if (action === undefined) return xargs ? ask(REPO_UNREAD_ASK("which `gh repo` action xargs builds")) : null;
+  if (flagFirst) return ask(REPO_UNREAD_ASK("which `gh repo` action this is when a flag comes before it"));
+  if (expands(action)) return ask(REPO_UNREAD_ASK("the `gh repo` action, which is built at run time"));
+  return REPO_ADMIN.has(action.text) ? ask(REPO_ASK(action.text)) : null;
 }
 
 const unreadMergeWord = (word, why) =>
@@ -638,8 +824,12 @@ function classifyGhPr(call) {
   if ((pr.action === null || pr.action.text === "merge") && pr.splitValues.length > 0) {
     return refuse(unreadMergeWord(pr.splitValues[0], "the shell splits it and the parts may include `--admin`"));
   }
+  const xargs = call.wrappers.includes("xargs");
+  if (xargs && pr.action === null && !pr.boolean("--help", "-h")) {
+    return refuse("it cannot read which gh pr action xargs builds. Run gh with the action and the PR number written out.");
+  }
   if (!PR_ACTIONS.includes(pr.action?.text) || pr.boolean("--help", "-h")) return null;
-  if (call.wrappers.includes("xargs")) {
+  if (xargs) {
     return refuse("it cannot read a PR command whose arguments come from xargs. Run gh with the PR number written out.");
   }
   const action = pr.action.text;
@@ -659,7 +849,8 @@ function classifyGhPr(call) {
 }
 
 function classifyGhApi(call) {
-  if (MERGE_MUTATIONS.test(plain(wordsText(call)))) {
+  const said = plain(wordsText(call));
+  if (MERGE_MUTATIONS.test(said)) {
     return refuse("it cannot check a GraphQL mutation that merges, opens or readies a PR. Use gh pr merge, gh pr ready or gh pr create.");
   }
   const api = parseApiArgs(call.args.slice(1));
@@ -669,14 +860,16 @@ function classifyGhApi(call) {
   }
   if (!api.endpoint) return null;
   if (expands(api.endpoint)) {
-    return api.method === "GET" ? null : refuse("it cannot tell which endpoint this gh api write goes to. Write the endpoint out in full.");
+    return READ_METHOD.test(api.method) ? null : refuse("it cannot tell which endpoint this gh api write goes to. Write the endpoint out in full.");
   }
   const where = apiPath(api.endpoint.text);
   if (API.graphql.test(where)) {
+    if (BRANCH_MUTATIONS.test(said)) return refuseBranchWrite();
     return graphqlQueryReadable(api) ? null
       : refuse("it cannot read a GraphQL query from a file, stdin or a variable. Pass it inline with -f query='...'.");
   }
-  if (api.method === "GET") return null;
+  if (READ_METHOD.test(api.method)) return null;
+  if (API.branchWrite.test(where)) return refuseBranchWrite();
   if (API.createPr.test(where)) return refuse("it cannot check a PR opened through gh api. Use gh pr create.");
   if (API.mergeBranch.test(where)) return refuse("it cannot check a branch merge through gh api. Use gh pr merge.");
   // gh pr merge refuses a merge that branch protection blocks unless given
@@ -692,10 +885,57 @@ function classifyGhApi(call) {
 // node -e, alias, a wrapper the walk does not know) is refused.
 function classifyOther(call, prog) {
   if (prog === null) return unread("a command whose program is built at run time");
+  if (prog === "git") {
+    const found = classifyGitConfig(call);
+    if (found) return found;
+  }
   if (READERS.has(prog)) return null;
   const said = plain(wordsText(call));
-  if (prActions(said) === 0 && !MERGE_MUTATIONS.test(said)) return null;
-  return namesAdminMerge(said) ? refuse(`${ADMIN_REASON} Run gh directly, not through another program.`, true) : refuse("it cannot read a PR command run through another program. Run gh directly.");
+  if (!namesWrite(said)) {
+    return repoAdminCount(said) > 0 ? ask(REPO_UNREAD_ASK("a gh command run through another program")) : null;
+  }
+  return namesAdminMerge(said) ? refuse(`${ADMIN_REASON} Run gh directly, not through another program.`, true) : refuse("it cannot read a gh or GitHub API command run through another program. Run gh directly, in its own Bash call.");
+}
+
+// The config a git call sets, as [{ key, value }]: `-c key=value`,
+// `git config [options] key value`, and `--config-env key=VAR` (either
+// spelling), whose value comes from the environment (value null).
+function gitConfigSets(call) {
+  const words = call.args;
+  const isConfig = words.some((w) => w.text === "config");
+  const sets = [];
+  for (let i = 0; i < words.length; i++) {
+    const text = plain(words[i].text);
+    const env = /^--config-env(?:=(.*))?$/i.exec(text);
+    if (env) {
+      const key = env[1] !== undefined ? { text: env[1], dynamic: words[i].dynamic } : words[i + 1];
+      if (key) sets.push({ key, value: null });
+      if (env[1] === undefined) i++;
+      continue;
+    }
+    const pair = /^([a-z][\w-]*(?:\.[^=\s]+)?\.[\w-]+)=(.*)$/is.exec(text);
+    if (pair) sets.push({ key: { text: pair[1], dynamic: false }, value: { text: pair[2], dynamic: words[i].dynamic } });
+    else if (isConfig && /^[a-z][\w-]*\.\S+$/i.test(text) && words[i + 1]) sets.push({ key: { text, dynamic: false }, value: words[i + 1] });
+  }
+  return sets;
+}
+
+// git config that runs a command the gate cannot read: an alias whose value
+// may run a shell command (`!...`) or set another alias, any alias from the
+// environment, or a value (core.pager, core.sshCommand, an alias) that names
+// a gh write.
+function classifyGitConfig(call) {
+  for (const { key, value } of gitConfigSets(call)) {
+    const isAlias = expands(key) || /^alias\./i.test(plain(key.text));
+    const said = value ? plain(value.text) : "";
+    if (isAlias && (value === null || expands(value) || /!|alias\.|--config-env/i.test(said))) {
+      return refuse("it cannot read what a git shell alias (a value that starts with `!`, or one read from the environment) runs, and it may run gh. Run the command directly, not through a git alias.");
+    }
+    if (value && (namesWrite(said) || repoAdminCount(said) > 0)) {
+      return refuse(`it cannot read a gh command that git runs from its config (\`${plain(key.text)}\`). Run gh directly, in its own Bash call.`);
+    }
+  }
+  return null;
 }
 
 // The HTTP clients the gate reads, by program name.
@@ -708,8 +948,9 @@ const CLASSIFIERS = {
 // Classify one simple command into the PR operation it makes, or null:
 //   { kind: "create", pr, repo }               gh pr create / new, draft or not
 //   { kind: "remote", what, selector, repo }   a gh pr merge or ready of an existing PR
-//   { kind: "refuse", reason }                 a form the gate cannot read
+//   { kind: "refuse", reason, bypass }         a form the gate refuses
 //   { kind: "unread", what }                   a command the gate cannot read
+//   { kind: "ask", reason }                    a command the user approves first
 function classify(call, shell) {
   const prog = shell.nameOf(call);
   const byProgram = CLASSIFIERS[prog];
@@ -733,14 +974,14 @@ function readText(call) {
 // assignments and heredoc bodies included. Counted both ways, so text the
 // lexer drops (a redirection target) or joins ($(true)) cannot pad the
 // read count past the line's.
-function lineHints(command, shell) {
+function lineHints(command, shell, count = hintCount) {
   let total = 0;
   for (const item of shell.lex(command)) {
     if (item.type !== "cmd") continue;
-    total += hintCount(item.words.map((w) => w.text).join(" "));
-    for (const doc of item.heredocs) total += hintCount(doc.body);
+    total += count(item.words.map((w) => w.text).join(" "));
+    for (const doc of item.heredocs) total += count(doc.body);
   }
-  return Math.max(total, hintCount(command));
+  return Math.max(total, count(command));
 }
 
 // A refusal the walk could not read: what it could not read, and the way out.
@@ -844,46 +1085,61 @@ const formRefusal = (reason) =>
 
 const bypassRefusal = (reason) => `Refused by the review gate: ${reason}\nA Review record does not clear this, and neither does writing the bypass another way.`;
 
-// Every reason to refuse a Bash command. An empty list allows it.
-// shell is agent-hook-shell.mjs, passed in so it loads inside main's try.
+// Every reason to refuse a Bash command, and every reason to ask the user
+// first: { problems, asks }. Both empty allows it; any problem refuses it,
+// whatever the asks. shell is agent-hook-shell.mjs, passed in so it loads
+// inside main's try.
 //
 // A call the gate cannot read (an eval or sh -c script built at run time, a
 // script piped into a shell, a program built at run time) is refused only
 // when the line names more PR writes than the gh and HTTP calls the gate did
 // read. So `eval "$(ssh-agent -s)" && gh pr merge 5` is checked like the
 // merge alone, and `X='gh pr merge 5'; eval "$X"` is refused.
-export function bashProblems(command, cwd, shell) {
-  if (!MAY_CONCERN.test(plain(command))) return [];
+// The same count, for `gh repo` commands that change the repository, asks
+// instead: `X='gh repo delete o/r'; eval "$X"` asks the user.
+const refused = (reason) => ({ problems: [formRefusal(reason)], asks: [] });
+const asking = (reason) => ({ problems: [], asks: [reason] });
+export function bashCheck(command, cwd, shell) {
+  const none = { problems: [], asks: [] };
+  if (!MAY_CONCERN.test(plain(command))) return none;
   if (command.length > MAX_LINE) {
     // Only linear scans here: hints, the word gh, an HTTP client next to GitHub.
     const risky = hintCount(command) > 0 || /\bgh\b/.test(command)
       || (/\b(?:curl|wget|https?|xh|xhs)\b/.test(command) && /github/i.test(command));
-    return risky ? [formRefusal("this command is too long for it to check, and it may write to a PR. Split it into shorter Bash calls.")] : [];
+    return risky ? refused("this command is too long for it to check, and it may write to a PR. Split it into shorter Bash calls.") : none;
   }
   let steps;
   let total;
+  let repoTotal;
   try {
     steps = [...shell.walk(command, cwd)];
     total = lineHints(command, shell);
+    repoTotal = lineHints(command, shell, repoAdminHints);
   } catch {
-    return hintCount(command) > 0 ? [formRefusal("it cannot parse this command, and the command may write to a PR. Split it into simpler Bash calls, and run the gh PR command on its own.")] : [];
+    if (hintCount(command) > 0) {
+      return refused("it cannot parse this command, and the command may write to a PR. Split it into simpler Bash calls, and run the gh PR command on its own.");
+    }
+    return repoAdminHints(command) > 0 ? asking(REPO_UNREAD_ASK("this command")) : none;
   }
   const ops = steps.map((step) => ({
     step,
     op: step.opaque ? unread(`the script that \`${shell.nameOf(step.call) ?? "this command"}\` runs`) : classify(step.call, shell),
   }));
-  const read = ops
-    .filter(({ step, op }) => op?.kind !== "unread" && CLASSIFIERS[shell.nameOf(step.call)])
-    .reduce((n, { step }) => n + hintCount(readText(step.call)), 0);
-  const hidden = total > read;
+  const readCalls = ops.filter(({ step, op }) => op?.kind !== "unread" && CLASSIFIERS[shell.nameOf(step.call)]);
+  const countRead = (count) => readCalls.reduce((n, { step }) => n + count(readText(step.call)), 0);
+  const hidden = total > countRead(hintCount);
+  const anyUnread = ops.some(({ op }) => op?.kind === "unread");
   const adminHidden = namesAdminMerge(plain(command));
   const problems = ops
     .map(({ step, op }) => {
       if (op?.kind === "unread") return hidden ? unreadRefusal(op.what, adminHidden) : null;
+      if (op?.kind === "ask") return null;
       return op && problemFor(op, step.dir, cwd);
     })
     .filter(Boolean);
-  return [...new Set(problems)];
+  const asks = ops.filter(({ op }) => op?.kind === "ask").map(({ op }) => op.reason);
+  if (anyUnread && repoTotal > countRead(repoAdminHints)) asks.push(REPO_UNREAD_ASK("part of this line"));
+  return { problems: [...new Set(problems)], asks: [...new Set(asks)] };
 }
 
 // Every reason to refuse an MCP tool call. An empty list allows it.
@@ -916,19 +1172,23 @@ async function main() {
   const concerns = tool === "Bash" ? typeof command === "string" && MAY_CONCERN.test(plain(command)) : tool.startsWith("mcp__");
   if (!concerns) return;
   let problems;
+  let asks = [];
   try {
     // Loaded here, so a missing shell module refuses instead of exiting 1,
     // which Claude Code would treat as allow.
     const shell = await import("./agent-hook-shell.mjs");
-    problems = tool === "Bash"
-      ? bashProblems(command, payload.cwd ?? process.cwd(), shell)
-      : mcpProblems(tool, payload.tool_input ?? {});
+    if (tool === "Bash") ({ problems, asks } = bashCheck(command, payload.cwd ?? process.cwd(), shell));
+    else problems = mcpProblems(tool, payload.tool_input ?? {});
   } catch (error) {
     problems = [`review-gate: the hook failed while checking a PR operation, so it refuses: ${error?.stack ?? error}`];
   }
   if (problems.length) {
     process.stderr.write(`${problems.join("\n\n")}\n`);
     process.exitCode = 2;
+  } else if (asks.length) {
+    // Claude Code shows the user a permission prompt with this reason.
+    const decision = { hookEventName: "PreToolUse", permissionDecision: "ask", permissionDecisionReason: asks.join("\n\n") };
+    process.stdout.write(`${JSON.stringify({ hookSpecificOutput: decision })}\n`);
   }
 }
 

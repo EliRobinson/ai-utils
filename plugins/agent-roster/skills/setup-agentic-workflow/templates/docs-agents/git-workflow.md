@@ -103,4 +103,9 @@ Never run `git commit --no-verify`, `git push --no-verify` or `HUSKY=0`. If a ho
 
 ## Branch protection is never bypassed
 
-Never use `gh pr merge --admin`, and never merge through the REST API (`gh api -X PUT .../pulls/N/merge`). Both skip the branch protection check that a plain `gh pr merge` makes. If checks fail or a branch rule blocks a merge, stop and ask the owner what to do, and say what blocks it. The owner can fix the check or the rule, or merge the PR themselves on GitHub. The review gate hook refuses both forms ([review-gate.md](review-gate.md#the-hook)).
+- Never use `gh pr merge --admin`, and never merge through the REST API (`gh api -X PUT .../pulls/N/merge`). Both skip the branch protection check that a plain `gh pr merge` makes. If checks fail or a branch rule blocks a merge, stop and ask the owner what to do, and say what blocks it. The owner can fix the check or the rule, or merge the PR themselves on GitHub.
+- Never change a branch, its protection, a ruleset or the repository's settings through the GitHub API. Push and delete branches with git from your worktree (`git push origin --delete <branch>`). Protection, rulesets and repository settings are the owner's.
+- Do not set gh aliases, or git aliases that run shell commands (`!...`). Write every gh command out in full.
+- `gh repo edit`, `rename`, `delete`, `archive` and `unarchive` change or remove the repository. Run them only when the owner asked for that change. If the prompt for one is denied or cannot be shown, stop and ask the owner; do not run it another way.
+
+The review gate hook refuses the merges, API writes and aliases above, and asks the user before the `gh repo` commands. The exact forms are in [review-gate.md](review-gate.md#the-hook).
