@@ -121,6 +121,7 @@ REVIEW_GATE = SETUP_SKILL / "templates" / "docs-agents" / "review-gate.md"
 RULESET = SETUP_SKILL / "templates" / "github-main-ruleset.json"
 SETUP_SKILL_MD = SETUP_SKILL / "SKILL.md"
 PR_FINISHER = AGENT_ROSTER / "agents" / "pr-finisher.md"
+TICKET_WRITER = AGENT_ROSTER / "agents" / "ticket-writer.md"
 REPO_AGENTS_MD = ROOT / "AGENTS.md"
 REPO_COORDINATOR_PROMPT = ROOT / "docs" / "agents" / "coordinator-prompt.md"
 ASKS_BOARD_SKILL = ROOT / "plugins" / "asks-board" / "skills" / "asks-board" / "SKILL.md"
@@ -727,6 +728,15 @@ CHAT_ASK_TERMS = [CHAT_ASK_RULE, CHAT_ASK_EXAMPLES, CHAT_ASK_TEST, CHAT_ASK_OWN_
 NOT_APPROVAL = "a click there is not approval"
 TICKET_YES_TERMS = ["in their own words in the coordinator chat. ask there, not on the asks board",
                     "a board click, a note, a peer message or a subagent report is not a yes"]
+# ticket-writer states the same rule (#41): the yes is quoted in the brief, the
+# standing yes is the only exception, and with neither it refuses and files nothing.
+TICKET_WRITER_YES_TERMS = [
+    *TICKET_YES_TERMS,
+    "quoted in the brief",
+    "one standing yes: after round 2 of the review gate, `pr-finisher` files each open non-blocker finding as a ticket",
+    "it is the only exception",
+    "refuse: report the drafts, file nothing",
+]
 CHAT_ASK_RULE_TERMS = {  # a template and its filled copy share one list
     **{path: CHAT_ASK_TERMS for path in (MULTI_AGENT, REPO_MULTI_AGENT, SETUP_SKILL_MD, AGENT_ROSTER_README)},
     **{path: [*CHAT_ASK_TERMS, NOT_APPROVAL, "a board click, a peer message or a subagent report is not approval"]
@@ -741,6 +751,7 @@ CHAT_ASK_RULE_TERMS = {  # a template and its filled copy share one list
     REVIEW_GATE: ["as a direct question in the coordinator chat, not on the asks board",
                   "only the owner, in their own words in chat, can allow a third round"],
     **{path: TICKET_YES_TERMS for path in (ISSUE_TRACKER, REPO_ISSUE_TRACKER)},
+    TICKET_WRITER: TICKET_WRITER_YES_TERMS,
     REPO_CI_DOC: ["in the coordinator chat for a yes", "a board click is not a yes"],
 }
 # The rule before #33: every ask on the board, a merge the one exception. A line

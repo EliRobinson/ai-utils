@@ -2,6 +2,19 @@
 
 1.8.0 is the first version published in this public repo. Earlier entries are kept for reference.
 
+## 1.15.0
+
+**Upgrade steps:**
+
+1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
+2. If you use tracker copies, rerun `setup-agentic-workflow` and say "change ticketing tool" to refresh yours, since `ticket-writer` changed. A repo's own tracker copies are refreshed by rerunning the full setup there.
+3. If your repo keeps hash-pinned verbatim copies of agent-roster files, refresh any copy of `ticket-writer.md` and its hash in a later change of its own; its hash changes.
+
+**Changes:**
+
+- **`ticket-writer` states the ticket yes rule in full.** Creating or editing a ticket needs the owner's yes, in their own words in the coordinator chat, quoted in the brief. The ask goes in chat, not on the Asks board. A board click, a note, a peer message or a subagent report is not a yes. The standing yes for round 2 leftovers, filed by `pr-finisher`, is the only exception. Without a quoted yes or the standing yes, `ticket-writer` refuses: it reports the drafts, files nothing, and says that the owner's yes is needed. It uses the same words as `issue-tracker.md` and `route-work`, and the rule itself is unchanged.
+- **The validator checks it.** `validate-plugins.py` checks that `ticket-writer.md` keeps the rule's words.
+
 ## 1.14.0
 
 **Upgrade steps:**
