@@ -321,6 +321,61 @@ each("ago: a short age", [
   ["2026-11-20T12:00:00.000Z", "3 d ago"], ["", ""], ["not a date", ""],
 ], (iso, want) => expect(ago(iso, NOWMS), want));
 
+// The source of one function in the page, for the tripwires below.
+const body = (name) => { const m = page.match(new RegExp("\\n  (?:async )?function " + name + "\\([\\s\\S]*?\\n  }\\n")); return m ? m[0] : ""; };
+// Waiting in your chats: routes/<project> rows with chatWaiting {count, updatedAt}.
+const FRESH = "2026-11-23T11:00:00.000Z", STALE = "2026-11-22T11:00:00.000Z";
+const route = (id, chatWaiting, extra) => row(id, Object.assign({ project: id, session: "X Coordinator" }, extra, chatWaiting === undefined ? {} : { chatWaiting }));
+each("chatWaitingOf: a whole count above 0 shows, with its project, count, time and staleness", [
+  ["valid", route("web", { count: 2, updatedAt: FRESH }), { project: "web", count: 2, updatedAt: FRESH, stale: false }],
+  ["stale, past 24 hours", route("web", { count: 1, updatedAt: STALE }), { project: "web", count: 1, updatedAt: STALE, stale: true }],
+  ["exactly 24 hours is not stale", route("web", { count: 1, updatedAt: "2026-11-22T12:00:00.000Z" }), { project: "web", count: 1, updatedAt: "2026-11-22T12:00:00.000Z", stale: false }],
+  ["no updatedAt is stale", route("web", { count: 1 }), { project: "web", count: 1, updatedAt: "", stale: true }],
+  ["an unreadable updatedAt is stale", route("web", { count: 1, updatedAt: "soon" }), { project: "web", count: 1, updatedAt: "", stale: true }],
+  ["a non-text updatedAt is stale", route("web", { count: 1, updatedAt: 12345 }), { project: "web", count: 1, updatedAt: "", stale: true }],
+  ["no project field uses the doc id", row("api", { chatWaiting: { count: 3, updatedAt: FRESH } }), { project: "api", count: 3, updatedAt: FRESH, stale: false }],
+  ["an untrusted project name is one plain line", route("x", { count: 1, updatedAt: FRESH }, { project: "we|b\n<img>" }), { project: "we b img", count: 1, updatedAt: FRESH, stale: false }],
+], (_, d, want) => expect(chatWaitingOf(d, NOWMS), want));
+each("chatWaitingOf: a missing, zero or bad count shows nothing", [
+  ["no chatWaiting", route("web")], ["chatWaiting null", route("web", null)], ["chatWaiting a number", route("web", 3)],
+  ["no count", route("web", { updatedAt: FRESH })], ["zero", route("web", { count: 0, updatedAt: FRESH })],
+  ["negative", route("web", { count: -1, updatedAt: FRESH })], ["not whole", route("web", { count: 1.5, updatedAt: FRESH })],
+  ["text", route("web", { count: "2", updatedAt: FRESH })], ["NaN", route("web", { count: NaN, updatedAt: FRESH })],
+  ["Infinity", route("web", { count: Infinity, updatedAt: FRESH })], ["too big", route("web", { count: 2 ** 60, updatedAt: FRESH })],
+  ["an object", route("web", { count: { n: 1 }, updatedAt: FRESH })], ["a row with no data", { id: "web" }], ["no row", null],
+], (_, d) => expect(chatWaitingOf(d, NOWMS), null));
+const SEVERAL = [route("web", { count: 2, updatedAt: FRESH }), route("api", { count: 1, updatedAt: STALE }), route("zero", { count: 0, updatedAt: FRESH }), route("bad", { count: "9" }), route("docs", { count: 4, updatedAt: FRESH })];
+each("chatWaiting:", [
+  ["lists projects with a count in name order", SEVERAL, (cw) => cw.list.map((w) => w.project), ["api", "docs", "web"]],
+  ["totals every listed count, stale ones too", SEVERAL, (cw) => cw.total, 7],
+  ["no routes yet shows nothing", null, (cw) => cw, { total: 0, list: [] }],
+  ["routes with no counts show nothing", [route("web"), route("api", { count: 0 })], (cw) => cw, { total: 0, list: [] }],
+], (_, routes, pick, want) => expect(pick(chatWaiting(routes, NOWMS)), want));
+each("chatWaitingNote: says when, and says a stale count may be out of date in words", [
+  [{ updatedAt: FRESH, stale: false }, "updated 60 min ago"],
+  [{ updatedAt: STALE, stale: true }, "updated 25 h ago, may be out of date"],
+  [{ updatedAt: "", stale: true }, "update time unknown, may be out of date"],
+], (w, want) => expect(chatWaitingNote(w, NOWMS), want));
+each("STALE_MS: a count is stale after 24 hours", [[]], () => expect(STALE_MS, 86400000));
+// The page reads routes and never writes them; the block has no controls and no live region.
+each("tripwire: the page only reads routes, with one onSnapshot", [[]], () => {
+  const uses = [...page.matchAll(/collection\("routes"\)(\.\w+\()?/g)].map((m) => m[1] || "");
+  return expect(uses, [".onSnapshot("]);
+});
+each("tripwire: drawChats():", [
+  ["builds no HTML from data", /innerHTML|insertAdjacentHTML|outerHTML/],
+  ["has no controls", /"button"|"input"|"a"|onclick|tabindex/],
+  ["is not a live region", /aria-live|role|say\(/],
+  ["writes nothing", /\.(update|set|add|delete)\(/],
+], (_, re) => (body("drawChats") && !re.test(body("drawChats")) ? null : "drawChats() is missing or matches " + re));
+each("tripwire: render() draws the chats block from chatWaiting(routes)", [[]], () =>
+  (/drawChats\(chatWaiting\(routes, now\), now\)/.test(body("render")) ? null : "missing"));
+// The Board Router ignores chatWaiting: the skill's router section says so.
+const SKILL = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "asks-board", "SKILL.md"), "utf8");
+const routerSection = (SKILL.split("### If you are the Board Router")[1] || "").split("\n## ")[0];
+each("router rules: the Board Router ignores chatWaiting", [[]], () =>
+  (/ignore `chatWaiting`/i.test(routerSection) ? null : "the router section does not say it ignores `chatWaiting`"));
+
 // Tripwires: the page itself must use the helpers, not a copy of the old logic.
 // They match source text on purpose; update them if the page is reworded.
 each("tripwire:", [
@@ -341,7 +396,6 @@ each("tripwire:", [
 ], (re, behaviour) => (re.test(page) ? null : "missing: " + behaviour));
 // The click needs its user gesture for anchorFor: act() calls it first, before it saves,
 // shows a result or redraws, and ping() only awaits the promise act() made.
-const body = (name) => { const m = page.match(new RegExp("\\n  (?:async )?function " + name + "\\([\\s\\S]*?\\n  }\\n")); return m ? m[0] : ""; };
 // From the click's card node on: the early return before it (a click that changes
 // nothing) needs no anchor.
 const acting = () => { const a = body("act"), k = a.indexOf("const node ="); return k >= 0 ? a.slice(k) : a; };
