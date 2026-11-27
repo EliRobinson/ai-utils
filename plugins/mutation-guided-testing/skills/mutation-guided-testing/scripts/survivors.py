@@ -16,8 +16,8 @@ concatenated (see reference/python.md).
 
 Keeps only mutants on changed lines (from diff_scope.py --json), drops
 Tailwind/CSS class-string mutants as visual-only noise, ranks the rest by
-risk, and prints at most SURVIVOR_CAP_PER_FILE per changed source file
-(or --cap) as a table to fill in. Changed lines no test runs are listed in
+risk, and prints at most SURVIVOR_CAP_PER_FILE x (changed source files)
+of them in total as a table to fill in; --cap can only lower that. Changed lines no test runs are listed in
 full. The diff mutation score is printed for information only; it is not a
 gate.
 
@@ -70,14 +70,17 @@ RISK_WORDS = re.compile(
     r"expir|deadline|ttl|until|lock|mutex|env|fallback|default|limit|max|min|"
     r"disabled|aria|controlled|checked|value",
     re.I)
-# A string literal of two or more CSS utility classes with a hyphen somewhere,
-# e.g. "h-8 px-2 text-sm". One token ("org-admin", "aria-disabled", "2024-01-01")
-# is a value, not a class list.
-CLASS_TOKEN = r"[\w:\[\]/.%#()&>=!*,+-]+"
+# A string literal of two or more lowercase CSS utility classes, e.g.
+# "h-8 px-2 text-sm". One token ("org-admin", "2024-01-01") is a value, and
+# words ("read-only file", "Sign-in failed") are copy, not a class list.
+CLASS_TOKEN = r"[a-z0-9:\[\]/.%#()&>=!*,+_-]+"
 CLASS_STRING = re.compile(rf"^{CLASS_TOKEN}(\s+{CLASS_TOKEN})+$")
+UTILITY_MARK = re.compile(r"[-:\[]")
+# A line that hands the string to a class prop or class helper.
+CLASS_CONTEXT = re.compile(r"className|class=|class:|clsx\(|cn\(|cva\(|tw`|twMerge|classList")
 MUTMUT_HEADER = re.compile(r"^# (\S+): (.+)$")
 MUTMUT_HUNK = re.compile(r"^@@ -(\d+)")
-MUTMUT_NAME = re.compile(r"\.x[_ǁ](.+?)__mutmut_\d+$")
+MUTMUT_NAME = re.compile(r"\.x[_ǁ]([^.]+?)__mutmut_\d+$")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -120,9 +123,13 @@ def read_scope(path):
         sys.exit(f"survivors: {path} is not a diff_scope.py --json file")
     here = subprocess.run(["git", "rev-parse", "--show-toplevel"],
                           capture_output=True, text=True)
-    if here.returncode == 0 and os.path.realpath(here.stdout.strip()) != os.path.realpath(scope["repo"]):
+    if here.returncode != 0:
+        sys.exit("survivors: run this from inside the repo that diff_scope.py scanned "
+                 f"({scope['repo']})")
+    if os.path.realpath(here.stdout.strip()) != os.path.realpath(scope["repo"]):
         sys.exit(f"survivors: {path} is the scope of {scope['repo']}, not of this repo "
-                 f"({here.stdout.strip()}). Run diff_scope.py here first.")
+                 f"({here.stdout.strip()}). Run survivors.py from the repo that diff_scope.py "
+                 "scanned, or run diff_scope.py here first.")
     return scope
 
 
@@ -143,7 +150,7 @@ def outcome(table, not_run, raw, where):
     return None
 
 
-def build(report_path, mutants):
+def inside_repo(report_path, mutants):
     """Keep the mutants whose file is inside the repo."""
     kept = [m for m in mutants if m.file is not None]
     if len(kept) < len(mutants):
@@ -152,6 +159,7 @@ def build(report_path, mutants):
     return kept
 
 
+# go_mutate.sh calls this one too, for its "Runnable: 0" check.
 def gremlins_ran(rep):
     """How many mutants Gremlins actually ran (killed or lived). go_mutate.sh
     treats 0 as a failure ("Runnable: 0")."""
@@ -176,7 +184,7 @@ def from_gremlins(pkgdir, path, repo):
                 out.append(Mutant(norm(repo, pkgdir, fi["file_name"]), m["line"],
                                   m.get("column"), "gremlins", m["type"], m["type"].lower(),
                                   status))
-    return build(path, out), gremlins_suspect(rep)
+    return inside_repo(path, out)
 
 
 def source_text(source, loc):
@@ -190,9 +198,15 @@ def source_text(source, loc):
                      + [lines[e["line"] - 1][:e["column"] - 1]])
 
 
-def is_class_string(mutator, original):
-    return (mutator == "StringLiteral" and "-" in original
-            and CLASS_STRING.match(original.strip("\"'`")) is not None)
+def is_class_string(mutator, original, line=""):
+    """Visual-only noise: a class list, either handed to a class prop or helper
+    on its line, or with most of its tokens shaped like utilities."""
+    text = original.strip("\"'`")
+    if mutator != "StringLiteral" or not CLASS_STRING.match(text):
+        return False
+    tokens = text.split()
+    return bool(CLASS_CONTEXT.search(line)) or \
+        sum(bool(UTILITY_MARK.search(t)) for t in tokens) * 2 > len(tokens)
 
 
 def from_stryker(root, path, repo):
@@ -209,8 +223,9 @@ def from_stryker(root, path, repo):
                 norm(repo, root, rel), start["line"], start["column"], "stryker",
                 m["mutatorName"],
                 f"{original.strip()[:40]} → {m.get('replacement', '')[:40]}", status,
-                noise=is_class_string(m["mutatorName"], original)))
-    return build(path, out), False
+                noise=is_class_string(m["mutatorName"], original,
+                                      fi.get("source", "").splitlines()[start["line"] - 1])))
+    return inside_repo(path, out)
 
 
 @functools.lru_cache(maxsize=None)
@@ -237,11 +252,15 @@ def def_line(lines, func):
     class_re = re.compile(rf"^(\s*)class\s+{re.escape(cls[-1])}\b")
     for i, t in enumerate(lines):
         if class_re.match(t):
+            body_indent = None
             for j in range(i + 1, len(lines)):
                 body = lines[j]
-                if body.strip() and indent(body) <= indent(t):
+                if not body.strip():
+                    continue
+                if indent(body) <= indent(t):
                     break
-                if def_re.match(body) and indent(body) > indent(t):
+                body_indent = body_indent or indent(body)
+                if indent(body) == body_indent and def_re.match(body):
                     return j + 1
     return None
 
@@ -278,7 +297,7 @@ def parse_mutmut_block(lines):
 
 
 def from_mutmut(root, path, repo):
-    out = []
+    out, outside = [], []
     for name, raw, lines in mutmut_blocks(read_report(path, as_json=False)):
         status = outcome(MUTMUT_STATUS, MUTMUT_NOT_RUN, raw, path)
         parsed = parse_mutmut_block(lines)
@@ -286,16 +305,19 @@ def from_mutmut(root, path, repo):
             continue
         file, offset, removed = parsed
         file_rel = norm(repo, root, file)
+        if file_rel is None:
+            outside.append(Mutant(None, 0, None, "mutmut", "mutmut", removed, status))
+            continue
         m = MUTMUT_NAME.search(name)
-        start = def_line(file_lines(os.path.join(repo, file_rel)), m.group(1)) \
-            if m and file_rel else None
+        start = def_line(file_lines(os.path.join(repo, file_rel)), m.group(1)) if m else None
         if start is None:
-            warn(f"{path}: cannot find the function of {name} in {file_rel or file}; left out. "
-                 "Run survivors.py before you edit that file again.")
+            warn(f"{path}: cannot find the function for {name} in {file_rel}; left out. "
+                 "The file may have changed since mutmut ran. Rerun mutmut after your "
+                 "last edit.")
             continue
         out.append(Mutant(file_rel, start + offset - 1, None, "mutmut", "mutmut",
                           removed.strip()[:80], status))
-    return out, False
+    return inside_repo(path, out + outside)
 
 
 def union(mutants):
@@ -358,7 +380,8 @@ def triage(scope, mutants, cap):
         "scored": len(scored),
         "killed": sum(m.status == KILLED for m in scored),
         "unscored_tools": sorted({m.tool for m in real} - {m.tool for m in scored}),
-        "alive": alive,
+        "surviving": len(alive),
+        "shown": alive[:cap],
         "noise": len(on_diff) - len(real),
         "cap": cap,
         "no_coverage": [f"{f}:{spans(sorted(ls))}" for f, ls in sorted(uncovered.items())],
@@ -366,11 +389,12 @@ def triage(scope, mutants, cap):
 
 
 def render(t, repo, suspect):
+    """`suspect`: Gremlins reports whose kills look like build failures."""
     out = []
     if t["scored"]:
         pct = 100.0 * t["killed"] / t["scored"]
-        note = (f" (suspect: kills in {', '.join(suspect)} look like build failures; "
-                "rerun with go_mutate.sh)") if suspect else ""
+        note = (f" (not trustworthy: kills in {', '.join(suspect)} look like build "
+                "failures)") if suspect else ""
         out.append(f"Diff mutation score (information, not a gate): {t['killed']}/"
                    f"{t['scored']} = {pct:.0f}%{note}")
     for tool in t["unscored_tools"]:
@@ -382,8 +406,10 @@ def render(t, repo, suspect):
     out.append(f"Visual-only class-string mutants left out: {t['noise']}")
     out.append("No coverage (changed lines no test runs): "
                + ("; ".join(t["no_coverage"]) or "none"))
-    shown = t["alive"][: t["cap"]]
-    out.append(f"Surviving: {len(t['alive'])}; showing {len(shown)} (cap {t['cap']})\n")
+    shown = t["shown"]
+    more = "; pass a higher --cap, up to the default, to see more" \
+        if t["surviving"] > len(shown) and t["cap"] < t["max_cap"] else ""
+    out.append(f"Surviving: {t['surviving']}; showing {len(shown)} (cap {t['cap']}){more}\n")
     if shown:
         out.append("| # | where | mutation | status | code | verdict |")
         out.append("|---|---|---|---|---|---|")
@@ -401,31 +427,33 @@ def main():
     ap.add_argument("--gremlins", action="append", default=[])
     ap.add_argument("--stryker", action="append", default=[])
     ap.add_argument("--mutmut", action="append", default=[])
-    ap.add_argument("--cap", type=int, help=f"default: {SURVIVOR_CAP_PER_FILE} per changed file")
+    ap.add_argument("--cap", type=int, help=f"lower the cap (default and maximum: "
+                    f"{SURVIVOR_CAP_PER_FILE} x changed source files)")
     ap.add_argument("--json", dest="json_out")
     a = ap.parse_args()
     if not (a.gremlins or a.stryker or a.mutmut):
         sys.exit("survivors: pass at least one --gremlins, --stryker or --mutmut report")
     scope = read_scope(a.scope)
     repo = scope["repo"]
-    mutants, suspect = [], []
+    mutants = []
     for parse, values in ((from_gremlins, a.gremlins), (from_stryker, a.stryker),
                           (from_mutmut, a.mutmut)):
         for v in values:
-            root, path = split_arg(v)
-            found, is_suspect = parse(root, path, repo)
-            mutants += found
-            if is_suspect:
-                suspect.append(path)
-                warn(f"{path}: every kill took under {FAST_KILL_SECONDS}s and none lived. "
-                     "Kills this fast usually mean the build is failing, often from relative "
-                     "`replace` paths in go.mod. Rerun with go_mutate.sh, which makes them "
-                     "absolute.")
-    cap = a.cap if a.cap is not None else SURVIVOR_CAP_PER_FILE * len(scope["files"])
-    t = triage(scope, union(mutants), cap)
+            mutants += parse(*split_arg(v), repo)
+    suspect = [path for _, path in map(split_arg, a.gremlins)
+               if gremlins_suspect(read_report(path, as_json=True))]
+    for path in suspect:
+        warn(f"{path}: every kill took under {FAST_KILL_SECONDS}s and none lived, which "
+             "usually means the build is failing. If this report did not come from "
+             "go_mutate.sh, rerun with it: it makes relative `replace` paths absolute. If it "
+             "did, run `go vet` and `go test -count=1` on the package to see why the build "
+             "fails, and do not trust this score.")
+    max_cap = SURVIVOR_CAP_PER_FILE * len(scope["files"])
+    cap = max_cap if a.cap is None else max(0, min(a.cap, max_cap))
+    t = dict(triage(scope, union(mutants), cap), max_cap=max_cap)
     if a.json_out:
         with open(a.json_out, "w") as f:
-            json.dump({**t, "alive": [dataclasses.asdict(m) for m in t["alive"][:cap]],
+            json.dump({**t, "shown": [dataclasses.asdict(m) for m in t["shown"]],
                        "suspect": suspect}, f, indent=2)
     print(render(t, repo, suspect))
 

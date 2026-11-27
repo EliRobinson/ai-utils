@@ -36,6 +36,13 @@ def run(cwd, *cmd, env=None, check=True):
                           env={**os.environ, **GIT_ENV, **(env or {})})
 
 
+def split_shell(line):
+    """A command line's words as a shell reads them; `(`, `)` and `&&` are words."""
+    lex = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    return list(lex)
+
+
 def write(root, rel, text):
     path = os.path.join(root, rel)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -80,10 +87,9 @@ class Repo:
 
     def commands(self):
         """diff_scope.py's suggested command lines, split as a shell would."""
-        out = self.diff_scope("--base", "origin/main").stdout
-        return [shlex.split(line, comments=True) for line in out.splitlines()
-                if line.startswith("  ") and not line.lstrip().startswith(("#", "go ", "ts ",
-                                                                             "python "))]
+        out = self.diff_scope("--base", "origin/main").stdout.split("Suggested commands", 1)[1]
+        return [split_shell(line) for line in out.splitlines()[1:]
+                if not line.lstrip().startswith("#")]
 
     def save(self, name, data):
         path = self.scratch(name)
@@ -101,6 +107,14 @@ class Repo:
         proc = self.survivors(scope, *args, "--json", out)
         with open(out) as f:
             return json.load(f), proc
+
+
+def gremlins_report(*mutations):
+    """fixtures/gremlins-report.json, with these mutations in its one file."""
+    rep = fixture("gremlins-report.json")
+    if mutations:
+        rep["files"][0]["mutations"] = list(mutations)
+    return rep
 
 
 GO_BASE = {"svc/go.mod": "module example.com/svc\n\ngo 1.22\n",
@@ -156,6 +170,17 @@ class DiffScopeTest(unittest.TestCase):
                 run(self.repo.dir, "git", "config", key, "true")
                 self.repo.commit({"svc/auth/auth.go": f"package auth\n\n// {key}\n"})
                 self.assertEqual(self.paths(), ["svc/auth/auth.go"])
+
+    def test_an_added_line_that_starts_with_plus_signs_is_not_a_file_header(self):
+        self.repo.commit({"svc/auth/auth.go":
+                          "package auth\n++ x\n\nfunc A() int { return 1 }\n// end\n"})
+        self.assertEqual(self.repo.scope()["files"][0]["lines"], [[2, 2], [5, 5]])
+
+    def test_a_file_name_with_a_newline_is_skipped_with_a_warning(self):
+        self.repo.commit({"web/src/a\nrm -rf x #.ts": "export const a = 1;\n"})
+        out = self.repo.diff_scope("--base", "origin/main")
+        self.assertEqual(("nothing to mutate" in out.stdout, "control character" in out.stderr),
+                         (True, True))
 
     def test_pure_deletion_leaves_nothing_to_mutate(self):
         self.repo.commit({"svc/auth/auth.go": "package auth\n"})
@@ -267,7 +292,7 @@ class GremlinsSurvivorsTest(unittest.TestCase):
 
     def test_not_covered_is_a_survivor_with_no_coverage(self):
         t, _ = self.triage()
-        self.assertIn((11, "no coverage"), [(m["line"], m["status"]) for m in t["alive"]])
+        self.assertIn((11, "no coverage"), [(m["line"], m["status"]) for m in t["shown"]])
 
     def test_not_covered_lines_are_listed_in_full(self):
         t, proc = self.triage(None, "--cap", "0")
@@ -281,24 +306,21 @@ class GremlinsSurvivorsTest(unittest.TestCase):
         run(self.repo.dir, "git", "update-ref", "refs/remotes/origin/main", "HEAD")
         self.repo.commit({"svc/auth/auth.go": AUTH_GO.replace("n + 1", "n + 2")})
         self.scope = self.repo.scope()
-        self.assertEqual([m["line"] for m in self.triage()[0]["alive"]], [11])
+        self.assertEqual([m["line"] for m in self.triage()[0]["shown"]], [11])
 
     def test_two_mutants_of_one_kind_on_one_line_count_separately(self):
-        rep = fixture("gremlins-report.json")
-        rep["files"][0]["mutations"] = [
-            {"type": "CONDITIONALS_BOUNDARY", "status": status, "line": 7, "column": col}
-            for status, col in (("KILLED", 9), ("LIVED", 13))]
-        self.assertEqual([m["column"] for m in self.triage(rep)[0]["alive"]], [13])
+        rep = gremlins_report(*({"type": "CONDITIONALS_BOUNDARY", "status": status, "line": 7,
+                                 "column": col} for status, col in (("KILLED", 9), ("LIVED", 13))))
+        self.assertEqual([m["column"] for m in self.triage(rep)[0]["shown"]], [13])
 
     def test_stronger_mutator_ranks_first(self):
-        self.assertEqual([m["line"] for m in self.triage()[0]["alive"]], [7, 11])
+        self.assertEqual([m["line"] for m in self.triage()[0]["shown"]], [7, 11])
 
     def test_same_mutation_ranks_first_on_a_risky_line(self):
-        rep = fixture("gremlins-report.json")
-        rep["files"][0]["mutations"] = [
-            {"type": "CONDITIONALS_NEGATION", "status": "LIVED", "line": ln, "column": 5}
-            for ln in (4, 7)]  # `if !ok {` vs `return org != ""`
-        self.assertEqual([m["line"] for m in self.triage(rep)[0]["alive"]], [7, 4])
+        # `if !ok {` vs `return org != ""`
+        rep = gremlins_report(*({"type": "CONDITIONALS_NEGATION", "status": "LIVED", "line": ln,
+                                 "column": 5} for ln in (4, 7)))
+        self.assertEqual([m["line"] for m in self.triage(rep)[0]["shown"]], [7, 4])
 
     def test_survivor_cap_is_seven_per_changed_file(self):
         t, _ = self.triage(None, files=self.scope["files"] * 3)
@@ -306,17 +328,17 @@ class GremlinsSurvivorsTest(unittest.TestCase):
 
     def test_list_is_capped(self):
         t, proc = self.triage(None, "--cap", "1")
-        shown = {"JSON list": len(t["alive"]),
+        shown = {"JSON list": len(t["shown"]),
                  "printed table": len(re.findall(r"^\| \d+ \|", proc.stdout, re.M))}
         for name, count in shown.items():
             with self.subTest(name):
                 self.assertEqual(count, 1)
 
-    def test_kills_too_fast_to_be_real_mark_the_score_suspect(self):
+    def test_kills_too_fast_to_be_real_mark_the_score_untrustworthy(self):
         rep = dict(fixture("gremlins-report.json"), mutants_lived=0, elapsed_time=0.05)
         _, proc = self.triage(rep)
         cases = {"warning": "build is failing" in proc.stderr,
-                 "score line": bool(re.search(r"^Diff mutation score.*suspect", proc.stdout, re.M))}
+                 "score line": bool(re.search(r"^Diff mutation score.*not trustworthy", proc.stdout, re.M))}
         for where, found in cases.items():
             with self.subTest(where):
                 self.assertTrue(found, proc)
@@ -347,7 +369,7 @@ class StrykerSurvivorsTest(unittest.TestCase):
         return rep
 
     def alive(self, t):
-        return sorted((m["line"], m["mutator"], m["status"]) for m in t["alive"])
+        return sorted((m["line"], m["mutator"], m["status"]) for m in t["shown"])
 
     def test_survivors_and_no_coverage_are_listed_and_the_rest_are_not(self):
         self.assertEqual(self.alive(self.triage()[0]), [
@@ -374,24 +396,29 @@ class StrykerSurvivorsTest(unittest.TestCase):
         rep = copy.deepcopy(self.report)
         rep["files"] = {"../../outside.tsx": rep["files"]["src/select.tsx"]}
         t, proc = self.triage(rep)
-        self.assertEqual((t["alive"], "outside the repo" in proc.stderr), ([], True))
+        self.assertEqual((t["shown"], "outside the repo" in proc.stderr), ([], True))
 
 
 class ClassStringTest(unittest.TestCase):
     CASES = [
-        ('"h-8 px-2 text-sm"', True),
-        ("'flex items-center gap-2'", True),
-        ('"Choose one"', False),       # words, no utility class
-        ('"org-admin"', False),        # one hyphenated value
-        ('"x-api-key"', False),
-        ('"aria-disabled"', False),
-        ('"2024-01-01"', False),
+        ('"h-8 px-2 text-sm"', "", True),
+        ("'flex items-center gap-2'", "", True),
+        ('"flex grow"', 'className="flex grow"', True),   # a class prop on the line
+        ('"flex grow"', "", False),
+        ('"Choose one"', "", False),                       # words, no utility class
+        ('"org-admin"', "", False),                        # one hyphenated value
+        ('"aria-disabled"', "", False),
+        ('"2024-01-01"', "", False),
+        ('"read-only file"', "", False),                   # copy with a hyphen in it
+        ('"non-empty value required"', "", False),
+        ('"Sign-in failed"', "", False),
+        ('"Content-Type: application/json"', "", False),
     ]
 
     def test_only_class_lists_are_noise(self):
-        for literal, noise in self.CASES:
-            with self.subTest(literal):
-                self.assertEqual(survivors.is_class_string("StringLiteral", literal), noise)
+        for literal, line, noise in self.CASES:
+            with self.subTest(literal=literal, line=line):
+                self.assertEqual(survivors.is_class_string("StringLiteral", literal, line), noise)
 
 
 PRICES_PY = '''
@@ -421,7 +448,7 @@ class MutmutSurvivorsTest(unittest.TestCase):
 
     def test_function_relative_hunks_map_to_file_lines(self):
         t, _ = self.survivors(PRICES_PY)
-        self.assertEqual(sorted((m["line"], m["status"]) for m in t["alive"]),
+        self.assertEqual(sorted((m["line"], m["status"]) for m in t["shown"]),
                          [(9, "survived"), (11, "no coverage")])
 
     def test_each_status_maps_to_its_outcome(self):
@@ -431,12 +458,17 @@ class MutmutSurvivorsTest(unittest.TestCase):
             with self.subTest(status):
                 show = fixture("mutmut-show.txt").replace(": survived", f": {status}")
                 t, _ = self.survivors(PRICES_PY, show)
-                self.assertEqual([(m["line"], m["status"]) for m in t["alive"]
+                self.assertEqual([(m["line"], m["status"]) for m in t["shown"]
                                   if m["line"] == 9], alive)
 
     def test_score_is_not_given_for_a_survivors_only_report(self):
         _, proc = self.survivors(PRICES_PY)
         self.assertIn("score for mutmut: n/a", proc.stdout)
+
+    def test_a_file_outside_the_repo_is_left_out_with_a_warning(self):
+        show = fixture("mutmut-show.txt").replace("--- pkg/prices.py", "--- ../../outside.py")
+        t, proc = self.survivors(PRICES_PY, show)
+        self.assertEqual((t["shown"], "outside the repo" in proc.stderr), ([], True))
 
     def test_a_mutant_whose_function_is_gone_is_reported_not_dropped_silently(self):
         _, proc = self.survivors(PRICES_PY.replace("def infer_price", "def median_price"))
@@ -445,11 +477,16 @@ class MutmutSurvivorsTest(unittest.TestCase):
 
 class DefLineTest(unittest.TestCase):
     LINES = ("class Foo:", "    def validate(self):", "        pass",
-             "class Bar:", "    def validate(self):", "        pass",
+             "class Bar:", "    def setup(self):", "        def validate():", "            pass",
+             "    def validate(self):", "        pass",
              "def validate():", "    pass")
 
+    def test_mutmut_name_gives_the_function(self):
+        m = survivors.MUTMUT_NAME.search("pkg.x_tools.xǁBarǁvalidate__mutmut_1")
+        self.assertEqual(m.group(1), "Barǁvalidate")
+
     def test_finds_the_def_mutmut_names(self):
-        cases = {"Barǁvalidate": 5, "Fooǁvalidate": 2, "validate": 7, "Bazǁvalidate": None}
+        cases = {"Barǁvalidate": 8, "Fooǁvalidate": 2, "validate": 10, "Bazǁvalidate": None}
         for func, line in cases.items():
             with self.subTest(func):
                 self.assertEqual(survivors.def_line(self.LINES, func), line)
@@ -551,13 +588,20 @@ class GoMutateTest(unittest.TestCase):
         self.assertIn("--integration", self.calls("./untested")[0]["argv"])
 
     def test_only_unchanged_files_are_excluded(self):
-        argv = self.calls("--files", "calc/data.go calc/sub/util.go", "./calc")[0]["argv"]
-        patterns = [argv[i + 1] for i, a in enumerate(argv) if a == "--exclude-files"]
-        cases = {"calc/a.go": True, "calc/calc.go": True, "calc/util.go": True,
-                 "calc/data.go": False, "calc/sub/util.go": False}
-        for path, excluded in cases.items():
-            with self.subTest(path):
-                self.assertEqual(any(re.search(p, path) for p in patterns), excluded, patterns)
+        """Gremlins matches the patterns against paths relative to the package it mutates."""
+        cases = [
+            ("calc/data.go calc/sub/util.go", "./calc",
+             {"a.go": True, "calc.go": True, "util.go": True, "data.go": False,
+              "sub/util.go": False}),
+            ("calc/sub/util.go", ".", {"calc/util.go": True, "calc/sub/util.go": False}),
+        ]
+        for files, pkg, paths in cases:
+            os.path.exists(self.log) and os.remove(self.log)
+            argv = self.calls("--files", files, pkg)[0]["argv"]
+            patterns = [argv[i + 1] for i, a in enumerate(argv) if a == "--exclude-files"]
+            for path, excluded in paths.items():
+                with self.subTest(pkg=pkg, path=path):
+                    self.assertEqual(any(re.search(p, path) for p in patterns), excluded, patterns)
 
     def test_prints_one_survivors_argument_per_package(self):
         out = self.go_mutate("./calc", "./untested").stdout
@@ -566,9 +610,8 @@ class GoMutateTest(unittest.TestCase):
                           ["--gremlins", f"svc/untested={self.out}/2-untested.json"]])
 
     def test_a_run_that_does_not_count_fails(self):
-        none_ran = fixture("gremlins-report.json")
-        for m in none_ran["files"][0]["mutations"]:
-            m["status"] = "NOT COVERED"
+        none_ran = gremlins_report(*(dict(m, status="NOT COVERED") for m in
+                                     gremlins_report()["files"][0]["mutations"]))
         cases = {"no mutant ran": (none_ran, "Runnable: 0"),
                  "unreadable report": ("{not json", "cannot read the report")}
         for name, (report, message) in cases.items():
@@ -592,7 +635,7 @@ class RealGremlinsTest(unittest.TestCase):
         t, _ = repo.triage(repo.scope(), "--gremlins", arg)
         # `n > 1` -> `n >= 1` survives (no test at n == 1); a build failure would kill it,
         # and a file name survivors.py can't map would drop it.
-        self.assertIn(("svc/calc/calc.go", 5), [(m["file"], m["line"]) for m in t["alive"]],
+        self.assertIn(("svc/calc/calc.go", 5), [(m["file"], m["line"]) for m in t["shown"]],
                       proc.stderr)
 
 

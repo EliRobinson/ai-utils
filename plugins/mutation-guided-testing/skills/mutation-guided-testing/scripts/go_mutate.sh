@@ -96,6 +96,13 @@ with open(gomod, "w") as f:
     f.writelines(out)
 PY
 
+# survivors.gremlins_ran counts the mutants that ran; check it loads once, so a
+# broken import is not reported as an unreadable report for every package.
+count_ran='import json, sys; sys.path.insert(0, sys.argv[1]); import survivors
+print(survivors.gremlins_ran(json.load(open(sys.argv[2]))) if len(sys.argv) > 2 else "")'
+python3 -I -c "$count_ran" "$here" >/dev/null || {
+  echo "go_mutate: cannot load survivors.py from $here" >&2; exit 2; }
+
 # 2. Mutate each package, changed files only.
 status=0 i=0
 for pkg in "${pkgs[@]}"; do
@@ -111,13 +118,15 @@ for pkg in "${pkgs[@]}"; do
     flags+=(--integration)
   fi
   if [ -n "$files" ]; then
-    # Module-relative patterns, subpackages included, so an unchanged
-    # pkg/util.go never hides a changed pkg/sub/util.go.
+    # Gremlins matches each pattern against the path relative to the package
+    # it mutates (subpackages included), so anchor on that path: an unchanged
+    # util.go must not hide a changed sub/util.go.
     while IFS= read -r -d '' f; do
       relf=${f#"$work/mod/"}
+      prel=${f#"$dir/"}
       case " $files " in
         *" $relf "*) ;;
-        *) flags+=(--exclude-files "(^|/)$(printf '%s' "$relf" | sed 's/[][\.*^$+?(){}|]/\\&/g')\$") ;;
+        *) flags+=(--exclude-files "^$(printf '%s' "$prel" | sed 's/[][\.*^$+?(){}|]/\\&/g')\$") ;;
       esac
     done < <(find "$dir" -name '*.go' ! -name '*_test.go' -print0)
   fi
@@ -135,15 +144,14 @@ for pkg in "${pkgs[@]}"; do
     continue
   fi
   # "Runnable: 0": nothing was mutated, or no test reached the mutants.
-  if ! ran=$(python3 -I -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import survivors
-print(survivors.gremlins_ran(json.load(open(sys.argv[2]))))' "$here" "$report"); then
+  if ! ran=$(python3 -I -c "$count_ran" "$here" "$report" 2>/dev/null); then
     echo "go_mutate: cannot read the report for $pkg ($report)" >&2
     status=1
     continue
   fi
   if [ "$ran" = 0 ]; then
-    echo "go_mutate: no mutant ran for $pkg (Runnable: 0). Check --files, or use --integration" \
-         "or the package that tests it; this is not a clean result." >&2
+    echo "go_mutate: no mutant ran for $pkg (Runnable: 0). This is not a clean result." \
+         "Check --files, rerun with --integration, or pass the package whose tests cover this code." >&2
     status=1
   fi
   printf -- '--gremlins %q\n' "$module${rel:+/$rel}=$report"

@@ -36,9 +36,9 @@ export default {
 ```bash
 S="$(git rev-parse --absolute-git-dir)/mgt-scope.json"
 python3 <skill-dir>/scripts/diff_scope.py --json "$S"     # prints --mutate spans and --testFiles
-cd <project> && npx --no-install stryker run --ignoreStatic \
+(cd <project> && npx --no-install stryker run --ignoreStatic \
   --mutate "src/a.tsx:40-58,src/b.ts:10-12" \
-  --testFiles "src/a.test.tsx,src/b.test.ts"
+  --testFiles "src/a.test.tsx,src/b.test.ts")      # a subshell, so survivors.py runs from the repo root
 python3 <skill-dir>/scripts/survivors.py --scope "$S" --stryker <project>=<project>/reports/mutation/mutation.json
 ```
 

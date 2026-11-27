@@ -32,7 +32,7 @@ Do this for each commit-sized change, while you develop. It is not a review you 
    ```bash
    python3 <skill-dir>/scripts/survivors.py --scope "$S" --gremlins DIR=report.json ...
    ```
-   It keeps mutants on changed lines, drops Tailwind/CSS class-string noise, ranks by risk, shows at most **7 × changed source files**, and lists every changed line no test runs.
+   It keeps mutants on changed lines, drops Tailwind/CSS class-string noise, ranks by risk, shows at most **7 × changed source files** (`--cap N` can only lower that), and lists every changed line no test runs.
 6. **Triage every survivor shown.** A kill counts only if a test calls the code's public API, or renders and uses the component, and asserts the outcome. Each survivor ends one way:
    - **Killed:** preferably a stronger assertion in an existing test, or a new case in its table. Write a new test file only when no test covers the behaviour at all.
    - **Equivalent:** one line on why no input can tell the mutant from the original.
@@ -59,7 +59,7 @@ Do this for each commit-sized change, while you develop. It is not a review you 
 |---|---|
 | The tool is missing | Install it into the repo as a dev dependency, a scratch venv or a local `GOBIN` (see the reference). Never install globally without asking. |
 | The run would take more than ~10 min | Narrow it: changed files only, plus each file's own tests (`--testFiles`, `--files`, `source_paths`). Never mutate the whole repo by default. |
-| Gremlins: every mutant killed in under ~0.1 s each | A false result: the build is failing. Use `go_mutate.sh`. |
+| Gremlins: every mutant killed in under ~0.1 s each | A false result: the build is failing. Use `go_mutate.sh`; if you already did, run `go vet` and `go test -count=1` on the package to find why, and don't trust the score. |
 | Gremlins: "Runnable: 0" | A failure, not a clean result. Check the scope; use `--integration` or the package that tests it. |
 | A package's tests live in another package | `go_mutate.sh --integration`, or mutate from the package that tests it. |
 | Survivors are only class strings | Visual-only. Report the count; don't chase them. |

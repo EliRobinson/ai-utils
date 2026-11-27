@@ -910,7 +910,8 @@ def run_skill_tests() -> None:
         if re.search(r"^Ran 0 tests", run.stderr, re.M):
             fail(f"{where}: found no tests; add them or remove the folder")
         elif run.returncode != 0:
-            fail(f"{where}: tests failed; run `python3 -m unittest discover -s {rel(tests)}`\n"
+            fail(f"{where}: tests failed; run "
+                 f"`python3 -m unittest discover -s {rel(tests)} -p '{TEST_PATTERN}'`\n"
                  f"{tail(run.stderr)}")
 
 
@@ -931,9 +932,10 @@ def run_self_checks() -> None:
         print(f"note: node not found, skipped {len(checks)} self-check(s)", file=sys.stderr)
         return
     for check in checks:
-        run = run_gate_process(["node", str(check)], f"{check.relative_to(ROOT)}: self-check")
+        where = f"{rel(check)}: self-check"
+        run = run_gate_process(["node", str(check)], where)
         if run is not None and run.returncode != 0:
-            fail(f"{check.relative_to(ROOT)}: self-check failed\n{tail(run.stdout + run.stderr)}")
+            fail(f"{where} failed\n{tail(run.stdout + run.stderr)}")
 
 
 MARKETPLACE_REL = ".claude-plugin/marketplace.json"
