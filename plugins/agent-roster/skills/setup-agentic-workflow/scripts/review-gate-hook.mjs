@@ -4,8 +4,9 @@
 // body carries a complete `## Review` record (docs/agents/review-gate.md).
 // It always refuses a merge that bypasses branch protection: `gh pr merge
 // --admin`, and a REST merge through `gh api`. It always refuses a GitHub API
-// write that moves, deletes or renames a branch, commits to it directly, or
-// changes branch protection or rulesets, and a gh or git alias it cannot read.
+// write that moves, deletes or renames a branch, commits to it directly,
+// changes branch protection or rulesets, or changes the repository's own
+// settings, and a gh or git alias it cannot read.
 // The reviewers run on the branch before the PR exists. Ready and merge stay
 // gated too, for PRs opened outside the hook (the web UI, other tools) and
 // for bodies edited after the PR was opened.
@@ -221,13 +222,14 @@ const PR_ACTIONS = ["merge", "ready", "create", "new"];
 const MERGE_MUTATIONS =
   /\b(mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|markPullRequestReadyForReview|createPullRequest|mergeBranch)\b/;
 // GraphQL mutations that move, delete or create a branch, commit to it
-// directly, or change branch protection or rulesets.
+// directly, change branch protection or rulesets, or change the repository's
+// settings (its default branch among them).
 const BRANCH_MUTATIONS =
-  /\b(createRef|updateRefs?|deleteRef|createCommitOnBranch|(?:create|update|delete)BranchProtectionRule|(?:create|update|delete)RepositoryRuleset)\b/;
+  /\b(createRef|updateRefs?|deleteRef|createCommitOnBranch|(?:create|update|delete)BranchProtectionRule|(?:create|update|delete)RepositoryRuleset|updateRepository)\b/;
 // Text that may name a branch write through the REST API (API.branchWrite
 // holds the exact paths). Bounded by slashes, so it stays linear on long lines.
 const BRANCH_HINT =
-  /\/(?:git\/refs?|merge-upstream|rulesets|protection|rename)(?=$|[\s/?#])|repos\/[^\s/]+\/[^\s/]+\/contents(?=$|[\s/?#])/;
+  /\/(?:git\/refs?|merge-upstream|rulesets|protection|rename)(?=$|[\s/?#])|repos\/[^\s/]+\/[^\s/]+\/contents(?=$|[\s/?#])|(?:^|[^\w-])(?:repos\/[^\s/]+\/[^\s/]+|repositories\/\d+)\/?(?=$|[\s?#])/i;
 // The last part of the GitHub API paths that merge, open a PR or run GraphQL.
 // API below holds the exact paths; PR_HINT and MAY_CONCERN only need the names.
 const API_SEGMENTS = ["pulls", "merges", "graphql"];
@@ -301,8 +303,9 @@ const API = {
   mergeBranch: /\/merges$/,
   // Writes here move, delete, create or rename a branch, commit to it
   // directly (contents), sync a fork's branch, or change branch protection
-  // or rulesets. A branch name may hold slashes.
-  branchWrite: /\/git\/refs?(?:\/|$)|\/branches\/.+\/(?:protection(?:\/.*)?|rename)$|\/rulesets(?:\/|$)|\/merge-upstream$|\/repos\/[^/]+\/[^/]+\/contents(?:\/|$)/i,
+  // or rulesets, or write to the repository itself (its default branch and
+  // settings). A branch name may hold slashes.
+  branchWrite: /\/git\/refs?(?:\/|$)|\/branches\/.+\/(?:protection(?:\/.*)?|rename)$|\/rulesets(?:\/|$)|\/merge-upstream$|\/repos\/[^/]+\/[^/]+\/contents(?:\/|$)|\/repos\/[^/]+\/[^/]+$|\/repositories\/[^/]+$/i,
 };
 // A merge path is refused earlier, as a bypass.
 const PR_WRITE_PATHS = [API.createPr, API.mergeBranch];
@@ -624,7 +627,7 @@ const refuse = (reason, bypass = false) => ({ kind: "refuse", reason, bypass });
 const BYPASS_NEXT = "Never bypass branch protection. If a plain `gh pr merge` is refused because checks fail or a branch rule blocks it, stop and ask the owner, and say what blocks it; do not look for another way around it. The owner can fix the check or the rule, or merge the PR themselves on GitHub.";
 const ADMIN_REASON = `\`gh pr merge --admin\` (even \`--admin=false\`) is refused: the flag merges past required checks and branch rules. Remove \`--admin\`. ${BYPASS_NEXT}`;
 const REST_MERGE_REASON = `a merge through the REST API skips the branch protection check that gh pr merge makes, the same bypass as \`--admin\`. Run a plain \`gh pr merge\` instead (no \`--admin\`). ${BYPASS_NEXT}`;
-const BRANCH_WRITE_REASON = `a GitHub API write that moves, deletes or renames a branch, commits to it directly, or changes branch protection or rulesets is refused. Push and delete branches with git from your worktree, land changes through a PR merged with a plain \`gh pr merge\`, and leave protection and rulesets to the owner. ${BYPASS_NEXT}`;
+const BRANCH_WRITE_REASON = `a GitHub API write that moves, deletes or renames a branch, commits to it directly, changes branch protection or rulesets, or changes the repository's own settings (its default branch among them) is refused. Push and delete branches with git from your worktree, land changes through a PR merged with a plain \`gh pr merge\`, and leave protection, rulesets and repository settings to the owner. ${BYPASS_NEXT}`;
 const ALIAS_REASON = `\`gh alias set\`, \`import\` and \`delete\` are refused: an alias runs a gh command the gate cannot see, which may merge a PR past it. Write every gh command out in full. If you need an alias, stop and ask the owner.`;
 const refuseAdmin = () => refuse(ADMIN_REASON, true);
 const refuseRestMerge = () => refuse(REST_MERGE_REASON, true);
