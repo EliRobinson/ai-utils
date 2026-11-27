@@ -2,6 +2,8 @@
 // PreToolUse hook for Bash and for the PR tools of MCP servers. Refuses to
 // open a PR (draft or not), take it out of draft, or merge it, unless its
 // body carries a complete `## Review` record (docs/agents/review-gate.md).
+// It always refuses a merge that bypasses branch protection: `gh pr merge
+// --admin`, and a REST merge through `gh api`.
 // The reviewers run on the branch before the PR exists. Ready and merge stay
 // gated too, for PRs opened outside the hook (the web UI, other tools) and
 // for bodies edited after the PR was opened.
@@ -333,8 +335,11 @@ export const MCP_MATCHER = `mcp__.*__(${Object.keys(MCP_TOOLS).join("|")})`;
 // The words after `gh pr`: the action word, its flags { get, boolean } and
 // the PR selector. Flags may come before the action (`gh pr -R o/r merge 5`).
 // -R and --repo are one flag; like gh, the last one wins.
+// unread: the words after the action that the shell builds at run time and
+// that are not a flag's value. Any of them may expand to a flag (--admin).
 function parsePrArgs(words) {
   const flags = new Map();
+  const unread = [];
   let selector = null;
   let action = null;
   for (let i = 0; i < words.length; i++) {
@@ -344,7 +349,10 @@ function parsePrArgs(words) {
     const stored = REPO_FLAGS.includes(name) ? "--repo" : name;
     if ((VALUE_FLAGS[action?.text ?? "pr"] ?? VALUE_FLAGS.pr).has(name)) {
       flags.set(stored, eq === -1 ? words[++i] ?? MISSING : { text: text.slice(eq + 1), dynamic });
-    } else if (text.startsWith("-")) {
+      continue;
+    }
+    if (action !== null && expands(words[i])) unread.push(words[i]);
+    if (text.startsWith("-")) {
       flags.set(stored, eq === -1 ? "true" : text.slice(eq + 1).toLowerCase());
     } else if (action === null) {
       action = words[i];
@@ -356,7 +364,10 @@ function parsePrArgs(words) {
     action,
     get: (...names) => names.map((n) => flags.get(REPO_FLAGS.includes(n) ? "--repo" : n)).find((v) => v !== undefined),
     boolean: (...names) => names.some((n) => flags.get(n) === "true"),
+    // Given at all, with any value: --admin=false is refused like --admin.
+    given: (name) => flags.has(name),
     selector,
+    unread,
   };
 }
 
@@ -530,6 +541,14 @@ function classifyHttp(request, call) {
 
 // A refusal about how the command is written, not about the record.
 const refuse = (reason) => ({ kind: "refuse", reason });
+
+// A merge that bypasses branch protection. Never needed: when checks fail or a
+// branch rule blocks the merge, the agent stops and the owner decides.
+const BYPASS_NEXT = "Never bypass branch protection. Do not retry the merge another way: stop and ask the owner, and tell them what blocks the merge (failing checks, a branch rule).";
+const ADMIN_REASON = `\`gh pr merge --admin\` merges past required checks and branch rules. ${BYPASS_NEXT}`;
+const refuseAdmin = () => refuse(ADMIN_REASON);
+// True when text that names a PR merge also names --admin.
+const namesAdminMerge = (said) => /(?:^|[^\w-])--admin(?![\w-])/.test(said) && /\bmerge\b/.test(said);
 // A call the gate cannot read: { kind: "unread", what }. bashProblems refuses
 // it only when the line names a PR write the gate did not read elsewhere.
 const unread = (what) => ({ kind: "unread", what });
@@ -555,6 +574,12 @@ function classifyGhPr(call) {
     return refuse("it cannot read a PR command whose arguments come from xargs. Run gh with the PR number written out.");
   }
   const action = pr.action.text;
+  if (action === "merge") {
+    if (pr.given("--admin")) return refuseAdmin();
+    if (pr.unread.length > 0) {
+      return refuse(`it cannot read \`${pr.unread[0].text}\` in this merge, and it may expand to \`--admin\`. Write the PR number and every flag out in full.`);
+    }
+  }
   // A PR URL names its repo, whatever -R says.
   const url = pr.selector && !pr.selector.dynamic ? /^(.*github\.com\/[^/]+\/[^/]+)\/pull\/\d+/i.exec(pr.selector.text) : null;
   const fromUrl = url ? repoKey(url[1]) ?? url[1] : undefined;
@@ -584,16 +609,13 @@ function classifyGhApi(call) {
   if (api.method === "GET") return null;
   if (API.createPr.test(where)) return refuse("it cannot check a PR opened through gh api. Use gh pr create.");
   if (API.mergeBranch.test(where)) return refuse("it cannot check a branch merge through gh api. Use gh pr merge.");
-  const merge = API.mergePr.exec(where);
-  if (!merge) return null;
-  if (!/^\d+$/.test(merge[2])) return refuse("it cannot tell which PR this gh api merge names. Use gh pr merge <number>.");
-  return {
-    kind: "remote",
-    what: "A merge through gh api",
-    selector: { text: merge[2], dynamic: false },
-    repo: merge[1] ? { text: merge[1], dynamic: false } : null,
-    host: call.env.GH_HOST,
-  };
+  // gh pr merge refuses a merge that branch protection blocks unless given
+  // --admin; the REST endpoint has no such check, so with admin rights it is
+  // the same bypass.
+  if (API.mergePr.test(where)) {
+    return refuse(`a merge through gh api skips the branch protection check that gh pr merge makes, like \`--admin\`. Use gh pr merge, without --admin. ${BYPASS_NEXT}`);
+  }
+  return null;
 }
 
 // Any other program: one that is handed a PR command as text (python -c,
@@ -602,9 +624,8 @@ function classifyOther(call, prog) {
   if (prog === null) return unread("a command whose program is built at run time");
   if (READERS.has(prog)) return null;
   const said = plain(wordsText(call));
-  return prActions(said) > 0 || MERGE_MUTATIONS.test(said)
-    ? refuse("it cannot read a PR command run through another program. Run gh directly.")
-    : null;
+  if (prActions(said) === 0 && !MERGE_MUTATIONS.test(said)) return null;
+  return namesAdminMerge(said) ? refuseAdmin() : refuse("it cannot read a PR command run through another program. Run gh directly.");
 }
 
 // The HTTP clients the gate reads, by program name.
@@ -782,9 +803,10 @@ export function bashProblems(command, cwd, shell) {
     .filter(({ step, op }) => op?.kind !== "unread" && CLASSIFIERS[shell.nameOf(step.call)])
     .reduce((n, { step }) => n + hintCount(readText(step.call)), 0);
   const hidden = total > read;
+  const adminHidden = namesAdminMerge(plain(command));
   const problems = ops
     .map(({ step, op }) => {
-      if (op?.kind === "unread") return hidden ? unreadRefusal(op.what) : null;
+      if (op?.kind === "unread") return hidden ? (adminHidden ? formRefusal(ADMIN_REASON) : unreadRefusal(op.what)) : null;
       return op && problemFor(op, step.dir, cwd);
     })
     .filter(Boolean);

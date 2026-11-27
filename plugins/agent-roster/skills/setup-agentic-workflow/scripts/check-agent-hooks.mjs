@@ -105,6 +105,9 @@ try {
   const inNamed = (command, expect, body = "no record") => reviewIn(named, command, expect, { FAKE_PR_BODY: body });
   // A PR whose body is empty, so a checked merge is refused.
   const noBody = (command, expect) => review(command, expect, { FAKE_PR_BODY: "" });
+  // Refused, and the refusal says `phrase`: the record is complete, so only the form can refuse.
+  const refuseSays = (command, phrase, extra = { FAKE_PR_BODY: good }) => ({ ...review(command, "refuse", extra), says: phrase });
+  const ASK_OWNER = "stop and ask the owner";
   const mcp = (tool, input, expect) => ({ hook: "review", hookDir: path.join(tree, "scripts"), cwd: tree, tool, input, expect });
   const fromTree = path.join(tree, "scripts");
 
@@ -299,7 +302,6 @@ try {
     inNamed("gh pr merge 5 -R other-owner/other-repo", "allow"),
     inNamed("gh pr merge 5 -R owner/name-fork.git", "allow"),
     inNamed("gh pr merge 5 --repo https://github.com/other-owner/name", "allow"),
-    inNamed("gh api -X PUT repos/other/repo/pulls/5/merge", "allow"),
     // Review gate round 1 (1.10.0): forms reviewers found getting past the gate.
     review("curl -X POST https://api.github.com/repos/o/r/pulls -d @body.json", "refuse"),
     review("curl --json '{\"title\":\"t\"}' https://api.github.com/repos/o/r/pulls", "refuse"),
@@ -395,6 +397,46 @@ try {
     review("git commit -m 'merge ready create'", "allow"),
     review("echo gh pr merge 5", "allow"),
     review("gh pr merge --help", "allow"),
+    // --admin (1.15.0): never bypass branch protection, in any spelling or wrapper, in any repo.
+    refuseSays("gh pr merge 5 --admin", ASK_OWNER),
+    refuseSays("gh pr merge --admin 5", ASK_OWNER),
+    refuseSays("gh pr merge 5 --squash --admin --match-head-commit abc123", ASK_OWNER),
+    refuseSays("gh pr merge 5 --admin=true", ASK_OWNER),
+    refuseSays("gh pr merge 5 --admin=1", ASK_OWNER),
+    refuseSays("gh pr merge 5 --admin=false", ASK_OWNER),
+    refuseSays("gh pr merge 5 --admin=$X", ASK_OWNER),
+    refuseSays("gh pr --repo o/r merge --admin 5", ASK_OWNER),
+    refuseSays("gh pr merge 5 -sd --admin", ASK_OWNER),
+    refuseSays("timeout 60 gh pr merge 5 --admin", ASK_OWNER),
+    refuseSays("git fetch && \\\n  gh pr merge 5 --rebase --admin", ASK_OWNER),
+    refuseSays("eval 'gh pr merge 5 --admin'", ASK_OWNER),
+    refuseSays("eval \"gh pr merge 5 --admin\"", ASK_OWNER),
+    refuseSays("bash -c 'gh pr merge 5 --admin'", ASK_OWNER),
+    refuseSays("sh -euo pipefail -c 'gh pr merge 5 --squash --admin'", ASK_OWNER),
+    refuseSays("echo 'gh pr merge 5 --admin' | bash", ASK_OWNER),
+    refuseSays("bash <<< 'gh pr merge 5 --admin'", ASK_OWNER),
+    refuseSays("X='gh pr merge 5 --admin'; eval \"$X\"", ASK_OWNER),
+    refuseSays("python3 -c \"import os; os.system('gh pr merge 5 --admin')\"", ASK_OWNER),
+    refuseSays("alias m='gh pr merge 5 --admin'", ASK_OWNER),
+    { ...inNamed("gh pr merge 5 -R other/repo --admin", "refuse"), says: ASK_OWNER },
+    { ...inNamed("gh pr merge https://github.com/other/repo/pull/5 --admin", "refuse"), says: ASK_OWNER },
+    // A merge word the gate cannot read may be --admin.
+    refuseSays("gh pr merge 5 $FLAGS", "--admin"),
+    refuseSays("gh pr merge 5 --squash \"$F\"", "--admin"),
+    { ...inNamed("gh pr merge 5 -R other/repo \"$F\"", "refuse"), says: "--admin" },
+    // A REST merge skips gh's branch protection check, so it is refused like --admin.
+    refuseSays("gh api -X PUT repos/o/r/pulls/5/merge", ASK_OWNER),
+    refuseSays("gh api --method=PUT repos/o/r/pulls/5/merge -f merge_method=squash", ASK_OWNER),
+    { ...inNamed("gh api -X PUT repos/other/repo/pulls/5/merge", "refuse"), says: ASK_OWNER },
+    // Reads, plain merges and text that only names --admin still pass.
+    review("gh pr merge 5 --squash --delete-branch --match-head-commit abc123", "allow", { FAKE_PR_BODY: good }),
+    review("gh pr merge 5 --squash --subject \"$T\" --body \"$B\" -R o/r", "allow", { FAKE_PR_BODY: good }),
+    review("gh pr merge --admin --help", "allow"),
+    review("gh pr view 5 --json mergeStateStatus", "allow"),
+    review("echo gh pr merge 5 --admin", "allow"),
+    review("git commit -m 'refuse gh pr merge --admin'", "allow"),
+    review("gh issue create --title 'gh pr merge --admin is refused' --body x", "allow"),
+    inNamed("gh pr merge 5 -R other-owner/other-repo --squash", "allow"),
     { ...review("gh pr merge 5", "refuse"), hookDir: lone },
     mcp("mcp__github__merge_pull_request", { pullNumber: 5 }, "refuse"),
     mcp("mcp__github__create_pull_request", { body: "hi" }, "refuse"),
@@ -418,7 +460,8 @@ try {
       env: { ...env, ...c.extra, PATH: `${bin}${path.delimiter}${env.PATH}` },
       encoding: "utf8",
     });
-    const got = run.status === 2 ? "refuse" : run.status === 0 ? "allow" : `exit ${run.status}`;
+    let got = run.status === 2 ? "refuse" : run.status === 0 ? "allow" : `exit ${run.status}`;
+    if (got === "refuse" && c.says && !run.stderr.toLowerCase().includes(c.says.toLowerCase())) got = `refuse without "${c.says}"`;
     if (got !== c.expect) failed += 1;
     const shown = (c.tool ?? c.command).replaceAll(tmp, "<tmp>").replace(/\n[\s\S]*/, " ...");
     console.log(`${got === c.expect ? "ok  " : "FAIL"} ${c.hook.padEnd(6)} ${c.expect.padEnd(6)} ${shown}`);

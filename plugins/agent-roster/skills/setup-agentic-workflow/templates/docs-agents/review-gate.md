@@ -83,12 +83,18 @@ Rounds: 1
 
 `scripts/review-gate-hook.mjs` runs before every Bash call and before PR tools of MCP servers. It refuses, unless the PR body has a valid record:
 
-- `gh pr merge`, `gh pr ready` (for a PR opened as a draft outside this workflow), and `gh api` merges of `pulls/N/merge`;
+- `gh pr merge` and `gh pr ready` (for a PR opened as a draft outside this workflow);
 - `gh api` calls that open a PR (`POST .../pulls`), always. Use `gh pr create` instead.
 - `gh pr create`, draft or not (it reads `--body`, `--body-file`, or a quoted `"$(cat <<'EOF' ... EOF)"` body);
 - MCP tools that create a PR, draft or not;
 - MCP tools that merge or take a PR out of draft, always. Use `gh` instead.
 - A PR command it cannot read, always: one whose arguments come from `xargs`, one whose `gh` subcommand or action is a variable or a brace expansion (`gh pr $A 5`, `gh pr {merge,} 5`), or one handed to another program as text (`python3 -c "...gh pr merge..."`, `alias`).
+
+It refuses, always, a merge that bypasses branch protection, whatever the record says and in any repo:
+
+- `gh pr merge` with `--admin`, in any position or spelling (`--admin`, `--admin=true`, even `--admin=false`), also inside `eval`, `bash -c`, a pipe into a shell, `python3 -c` or an `alias`. **Never use `--admin`.** When checks fail or a branch rule blocks a merge, stop and ask the owner.
+- `gh pr merge` with a word built at run time that is not a flag's value (`gh pr merge 5 $FLAGS`, `"$F"`), since it may expand to `--admin`. Write the PR number and every flag out in full.
+- `gh api` writes to a PR's `pulls/N/merge`. That endpoint skips the branch protection check `gh pr merge` makes, so with admin rights it bypasses branch protection like `--admin`. Use `gh pr merge`.
 
 It also refuses, always, three forms that would skip the record check:
 

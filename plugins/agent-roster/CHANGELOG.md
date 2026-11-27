@@ -2,6 +2,23 @@
 
 1.8.0 is the first version published in this public repo. Earlier entries are kept for reference.
 
+## 1.15.0
+
+**Upgrade steps:**
+
+1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
+2. Rerun `setup-agentic-workflow` in each repo set up before 1.15.0, and merge its setup PR. It refreshes `scripts/review-gate-hook.mjs`, `scripts/check-agent-hooks.mjs`, `docs/agents/git-workflow.md`, `docs/agents/review-gate.md` and the merge step in `docs/agents/coordinator-prompt.md`.
+3. Start a new coordinator chat from the new prompt, or tell the open one never to use `--admin`.
+4. If your repo keeps hash-pinned verbatim copies of these files, refresh the copies and their hash list in a later change of its own.
+
+**Changes:**
+
+- **The review gate refuses `gh pr merge --admin`** (#40), which merges past required checks and branch rules. It refuses it in any flag position and spelling (`--admin`, `--admin=true`, even `--admin=false`), with any other flags, inside `eval`, `bash -c`, a pipe into a shell, `python3 -c` or an `alias`, in any repo, whatever the Review record says. The refusal says never to bypass branch protection, and to stop and ask the owner.
+- **A `gh pr merge` word built at run time is refused** (`gh pr merge 5 $FLAGS`), since it may expand to `--admin`. A flag's value built at run time (`--body "$B"`) still passes.
+- **A `gh api` merge of `pulls/N/merge` is refused**, in any repo. That endpoint skips the branch protection check `gh pr merge` makes, so with admin rights it is the same bypass. Before, it passed with a complete record. Use `gh pr merge`.
+- `git-workflow.md` has a new section, "Branch protection is never bypassed", `review-gate.md` lists the new refusals, and the coordinator prompt's merge step says never to add `--admin` and to stop and tell the owner when GitHub refuses a merge.
+- `check-agent-hooks.mjs` has 35 new cases: each refused form, with a check that the refusal tells the agent to stop and ask the owner, and the reads, plain merges and text naming `--admin` that still pass. A case can now name a phrase its refusal must contain.
+
 ## 1.14.0
 
 **Upgrade steps:**

@@ -100,3 +100,7 @@ Two hooks check commands: the main-checkout guard above and the [review gate](re
 ## Hooks are never bypassed
 
 Never run `git commit --no-verify`, `git push --no-verify` or `HUSKY=0`. If a hook fails, fix the cause. If the cause is outside your change, stop and report it.
+
+## Branch protection is never bypassed
+
+Never use `gh pr merge --admin`, and never merge through the REST API (`gh api -X PUT .../pulls/N/merge`). Both merge past required checks and branch rules. If checks fail or a branch rule blocks a merge, stop and ask the owner what to do. The review gate hook refuses both forms ([review-gate.md](review-gate.md#the-hook)).
