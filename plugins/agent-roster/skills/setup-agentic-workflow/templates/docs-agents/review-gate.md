@@ -92,12 +92,16 @@ Rounds: 1
 
 It refuses, always, a merge that bypasses branch protection, whatever the record says and in any repo:
 
-- `gh pr merge` with `--admin`, in any position or spelling (`--admin`, `--admin=true`, even `--admin=false`), also inside `eval`, `bash -c`, a pipe into a shell, `python3 -c` or an `alias`. **Never use `--admin`.** When checks fail or a branch rule blocks a merge, stop and ask the owner.
-- `gh pr merge` with a word built at run time that is not a flag's value (`gh pr merge 5 $FLAGS`, `"$F"`), or a flag's value the shell would split (`-t $T`, `-t $(cat f)`; a quoted `"$T"` passes), since it may expand to `--admin`. Write the PR number and every flag out in full.
-- `gh api`, or an HTTP client (`curl`, `wget`, `http`, `xh`), writing to a PR's `pulls/N/merge`. That endpoint skips the branch protection check `gh pr merge` makes, so with admin rights it bypasses branch protection like `--admin`. Use `gh pr merge`.
-- `gh pr merge` with a flag before the subcommand or action (`gh -R o/r pr merge 5`, `gh pr -t x merge 5`), because gh reads past it and the hook cannot tell where the action is. Write `gh pr merge 5 ...` with the flags after.
+- `gh pr merge` with `--admin`, in any position or spelling (`--admin`, `--admin=true`, even `--admin=false`), also inside `eval`, `bash -c`, a pipe into a shell, `python3 -c` or an `alias`. **Never use `--admin`.**
+- `gh api`, or an HTTP client (`curl`, `wget`, `http`, `xh`), writing to a PR's `pulls/N/merge`. That endpoint skips the branch protection check `gh pr merge` makes, so with admin rights it bypasses branch protection like `--admin`. Use a plain `gh pr merge`.
 
-When it refuses one of these, the agent never retries another way. It stops and asks the owner, who can fix the check or the rule, or merge the PR themselves on GitHub.
+When checks fail or a branch rule blocks a plain `gh pr merge`, the agent stops and asks the owner. The owner can fix the check or the rule, or merge the PR themselves on GitHub. See [git-workflow.md](git-workflow.md#branch-protection-is-never-bypassed).
+
+It also refuses, always, merge forms it cannot read, because they may hide `--admin` or a REST merge. Rewrite the command with everything written out:
+
+- `gh pr merge` with a word built at run time that is not a flag's value (`gh pr merge 5 $FLAGS`, `"$F"`), or a flag's value the shell would split (`-t $T`, `-t $(cat f)`, `-t "$@"`; a quoted `"$T"` passes). Write the PR number and every flag out in full.
+- A flag before the `gh` subcommand or before the `pr` action (`gh -R o/r pr merge 5`, `gh pr -t x merge 5`), because gh reads past it and the hook cannot tell where the action is. `-R` and `--repo` before the action still pass. Write the subcommand and action first, then the flags.
+- `gh api` with a run-time word that may carry a flag (`gh api repos/o/r/pulls/5/merge $X`) or a glued flag group the hook cannot read as one. Write the method and endpoint out in full.
 
 It also refuses these three forms, whatever the record says, because they would skip the record check:
 

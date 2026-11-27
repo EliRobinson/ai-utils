@@ -227,7 +227,11 @@ export function lex(line) {
           } else if (line[i] === "`") {
             substitute(backtick(), true);
           } else {
-            if (line[i] === "$") word.dynamic = true;
+            if (line[i] === "$") {
+              word.dynamic = true;
+              // "$@" and "${a[@]}" still split into one word per element.
+              if (/^\$(?:@|\{@|\{!?\w*\[@\])/.test(line.slice(i, i + 40))) word.splits = true;
+            }
             word.text += line[i];
             i++;
           }
@@ -236,8 +240,12 @@ export function lex(line) {
         i++;
       } else {
         startWord();
-        if ("$*?[".includes(c) || (c === "~" && word.text === "")) word.dynamic = true;
-        if ("$*?[".includes(c)) word.splits = true;
+        if ("$*?[".includes(c)) {
+          word.dynamic = true;
+          word.splits = true;
+        } else if (c === "~" && word.text === "") {
+          word.dynamic = true;
+        }
         word.text += c;
         i++;
       }

@@ -7,19 +7,20 @@
 **Upgrade steps:**
 
 1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
-2. Rerun `setup-agentic-workflow` in each repo set up before 1.15.0, and merge its setup PR. It refreshes `scripts/review-gate-hook.mjs`, `scripts/check-agent-hooks.mjs`, `docs/agents/git-workflow.md`, `docs/agents/review-gate.md` and the merge step in `docs/agents/coordinator-prompt.md`.
+2. Rerun `setup-agentic-workflow` in each repo set up before 1.15.0, and merge its setup PR. It refreshes `scripts/review-gate-hook.mjs`, `scripts/agent-hook-shell.mjs` (the hook needs the new one), `scripts/check-agent-hooks.mjs`, `docs/agents/git-workflow.md`, `docs/agents/review-gate.md` and the merge step in `docs/agents/coordinator-prompt.md`.
 3. Start a new coordinator chat from the new prompt, or tell the open one never to use `--admin`.
-4. If your repo keeps hash-pinned verbatim copies of these files, refresh the copies and their hash list in a later change of its own.
+4. If your repo keeps hash-pinned verbatim copies of these files, refresh the copies (the shell reader `scripts/agent-hook-shell.mjs` together with the hook) and their hash list in a later change of its own.
 
 **Changes:**
 
 - **The review gate refuses `gh pr merge --admin`** (#40), which merges past required checks and branch rules. It refuses it in any flag position and spelling (`--admin`, `--admin=true`, even `--admin=false`), with any other flags, inside `eval`, `bash -c`, a pipe into a shell, `python3 -c` or an `alias`, in any repo, whatever the Review record says. The refusal says never to bypass branch protection, and to stop and ask the owner.
-- **A `gh pr merge` argument that the shell expands at run time is refused** (`gh pr merge 5 $FLAGS`), since it may expand to `--admin`. A quoted flag value (`--body "$B"`) still passes; an unquoted one (`--body $B`, `-t $(cat f)`) is refused, because the shell splits it.
-- **A flag before the `gh` subcommand or the `pr` action is refused** (`gh -R o/r pr merge 5`, `gh pr -t x merge 5 --admin`), because gh reads past it and the hook could not tell where the action is. Write the subcommand first and the flags after. The same goes for `gh -X PUT api ...`.
+- **A `gh pr merge` argument that the shell expands at run time is refused** (`gh pr merge 5 $FLAGS`), since it may expand to `--admin`. A quoted flag value (`--body "$B"`) still passes, except `"$@"` and `"${a[@]}"`, which split; an unquoted one (`--body $B`, `-t $(cat f)`) is refused, because the shell splits it.
+- **A flag before the `gh` subcommand or the `pr` action is refused** (`gh -R o/r pr merge 5`, `gh pr -t x merge 5 --admin`), because gh reads past it and the hook could not tell where the action is. Write the subcommand first and the flags after. The same goes for `gh -X PUT api ...`. `-R` and `--repo` before the action still pass.
+- **`gh api` run-time words and glued flag groups are read**: `gh api repos/o/r/pulls/5/merge $X` is refused, and `-iXPUT` is read as `-i` plus `-X PUT`.
 - **python's list form is read** (`subprocess.run(["gh","pr","merge","5"])`).
 - **A `gh api` merge of `pulls/N/merge` is refused**, in any repo. That endpoint skips the branch protection check `gh pr merge` makes, so with admin rights it is the same bypass. Before, it passed with a complete record. Use `gh pr merge`.
 - `git-workflow.md` has a new section, "Branch protection is never bypassed", `review-gate.md` lists the new refusals, and the coordinator prompt's merge step says never to add `--admin` and to stop and ask the owner when GitHub refuses a merge.
-- `check-agent-hooks.mjs` has 50 new cases: each refused form, with a check that the refusal tells the agent to stop and ask the owner, and the reads, plain merges and text naming `--admin` that still pass. A case can now name a phrase its refusal must contain.
+- `check-agent-hooks.mjs` has 65 new cases (and one old allow case now refuses): each refused form, with a check that the refusal tells the agent to stop and ask the owner, and the reads, plain merges and text naming `--admin` that still pass. A case can now name a phrase its refusal must contain.
 
 ## 1.14.0
 
@@ -29,7 +30,7 @@
 2. Rerun `setup-agentic-workflow` once in each repo set up before 1.14.0 (it covers the 1.13.0 refresh too) and merge its setup PR. If you use tracker copies, also run it once and say "change ticketing tool" to refresh yours, since `pr-finisher` changed. It rewrites the Asks board bullet in `AGENTS.md`, the "Asking" section of `docs/agents/coordinator-prompt.md`, and `docs/agents/multi-agent.md`, `review-gate.md` and `issue-tracker.md`.
 3. Start a new coordinator chat from the new prompt, or tell the open one the new rule.
 4. Tell each open coordinator chat to move its chat-only rows (a merge, a ticket, a PR, a third review round) off the board, as the `asks-board` skill's "A chat-only row is never the answer" says. A click on such a row, "Not needed" included, only moves it to chat. Rows of a chat that no longer checks in stay on the board; close them by telling a coordinator chat to.
-5. If your repo keeps hash-pinned verbatim copies of these files (`review-gate.md`, `pr-finisher.md` among them), refresh the copies and their hash list in a later change of its own.
+5. If your repo keeps hash-pinned verbatim copies of these files (`review-gate.md`, `pr-finisher.md` among them), refresh the copies (the shell reader `scripts/agent-hook-shell.mjs` together with the hook) and their hash list in a later change of its own.
 
 **Changes:**
 
@@ -44,7 +45,7 @@
 1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
 2. Rerun `setup-agentic-workflow` in each repo set up before 1.13.0, and merge its setup PR. It refreshes `docs/agents/issue-tracker.md`, `docs/agents/review-gate.md`, the hook scripts and the reviewer files in `.claude/agents/`. It shows the repo's current ticketing tool, so you only confirm it. It also asks whether that tool should be your own default for repos with no file of their own.
 3. If you want a default and did not set one in step 2, run `setup-agentic-workflow` once and say "change ticketing tool". It writes `~/.claude/agent-roster/issue-tracker.md`, and for an MCP tracker, tracker copies of the agents in `~/.claude/agents/agent-roster/`. Rerun it this way after each later agent-roster update, so your tracker copies match the new agents. A repo's own tracker copies are refreshed by rerunning the full setup there.
-4. If your repo keeps hash-pinned verbatim copies of these files, refresh the copies and their hash list in a later change of its own.
+4. If your repo keeps hash-pinned verbatim copies of these files, refresh the copies (the shell reader `scripts/agent-hook-shell.mjs` together with the hook) and their hash list in a later change of its own.
 
 **Changes:**
 

@@ -282,7 +282,8 @@ const API = {
   mergePr: /\/pulls\/[^/]+\/merge$/,
   mergeBranch: /\/merges$/,
 };
-const PR_WRITE_PATHS = [API.createPr, API.mergePr, API.mergeBranch];
+// A merge path is refused earlier, as a bypass.
+const PR_WRITE_PATHS = [API.createPr, API.mergeBranch];
 // A flag given no value, or a value the gate cannot read.
 const MISSING = Object.freeze({ text: "", dynamic: true });
 const READ_METHOD = /^(?:GET|HEAD)$/i;
@@ -392,32 +393,41 @@ function parseApiArgs(words) {
   let input = false;
   let help = false;
   const fields = [];
+  // hidden: run-time words that may carry a flag (-X PUT) the gate cannot see.
+  const hidden = [];
   for (let i = 0; i < words.length; i++) {
     const word = words[i];
     const { text } = word;
     let name = text;
     let value;
+    // A glued short group (-iXPUT, -if k=v): boolean letters, then the first value letter takes the rest of the group, or the next word.
+    const group = /^-[a-zA-Z]{2,}/.test(text) && !text.startsWith("--") ? [...text.slice(1)].findIndex((c) => API_VALUE_FLAGS.has(`-${c}`)) : -1;
     const eq = text.startsWith("--") ? text.indexOf("=") : -1;
     if (eq !== -1 && API_VALUE_FLAGS.has(text.slice(0, eq))) {
       name = text.slice(0, eq);
       value = { text: text.slice(eq + 1), dynamic: word.dynamic };
     } else if (API_VALUE_FLAGS.has(text)) {
       value = words[++i] ?? MISSING;
-    } else if (/^-[a-zA-Z]./.test(text) && API_VALUE_FLAGS.has(text.slice(0, 2))) {
-      name = text.slice(0, 2); // glued: -XPUT, -Fquery=@q.graphql
-      value = { text: text.slice(2), dynamic: word.dynamic };
+    } else if (group !== -1) {
+      name = `-${text[group + 1]}`; // glued: -XPUT, -Fquery=@q.graphql, -iXPUT
+      const rest = text.slice(group + 2);
+      value = rest ? { text: rest, dynamic: word.dynamic, splits: word.splits } : words[++i] ?? MISSING;
     } else {
       if (text === "--help" || text === "-h") help = true;
-      else if (!text.startsWith("-") && endpoint === null) endpoint = word;
+      else if (!text.startsWith("-") && endpoint === null) {
+        endpoint = word;
+        if (word.splits) hidden.push(word);
+      } else if (expands(word)) hidden.push(word);
       continue;
     }
+    if (value.splits) hidden.push(value);
     if (name === "-X" || name === "--method") method = value.dynamic ? "?" : value.text.toUpperCase();
     else if (name === "--input") input = true;
     else if (["-f", "--raw-field", "-F", "--field"].includes(name)) {
       fields.push({ ...value, fromFile: name === "-F" || name === "--field" });
     }
   }
-  return { method: method ?? (fields.length || input ? "POST" : "GET"), endpoint, fields, input, help };
+  return { method: method ?? (fields.length || input ? "POST" : "GET"), endpoint, fields, input, help, hidden };
 }
 
 // True when the gate can read the query of a `gh api graphql` call: no
@@ -538,7 +548,7 @@ function classifyHttp(request, call) {
     return refuse("it cannot read a GitHub GraphQL call made with an HTTP client. Use gh api graphql with the query inline: -f query='...'.");
   }
   if (!request.writes) return null;
-  if (request.urls.some((u) => API.mergePr.test(apiPath(u.text)))) return refuse(REST_MERGE_REASON, true);
+  if (request.urls.some((u) => API.mergePr.test(apiPath(u.text)))) return refuseRestMerge();
   if (request.urls.some((u) => PR_WRITE_PATHS.some((re) => re.test(apiPath(u.text))))) {
     return refuse("it cannot read an HTTP call that merges or opens a PR. Use gh pr merge or gh pr create.");
   }
@@ -557,10 +567,11 @@ const refuse = (reason, bypass = false) => ({ kind: "refuse", reason, bypass });
 
 // A merge that bypasses branch protection. Never needed: when checks fail or a
 // branch rule blocks the merge, the agent stops and the owner decides.
-const BYPASS_NEXT = "Never bypass branch protection. If a merge is refused because checks fail or a branch rule blocks it, stop and ask the owner, and say what blocks it; never retry it another way. The owner can fix the check or the rule, or merge the PR themselves on GitHub.";
-const ADMIN_REASON = `\`gh pr merge --admin\` (even \`--admin=false\`) is refused: the flag merges past required checks and branch rules. Drop it. ${BYPASS_NEXT}`;
-const REST_MERGE_REASON = `a merge through the REST API skips the branch protection check that gh pr merge makes, like \`--admin\`. Use gh pr merge, without --admin. ${BYPASS_NEXT}`;
+const BYPASS_NEXT = "Never bypass branch protection. If a plain `gh pr merge` is refused because checks fail or a branch rule blocks it, stop and ask the owner, and say what blocks it; do not look for another way around it. The owner can fix the check or the rule, or merge the PR themselves on GitHub.";
+const ADMIN_REASON = `\`gh pr merge --admin\` (even \`--admin=false\`) is refused: the flag merges past required checks and branch rules. Remove \`--admin\`. ${BYPASS_NEXT}`;
+const REST_MERGE_REASON = `a merge through the REST API skips the branch protection check that gh pr merge makes, the same bypass as \`--admin\`. Run a plain \`gh pr merge\` instead (no \`--admin\`). ${BYPASS_NEXT}`;
 const refuseAdmin = () => refuse(ADMIN_REASON, true);
+const refuseRestMerge = () => refuse(REST_MERGE_REASON, true);
 // True when text that names a PR merge also names --admin.
 const namesAdminMerge = (said) => /(?:^|[^\w-])--admin(?![\w-])/.test(said) && /\bmerge\b/.test(said);
 // A call the gate cannot read: { kind: "unread", what }. bashProblems refuses
@@ -573,7 +584,9 @@ function classifyGh(call) {
   if (text.length === 1 && (text[0] === "--help" || text[0] === "-h")) return null;
   if (call.args[0] && expands(call.args[0])) return refuse("it cannot read which gh command this is. Write the gh subcommand out in full.");
   // gh finds the subcommand past leading flags (`gh -R o/r pr merge 5`), and the gate does not follow it.
-  if (text[0]?.startsWith("-") && text.some((t) => t === "pr" || t === "api")) {
+  // Each flag may swallow one word as its value, so the subcommand is among the first (flags + 1) other words.
+  const subcommandWords = call.args.filter((w) => !w.text.startsWith("-")).slice(0, text.length - call.args.filter((w) => !w.text.startsWith("-")).length + 1);
+  if (text[0]?.startsWith("-") && subcommandWords.some((w) => w.text === "pr" || w.text === "api" || expands(w))) {
     return refuse("it cannot tell which gh command this is when flags come before the subcommand. Write `gh pr ...` or `gh api ...` with the subcommand first and the flags after it.");
   }
   if (call.wrappers.includes("xargs") && !(text[0] === "pr" || text[0] === "api")) return unread("the gh command xargs builds");
@@ -583,7 +596,7 @@ function classifyGh(call) {
 }
 
 const unreadMergeWord = (word, why) =>
-  `it cannot read ${word.text ? `\`${word.text}\`` : "a word built at run time"} in this merge, and ${why}. Write the PR number and every flag out in full.`;
+  `it cannot read ${word.text ? `\`${word.text}\`` : "a word built at run time"} in this gh pr command: ${why}. Write the PR number and every flag out in full${word.splits ? ', or put a flag value in double quotes' : ''}.`;
 
 function classifyGhPr(call) {
   const pr = parsePrArgs(call.args.slice(1));
@@ -591,11 +604,12 @@ function classifyGhPr(call) {
     return refuse("it cannot read which gh pr action this is. Write the action (merge, view, ...) out in full.");
   }
   // `gh pr -t x merge`: gh may read the flag's next word as its value and still find the action.
-  if (pr.flagBeforeAction && !PR_ACTIONS.includes(pr.action?.text) && pr.words.some((w) => PR_ACTIONS.includes(w.text))) {
+  if (pr.flagBeforeAction && !PR_ACTIONS.includes(pr.action?.text) && pr.words.some((w) => PR_ACTIONS.includes(w.text) || expands(w))) {
     return refuse("it cannot tell where the gh pr action is when a flag comes before it. Write the action right after `gh pr`, then the flags.");
   }
+  if (pr.action?.text === "merge" && pr.given("--admin") && !pr.boolean("--help", "-h")) return refuseAdmin();
   if ((pr.action === null || pr.action.text === "merge") && pr.splitValues.length > 0) {
-    return refuse(unreadMergeWord(pr.splitValues[0], "the shell splits it, and it may expand to `--admin`"));
+    return refuse(unreadMergeWord(pr.splitValues[0], "the shell splits it and the parts may include `--admin`"));
   }
   if (!PR_ACTIONS.includes(pr.action?.text) || pr.boolean("--help", "-h")) return null;
   if (call.wrappers.includes("xargs")) {
@@ -604,7 +618,7 @@ function classifyGhPr(call) {
   const action = pr.action.text;
   if (action === "merge") {
     if (pr.given("--admin")) return refuseAdmin();
-    if (pr.runtimeWords.length > 0) return refuse(unreadMergeWord(pr.runtimeWords[0], "it may expand to `--admin`"));
+    if (pr.runtimeWords.length > 0) return refuse(unreadMergeWord(pr.runtimeWords[0], "the shell builds it at run time and it may expand to `--admin`"));
   }
   // A PR URL names its repo, whatever -R says.
   const url = pr.selector && !pr.selector.dynamic ? /^(.*github\.com\/[^/]+\/[^/]+)\/pull\/\d+/i.exec(pr.selector.text) : null;
@@ -623,7 +637,11 @@ function classifyGhApi(call) {
     return refuse("it cannot check a GraphQL mutation that merges, opens or readies a PR. Use gh pr merge, gh pr ready or gh pr create.");
   }
   const api = parseApiArgs(call.args.slice(1));
-  if (!api.endpoint || api.help) return null;
+  if (api.help) return null;
+  if (api.hidden.length > 0) {
+    return refuse(`it cannot read \`${api.hidden[0].text || "a word built at run time"}\` in this gh api call, and the shell may turn it into \`-X PUT\` or another flag. Write the method and the endpoint out in full, and quote any value.`);
+  }
+  if (!api.endpoint) return null;
   if (expands(api.endpoint)) {
     return api.method === "GET" ? null : refuse("it cannot tell which endpoint this gh api write goes to. Write the endpoint out in full.");
   }
@@ -639,7 +657,7 @@ function classifyGhApi(call) {
   // --admin; the REST endpoint has no such check, so with admin rights it is
   // the same bypass.
   if (API.mergePr.test(where)) {
-    return refuse(REST_MERGE_REASON, true);
+    return refuseRestMerge();
   }
   return null;
 }
@@ -651,7 +669,7 @@ function classifyOther(call, prog) {
   if (READERS.has(prog)) return null;
   const said = plain(wordsText(call));
   if (prActions(said) === 0 && !MERGE_MUTATIONS.test(said)) return null;
-  return namesAdminMerge(said) ? refuseAdmin() : refuse("it cannot read a PR command run through another program. Run gh directly.");
+  return namesAdminMerge(said) ? refuse(`${ADMIN_REASON} Run gh directly, not through another program.`, true) : refuse("it cannot read a PR command run through another program. Run gh directly.");
 }
 
 // The HTTP clients the gate reads, by program name.
@@ -702,7 +720,7 @@ function lineHints(command, shell) {
 // A refusal the walk could not read: what it could not read, and the way out.
 // adminHidden: the line also names a `gh pr merge --admin`, which is never allowed.
 const unreadRefusal = (what, adminHidden = false) =>
-  formRefusal(`it cannot read ${what}, and this line names a PR write that it did not read in a plain gh or HTTP call. Run that part in its own Bash call, then run any gh PR command on its own, written out in full. If the line has no PR write, the trigger is text that looks like one (a commit message, an echo): run that text in its own Bash call.${adminHidden ? ` If it does run \`gh pr merge --admin\`: ${BYPASS_NEXT}` : ""}`);
+  formRefusal(`it cannot read ${what}, and this line names a PR write that it did not read in a plain gh or HTTP call. Run that part in its own Bash call, then run any gh PR command on its own, written out in full. If the line has no PR write, the trigger is text that looks like one (a commit message, an echo): run that text in its own Bash call.${adminHidden ? ` If the line runs \`gh pr merge --admin\`, that is never allowed. ${BYPASS_NEXT}` : ""}`);
 
 // "owner/name", lower case, for any spelling of a github.com repo: owner/name,
 // with a trailing .git or /, github.com/owner/name, an https or ssh URL, or
@@ -798,7 +816,7 @@ function problemFor(op, dir, cwd) {
 const formRefusal = (reason) =>
   `Refused by the review gate: ${reason}\nThis is about how the command is written; a complete Review record does not change it.`;
 
-const bypassRefusal = (reason) => `Refused by the review gate: ${reason}\nNo Review record or rewording clears this.`;
+const bypassRefusal = (reason) => `Refused by the review gate: ${reason}\nA Review record does not clear this, and neither does writing the bypass another way.`;
 
 // Every reason to refuse a Bash command. An empty list allows it.
 // shell is agent-hook-shell.mjs, passed in so it loads inside main's try.
