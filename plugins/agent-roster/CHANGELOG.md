@@ -30,7 +30,7 @@
 2. Rerun `setup-agentic-workflow` once in each repo set up before 1.14.0 (it covers the 1.13.0 refresh too) and merge its setup PR. If you use tracker copies, also run it once and say "change ticketing tool" to refresh yours, since `pr-finisher` changed. It rewrites the Asks board bullet in `AGENTS.md`, the "Asking" section of `docs/agents/coordinator-prompt.md`, and `docs/agents/multi-agent.md`, `review-gate.md` and `issue-tracker.md`.
 3. Start a new coordinator chat from the new prompt, or tell the open one the new rule.
 4. Tell each open coordinator chat to move its chat-only rows (a merge, a ticket, a PR, a third review round) off the board, as the `asks-board` skill's "A chat-only row is never the answer" says. A click on such a row, "Not needed" included, only moves it to chat. Rows of a chat that no longer checks in stay on the board; close them by telling a coordinator chat to.
-5. If your repo keeps hash-pinned verbatim copies of these files (`review-gate.md`, `pr-finisher.md` among them), refresh the copies (the shell reader `scripts/agent-hook-shell.mjs` together with the hook) and their hash list in a later change of its own.
+5. If your repo keeps hash-pinned verbatim copies of these files (`review-gate.md`, `pr-finisher.md` among them), refresh the copies and their hash list in a later change of its own.
 
 **Changes:**
 
@@ -45,7 +45,7 @@
 1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
 2. Rerun `setup-agentic-workflow` in each repo set up before 1.13.0, and merge its setup PR. It refreshes `docs/agents/issue-tracker.md`, `docs/agents/review-gate.md`, the hook scripts and the reviewer files in `.claude/agents/`. It shows the repo's current ticketing tool, so you only confirm it. It also asks whether that tool should be your own default for repos with no file of their own.
 3. If you want a default and did not set one in step 2, run `setup-agentic-workflow` once and say "change ticketing tool". It writes `~/.claude/agent-roster/issue-tracker.md`, and for an MCP tracker, tracker copies of the agents in `~/.claude/agents/agent-roster/`. Rerun it this way after each later agent-roster update, so your tracker copies match the new agents. A repo's own tracker copies are refreshed by rerunning the full setup there.
-4. If your repo keeps hash-pinned verbatim copies of these files, refresh the copies (the shell reader `scripts/agent-hook-shell.mjs` together with the hook) and their hash list in a later change of its own.
+4. If your repo keeps hash-pinned verbatim copies of these files, refresh the copies and their hash list in a later change of its own.
 
 **Changes:**
 
