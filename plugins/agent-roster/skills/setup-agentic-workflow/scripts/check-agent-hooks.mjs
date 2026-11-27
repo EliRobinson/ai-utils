@@ -398,7 +398,7 @@ try {
     review("git commit -m 'merge ready create'", "allow"),
     review("echo gh pr merge 5", "allow"),
     review("gh pr merge --help", "allow"),
-    // --admin (1.15.1): never bypass branch protection, in any spelling or wrapper, in any repo.
+    // --admin (1.16.0): never bypass branch protection, in any spelling or wrapper, in any repo.
     refuseSays("gh pr merge 5 --admin", ASK_OWNER),
     refuseSays("gh pr merge --admin 5", ASK_OWNER),
     refuseSays("gh pr merge 5 --squash --admin --match-head-commit abc123", ASK_OWNER),

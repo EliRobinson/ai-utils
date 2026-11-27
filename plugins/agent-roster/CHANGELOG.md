@@ -2,14 +2,15 @@
 
 1.8.0 is the first version published in this public repo. Earlier entries are kept for reference.
 
-## 1.15.1
+## 1.16.0
 
 **Upgrade steps:**
 
 1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
-2. Rerun `setup-agentic-workflow` in each repo set up before 1.15.1, and merge its setup PR. It refreshes `scripts/review-gate-hook.mjs`, `scripts/agent-hook-shell.mjs` (the hook needs the new one), `scripts/check-agent-hooks.mjs`, `docs/agents/git-workflow.md`, `docs/agents/review-gate.md` and the merge step in `docs/agents/coordinator-prompt.md`.
-3. Start a new coordinator chat from the new prompt, or tell the open one never to use `--admin`.
-4. If your repo keeps hash-pinned verbatim copies of these files, refresh the copies (the shell reader `scripts/agent-hook-shell.mjs` together with the hook) and their hash list in a later change of its own.
+2. Rerun `setup-agentic-workflow` in each repo set up before 1.16.0, and merge its setup PR. It refreshes `scripts/review-gate-hook.mjs`, `scripts/agent-hook-shell.mjs` (the hook needs the new one), `scripts/check-agent-hooks.mjs`, `docs/agents/git-workflow.md`, `docs/agents/review-gate.md` and the merge step in `docs/agents/coordinator-prompt.md`. The same rerun also covers the 1.15.0 refresh of the repo's own copies.
+3. If you come from a version before 1.15.0 and use your own tracker copies (an MCP ticketing tool), also rerun `setup-agentic-workflow` and say "change ticketing tool", since `ticket-writer` changed in 1.15.0. If you keep hash-pinned copies, refresh `ticket-writer.md` with the others in step 5.
+4. Start a new coordinator chat from the new prompt, or tell the open one never to use `--admin`.
+5. If your repo keeps hash-pinned verbatim copies of these files, refresh the copies (the shell reader `scripts/agent-hook-shell.mjs` together with the hook) and their hash list in a later change of its own.
 
 **Changes:**
 
@@ -58,7 +59,7 @@
 1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
 2. Rerun `setup-agentic-workflow` in each repo set up before 1.13.0, and merge its setup PR. It refreshes `docs/agents/issue-tracker.md`, `docs/agents/review-gate.md`, the hook scripts and the reviewer files in `.claude/agents/`. It shows the repo's current ticketing tool, so you only confirm it. It also asks whether that tool should be your own default for repos with no file of their own.
 3. If you want a default and did not set one in step 2, run `setup-agentic-workflow` once and say "change ticketing tool". It writes `~/.claude/agent-roster/issue-tracker.md`, and for an MCP tracker, tracker copies of the agents in `~/.claude/agents/agent-roster/`. Rerun it this way after each later agent-roster update, so your tracker copies match the new agents. A repo's own tracker copies are refreshed by rerunning the full setup there.
-4. If your repo keeps hash-pinned verbatim copies of these files, refresh the copies and their hash list in a later change of its own.
+5. If your repo keeps hash-pinned verbatim copies of these files, refresh the copies and their hash list in a later change of its own.
 
 **Changes:**
 
