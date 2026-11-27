@@ -94,6 +94,10 @@ It refuses, always, a merge that bypasses branch protection, whatever the record
 
 - `gh pr merge` with `--admin`, in any position or spelling (`--admin`, `--admin=true`, even `--admin=false`), also inside `eval`, `bash -c`, a pipe into a shell, `python3 -c` or an `alias`. **Never use `--admin`.**
 - `gh api`, or an HTTP client (`curl`, `wget`, `http`, `xh`), writing to a PR's `pulls/N/merge`. That endpoint skips the branch protection check `gh pr merge` makes, so with admin rights it bypasses branch protection like `--admin`. Use a plain `gh pr merge`.
+- `gh api`, or an HTTP client, writing to an endpoint that moves, deletes, creates or renames a branch, commits to it directly, or changes branch protection or rulesets: `git/refs`, `branches/<name>/protection` and everything under it, `branches/<name>/rename`, `rulesets` (repo and org), `contents`, and `merge-upstream`. Also the GraphQL mutations that do the same (`createRef`, `updateRef`, `updateRefs`, `deleteRef`, `createCommitOnBranch`, and creating, updating or deleting a branch protection rule or a ruleset). Reads (`GET`, `HEAD`) of the same paths pass. Push and delete branches with git from your worktree, and leave protection and rulesets to the owner.
+- `gh alias set`, `gh alias import` and `gh alias delete`. `gh alias list` passes.
+- A `gh` command whose first word is not one of gh's own commands (`gh co 5`, or any other alias or extension name). Write the gh command out in full (`gh pr checkout 5`).
+- A git alias whose value is a shell command (it starts with `!`), set with `git -c alias.<name>=...`, `git config alias.<name> ...` or `--config-env`, or whose value is built at run time. A plain git alias (`git config alias.st status`) passes.
 
 When checks fail or a branch rule blocks a plain `gh pr merge`, the agent stops and asks the owner. The owner can fix the check or the rule, or merge the PR themselves on GitHub. See [git-workflow.md](git-workflow.md#branch-protection-is-never-bypassed).
 
@@ -109,7 +113,7 @@ It also refuses these three forms, whatever the record says, because they would 
 - An HTTP client (`curl`, `wget`, `http`, `xh`) that writes to `pulls` (opening a PR) or to `merges`; a write to `pulls/N/merge` is refused as above. Use `gh pr merge` or `gh pr create`. Reads still pass. It reads the last `-X`, `--url` and `--expand-url`, and resolves `../` and `%`-encoding. A write whose URL is a variable or a curl glob (`{...}`, `[...]`, `{{var}}`) is refused when the URL names GitHub; otherwise it is an unread call (below). `gh api` writes to `merges` are refused too.
 - An HTTP client call to GitHub's GraphQL API (a host with `github` in its name). Use `gh api graphql`.
 
-It reads the script of `eval '...'`, `bash -c '...'` (also `sh`, `zsh`, `fish`, `busybox sh`, with options such as `-euo pipefail`) like any command. Some calls it cannot read: a script built at run time (`eval "$X"`), a script a shell reads from stdin, a pipe or `<(...)` (`... | bash`, `bash <<< '...'`, `bash -s`, `source /dev/stdin`), a program that is a variable or an `env -S` string, and an HTTP write whose URL it cannot read, or that uses curl `-K`, `--next` or `--variable` or wget `-i`. It refuses such a line when the line names a PR write (`gh pr merge|ready|create`, flags between them included, a `pulls`, `merges` or `graphql` path, or a GraphQL mutation) that it did not read in a plain `gh` or HTTP call. Text a `gh` call only prints (`-q`, `--jq`, `-t`, `--template`) does not count as read. So `eval "$(ssh-agent -s)" && gh pr merge 5` is checked like the merge alone.
+It reads the script of `eval '...'`, `bash -c '...'` (also `sh`, `zsh`, `fish`, `busybox sh`, with options such as `-euo pipefail`) like any command. Some calls it cannot read: a script built at run time (`eval "$X"`), a script a shell reads from stdin, a pipe or `<(...)` (`... | bash`, `bash <<< '...'`, `bash -s`, `source /dev/stdin`), a program that is a variable or an `env -S` string, and an HTTP write whose URL it cannot read, or that uses curl `-K`, `--next` or `--variable` or wget `-i`. It refuses such a line when the line names a PR write (`gh pr merge|ready|create`, flags between them included, a `pulls`, `merges` or `graphql` path, or a GraphQL mutation), a branch write path from the list above, a `gh alias` change or a `gh` word that is not a gh command, that it did not read in a plain `gh` or HTTP call. Text a `gh` call only prints (`-q`, `--jq`, `-t`, `--template`) does not count as read. So `eval "$(ssh-agent -s)" && gh pr merge 5` is checked like the merge alone.
 
 If it refuses, run the `eval` or `| bash` in its own Bash call, then run any gh PR command on its own. Any text naming a PR write beside an unread call can trigger it, a commit message or an `echo` included: run that text in its own Bash call.
 
@@ -123,8 +127,7 @@ It cannot stop:
 
 - a merge in the GitHub web UI;
 - a record that lies;
-- a script, a curl config file (`-K`) or a wget URL list (`-i`) that calls `gh` or GitHub from a file, when the line itself names no PR write;
-- a `gh` or git alias that hides `pr merge` (`gh alias set`, `git config alias.x '!gh ...'`);
+- a script, a config file (a git alias, a curl `-K` file) or a wget URL list (`-i`) that calls `gh` or GitHub from a file, when the line itself names no PR write;
 - a script built at run time whose text never names the PR write in plain words (`printf 'gh p%s merge' r`, base64);
 - an HTTP client other than `curl`, `wget`, `http` and `xh`, or a GitHub Enterprise host without `github` in its name.
 

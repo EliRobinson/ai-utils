@@ -2,6 +2,23 @@
 
 1.8.0 is the first version published in this public repo. Earlier entries are kept for reference.
 
+## 1.17.0
+
+**Upgrade steps:**
+
+1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
+2. Rerun `setup-agentic-workflow` in each repo set up before 1.17.0, and merge its setup PR. It refreshes `scripts/review-gate-hook.mjs`, `scripts/check-agent-hooks.mjs`, `docs/agents/git-workflow.md` and `docs/agents/review-gate.md`.
+3. If your repo keeps hash-pinned verbatim copies of these files, refresh the copies and their hash list in a later change of its own.
+
+**Changes:**
+
+- **The review gate refuses GitHub API writes that change a branch or its protection**, in any repo, whatever the Review record says: writes through `gh api` or an HTTP client (`curl`, `wget`, `http`, `xh`) to `git/refs`, `branches/<name>/protection` and everything under it, `branches/<name>/rename`, repo and org `rulesets`, `contents` and `merge-upstream`, and the GraphQL mutations that do the same (`createRef`, `updateRef`, `updateRefs`, `deleteRef`, `createCommitOnBranch`, and creating, updating or deleting a branch protection rule or a ruleset). Reads (`GET`, `HEAD`) of the same paths pass. The refusal says to push and delete branches with git, and to stop and ask the owner. A `gh api -X HEAD` call now counts as a read everywhere.
+- **The review gate refuses `gh alias set`, `gh alias import` and `gh alias delete`**, and a `gh` command whose first word is not one of gh's own commands (`gh co 5`, any other alias or extension name), also after leading flags (`gh -R o/r co 5`). `gh alias list` and gh's own commands pass.
+- **The review gate refuses a git alias whose value is a shell command** (starts with `!`), set through `git -c`, `git config` or `--config-env`, or whose value is built at run time. Plain git aliases pass.
+- These forms count as PR writes for a line with a call the gate cannot read (`eval "$X"`, `| bash`, `python3 -c`), so such a line is refused too.
+- `git-workflow.md` ("Branch protection is never bypassed") and `review-gate.md` list the new refusals.
+- `check-agent-hooks.mjs` has 107 new cases: each refused form, with a check that the refusal tells the agent to stop and ask the owner where it applies, and the reads and plain commands that still pass.
+
 ## 1.16.0
 
 **Upgrade steps:**
