@@ -432,6 +432,19 @@ BRANCH_RULE_TERMS = {
     COORDINATOR_PROMPT: COORDINATOR_TERMS,
     REPO_COORDINATOR_PROMPT: COORDINATOR_TERMS,
 }
+# The post-merge cleanup (#55): its section and its no-force guards stay in the
+# coordinator prompt and its filled copy, and the docs that link to it keep the link.
+CLEANUP_LINK = "coordinator-prompt.md#cleanup-after-a-merge"
+CLEANUP_TERMS = ["### cleanup after a merge", "if any check fails, delete nothing", "no `git branch -d`",
+                 "no `git worktree remove --force`", "git -c '<wt>' switch --detach <head>",
+                 "git -c '<wt>' status --porcelain --ignored"]
+CLEANUP_RULE_TERMS = {
+    COORDINATOR_PROMPT: CLEANUP_TERMS,
+    REPO_COORDINATOR_PROMPT: CLEANUP_TERMS,
+    GIT_WORKFLOW: [CLEANUP_LINK],
+    MULTI_AGENT: [CLEANUP_LINK],
+    REPO_MULTI_AGENT: [CLEANUP_LINK],
+}
 MERGE_STYLES = ("merge", "squash", "rebase")
 # The repo merge flag that turns on each style.
 MERGE_FLAGS = {"merge": "allow_merge_commit", "squash": "allow_squash_merge", "rebase": "allow_rebase_merge"}
@@ -455,6 +468,7 @@ def check_terms(table: dict[Path, list[str]], rule: str) -> None:
 
 def check_branch_rule_stated() -> None:
     check_terms(BRANCH_RULE_TERMS, "same-branch rule")
+    check_terms(CLEANUP_RULE_TERMS, "post-merge cleanup rule")
 
 
 def default_merge_style() -> str | None:
