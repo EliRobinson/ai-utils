@@ -434,6 +434,16 @@ await eachAsync("within:", [
   ["gives the fallback when it never comes", new Promise(() => {}), "late"],
 ], (p) => within(p, 5, "late"));
 
+// The header subtitle says the board holds only click-settled asks and sends typed answers to the chats.
+const sub = (page.match(/<p class="sub">([^<]*)<\/p>/) || [])[1] || "";
+each("subtitle: says what the board holds and where typed asks go", [
+  ["says the board holds click-settled asks", /asks a click can settle/i],
+  ["names merges as asked in chat", /merges/i],
+  ["names tickets as asked in chat", /tickets/i],
+  ["names opening PRs as asked in chat", /opening PRs/i],
+  ["points the owner to their chats", /your chats/i],
+], (name, re) => (re.test(sub) ? null : "subtitle " + show(sub) + " does not match"));
+
 // Every function and const in the pure block is used by a case above, not only listed.
 const self = readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
 each("pure block: every function and const is tested", NAMES.map((n) => [n]),

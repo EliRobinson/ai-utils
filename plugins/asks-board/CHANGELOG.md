@@ -2,6 +2,17 @@
 
 Entries start at 1.3.0. Earlier changes are in the git history of `plugins/asks-board`; 1.2.0 (chat-only asks) is described under agent-roster 1.14.0 in `plugins/agent-roster/CHANGELOG.md`.
 
+## 1.3.1
+
+**Upgrade steps:**
+
+1. `claude plugin marketplace update ai-utils`, then `claude plugin update asks-board@ai-utils`, then restart Claude Code.
+2. Republish `board-template.html` as the `asks-board` skill's "Changing this skill or the board page" section says. Until you do, the board you have keeps the old subtitle.
+
+**Changes:**
+
+- **Board subtitle says what the board holds** (#39). It now reads "Asks a click can settle." and tells you that merges, tickets, opening PRs and other typed answers are asked in your chats. Before, it said the board held everything your chats need from you. No other text, layout or styling changed.
+
 ## 1.3.0
 
 **Upgrade steps:**
