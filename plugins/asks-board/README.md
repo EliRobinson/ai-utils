@@ -7,6 +7,7 @@ One page for the asks your Claude chats need you to click. Asks that need your t
 - The page sends a comment to Claude. One chat, the **Board Router**, watches the board and forwards the ping to the chat that asked, by session id. That wakes the chat even if it is closed.
 - The chat acts, closes the row and replies in the thread. A row shows as Closed only when its status is `closed`. Each click clears the chat's old `ackAt`, so a new answer is never hidden.
 - Only asks a board click can resolve go on the board, and a click there is not approval. Any ask a board click cannot resolve goes in the coordinator chat as a direct question, and not on the board, because you must answer it in chat anyway: a merge request ("merge N"), filing or editing a ticket, opening a PR, allowing a third review round, and anything else whose answer must be typed in chat. A board row for it only duplicates the question. The test: can a board click alone unblock this? If no, ask in chat only. An ask fails the test if a rule needs your own words for it (an approval to merge, file a ticket, open a PR or run a third round, a deploy, a value to paste), or if any of its options leads to a chat-only step.
+- The header also shows "N waiting on you in your chats": how many asks each project's coordinator has put to you in chat and is still waiting on, with when each count was updated. Coordinators keep the count on their project's `routes` row (`chatWaiting`); it is read-only on the board, has no buttons, and a count that is old or has no usable time says "may be out of date". The Board Router ignores it.
 
 To get a fixed board page after a change merges, republish `board-template.html` as the `asks-board` skill's "Changing this skill or the board page" section says. Rows an older page left with an `ackAt` but not `closed` then show under "Waiting for the chat"; the owning chat's next check-in closes them (see "A row needs you" in the `asks-board` skill). Rows of a chat that no longer checks in stay there for now.
 
@@ -15,7 +16,7 @@ To get a fixed board page after a change merges, republish `board-template.html`
 ```
 skills/asks-board/            daily rules: add asks, check in, coordinator and router rules
 skills/asks-board-setup/      setup steps + board-template.html (the board page)
-                              + scripts/check-board-page.mjs (tests the page's section, click, ping, option, filter and receipt logic, and that one click sends one ping)
+                              + scripts/check-board-page.mjs (tests the page's section, click, ping, option, filter, receipt and chat-waiting logic, that one click sends one ping, and that the page only reads routes)
 ```
 
 Personal values never go in this repo. Each user keeps them in `~/.claude/asks-board.md`:
