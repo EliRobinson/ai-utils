@@ -1,0 +1,29 @@
+{
+  "go_module": "example.com/svc",
+  "files": [
+    {
+      "file_name": "auth.go",
+      "mutations": [
+        {"type": "CONDITIONALS_NEGATION", "status": "KILLED", "line": 4, "column": 5},
+        {"type": "CONDITIONALS_NEGATION", "status": "LIVED", "line": 7, "column": 13},
+        {"type": "INVERT_NEGATIVES", "status": "TIMED OUT", "line": 7, "column": 9},
+        {"type": "ARITHMETIC_BASE", "status": "NOT COVERED", "line": 11, "column": 11},
+        {"type": "INCREMENT_DECREMENT", "status": "NOT VIABLE", "line": 11, "column": 9}
+      ]
+    }
+  ],
+  "test_efficacy": 66.66666666666667,
+  "mutations_coverage": 75,
+  "mutants_total": 5,
+  "mutants_killed": 2,
+  "mutants_lived": 1,
+  "mutants_not_viable": 1,
+  "mutants_not_covered": 1,
+  "elapsed_time": 14.82,
+  "mutator_statistics": {
+    "arithmetic_base": 1,
+    "conditionals_negation": 2,
+    "increment_decrement": 1,
+    "invert_negatives": 1
+  }
+}

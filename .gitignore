@@ -14,3 +14,7 @@ __pycache__/
 
 # Built .skill bundles (regenerate with scripts/build-skill-bundles.py)
 dist/
+
+# Per-repo notes for mutation-guided-testing hold your own repo names and
+# paths; keep them out of this repo (see that plugin's README)
+plugins/mutation-guided-testing/skills/mutation-guided-testing/reference/local.md
