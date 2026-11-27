@@ -99,6 +99,8 @@ It refuses, always, a merge that bypasses branch protection, whatever the record
 - A `gh` command whose first word is not one of gh's own commands (`gh co 5`, or any other alias or extension name). Write the gh command out in full (`gh pr checkout 5`).
 - A git alias whose value is a shell command (it starts with `!`), set with `git -c alias.<name>=...`, `git config alias.<name> ...` or `--config-env`, or whose value is built at run time. A plain git alias (`git config alias.st status`) passes.
 
+It asks the user first (a permission prompt, not a refusal) before a `gh repo` command that changes or removes the repository: `gh repo edit`, `gh repo rename`, `gh repo delete`, `gh repo archive` and `gh repo unarchive`, with flags before `repo` too (`gh -R o/r repo delete`), inside `eval`, `bash -c`, a wrapper or another program, and when the action is built at run time. It also asks when a line has a call it cannot read and names such a command. `gh repo view`, `list`, `clone`, `set-default` and `--help` pass without a prompt. A refusal on the same line wins over the prompt.
+
 When checks fail or a branch rule blocks a plain `gh pr merge`, the agent stops and asks the owner. The owner can fix the check or the rule, or merge the PR themselves on GitHub. See [git-workflow.md](git-workflow.md#branch-protection-is-never-bypassed).
 
 It also refuses, always, merge forms it cannot read, because they may hide `--admin` or a REST merge. Rewrite the command with everything written out:

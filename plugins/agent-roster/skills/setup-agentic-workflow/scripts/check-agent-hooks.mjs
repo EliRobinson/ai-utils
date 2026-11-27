@@ -109,6 +109,8 @@ try {
   const says = (c, phrase) => ({ ...c, says: phrase });
   const refuseSays = (command, phrase) => says(review(command, "refuse", { FAKE_PR_BODY: good }), phrase);
   const ASK_OWNER = "stop and ask the owner";
+  // Asks the user first (permissionDecision "ask"), and the reason says `phrase`.
+  const asks = (command, phrase = "changes the repository") => says(review(command, "ask", { FAKE_PR_BODY: good }), phrase);
   const mcp = (tool, input, expect) => ({ hook: "review", hookDir: path.join(tree, "scripts"), cwd: tree, tool, input, expect });
   const fromTree = path.join(tree, "scripts");
 
@@ -552,6 +554,42 @@ try {
     review("gh api repos/o/r/labels -f name=bug", "allow"),
     review("gh api repos/o/r/issues/5/comments -f body=x", "allow"),
     review("curl -X POST -d '{}' https://api.github.com/repos/o/r/issues", "allow"),
+    // gh repo commands that change or remove the repository ask the user first.
+    asks("gh repo edit --default-branch dev"),
+    asks("gh repo edit o/r --visibility public --accept-visibility-change-consequences"),
+    asks("gh repo edit --enable-auto-merge"),
+    asks("gh repo rename new-name --yes"),
+    asks("gh repo rename -R o/r new-name --yes"),
+    asks("gh repo delete o/r --yes"),
+    asks("gh repo archive o/r -y"),
+    asks("gh repo unarchive o/r -y"),
+    asks("gh -R o/r repo delete --yes"),
+    asks("gh --repo=o/r repo edit --default-branch dev"),
+    asks("gh repo \"delete\" o/r --yes"),
+    asks("gh repo $A o/r --yes"),
+    asks("bash -c 'gh repo delete o/r --yes'"),
+    asks("eval 'gh repo archive o/r -y'"),
+    asks("timeout 30 gh repo delete o/r --yes"),
+    asks("env GH_REPO=o/r gh repo rename x --yes"),
+    asks("echo o/r | xargs gh repo delete --yes"),
+    asks("git fetch && gh repo edit --default-branch dev"),
+    asks("X='gh repo delete o/r --yes'; eval \"$X\"", "cannot read"),
+    asks("python3 -c \"import os; os.system('gh repo delete o/r --yes')\"", "cannot read"),
+    // A refusal wins over an ask on the same line.
+    review("gh repo delete o/r --yes && gh pr merge 5 --admin", "refuse"),
+    review("X='gh pr merge 5'; eval \"$X\"; gh repo delete o/r --yes", "refuse"),
+    // Reads of the repository, and local repo commands, pass without a prompt.
+    review("gh repo view", "allow"),
+    review("gh repo view o/r --json defaultBranchRef", "allow"),
+    review("gh repo list", "allow"),
+    review("gh repo ls o", "allow"),
+    review("gh repo clone o/r", "allow"),
+    review("gh repo set-default o/r", "allow"),
+    review("gh repo edit --help", "allow"),
+    review("gh repo delete --help", "allow"),
+    review("echo gh repo delete o/r --yes", "allow"),
+    review("git commit -m 'gh repo delete asks first'", "allow"),
+    review("eval \"$(ssh-agent -s)\" && gh repo view", "allow"),
     // Reads of the same paths, and other writes, still pass.
     review("gh api repos/o/r/git/refs/heads/main", "allow"),
     review("gh api -X GET repos/o/r/branches/main/protection", "allow"),
@@ -656,8 +694,18 @@ try {
       env: { ...env, ...c.extra, PATH: `${bin}${path.delimiter}${env.PATH}` },
       encoding: "utf8",
     });
-    let got = run.status === 2 ? "refuse" : run.status === 0 ? "allow" : `exit ${run.status}`;
-    if (got === "refuse" && c.says && !run.stderr.toLowerCase().includes(c.says.toLowerCase())) got = `refuse without "${c.says}"`;
+    // Exit 0 allows, or asks the user when stdout says so; any other output on exit 0 is a failure.
+    let decision = "allow";
+    if (run.status === 0 && run.stdout.trim()) {
+      try {
+        decision = JSON.parse(run.stdout).hookSpecificOutput?.permissionDecision ?? "no decision";
+      } catch {
+        decision = "unparsable output";
+      }
+    }
+    let got = run.status === 2 ? "refuse" : run.status === 0 ? decision : `exit ${run.status}`;
+    const reason = got === "ask" ? JSON.parse(run.stdout).hookSpecificOutput.permissionDecisionReason ?? "" : run.stderr;
+    if ((got === "refuse" || got === "ask") && c.says && !reason.toLowerCase().includes(c.says.toLowerCase())) got = `${got} without "${c.says}"`;
     if (got !== c.expect) failed += 1;
     const shown = (c.tool ?? c.command).replaceAll(tmp, "<tmp>").replace(/\n[\s\S]*/, " ...");
     console.log(`${got === c.expect ? "ok  " : "FAIL"} ${c.hook.padEnd(6)} ${c.expect.padEnd(6)} ${shown}`);
