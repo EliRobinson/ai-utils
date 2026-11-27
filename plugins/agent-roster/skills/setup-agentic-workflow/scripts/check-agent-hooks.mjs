@@ -110,7 +110,8 @@ try {
   const refuseSays = (command, phrase) => says(review(command, "refuse", { FAKE_PR_BODY: good }), phrase);
   const ASK_OWNER = "stop and ask the owner";
   // Refused as a branch, protection, ruleset or settings write, and no other way.
-  const refuseBranch = (command) => refuseSays(command, "are the owner's");
+  const BRANCH_SAYS = "are the owner's";
+  const refuseBranch = (command) => refuseSays(command, BRANCH_SAYS);
   // Asks the user first (permissionDecision "ask"), and the reason says `phrase`.
   const asks = (command, phrase = "asks you first") => says(review(command, "ask", { FAKE_PR_BODY: good }), phrase);
   const mcp = (tool, input, expect) => ({ hook: "review", hookDir: path.join(tree, "scripts"), cwd: tree, tool, input, expect });
@@ -510,7 +511,7 @@ try {
     refuseBranch("gh api graphql -f query='mutation { deleteBranchProtectionRule(input: {branchProtectionRuleId: \"x\"}) { clientMutationId } }'"),
     refuseBranch("gh api graphql -f query='mutation { updateRepositoryRuleset(input: {repositoryRulesetId: \"x\", enforcement: DISABLED}) { clientMutationId } }'"),
     refuseBranch("gh api graphql -f query='mutation { createCommitOnBranch(input: {}) { clientMutationId } }'"),
-    says(inNamed("gh api -X DELETE repos/other/repo/git/refs/heads/main", "refuse"), "are the owner's"),
+    says(inNamed("gh api -X DELETE repos/other/repo/git/refs/heads/main", "refuse"), BRANCH_SAYS),
     refuseBranch("bash -c 'gh api -X DELETE repos/o/r/branches/main/protection'"),
     refuseBranch("eval 'gh api -X DELETE repos/o/r/git/refs/heads/main'"),
     refuseBranch("timeout 30 gh api -X DELETE repos/o/r/rulesets/42"),
@@ -538,7 +539,7 @@ try {
     refuseBranch("gh api -X DELETE repos/o/r"),
     refuseBranch("gh api -X PATCH repositories/123 -f default_branch=x"),
     refuseBranch("gh api graphql -f query='mutation { updateRepository(input: {repositoryId: \"x\"}) { clientMutationId } }'"),
-    says(inNamed("gh api -X PATCH repos/other/repo -f default_branch=x", "refuse"), "are the owner's"),
+    says(inNamed("gh api -X PATCH repos/other/repo -f default_branch=x", "refuse"), BRANCH_SAYS),
     refuseBranch("bash -c 'gh api -X PATCH repos/o/r -f default_branch=x'"),
     review("X='gh api -X PATCH repos/o/r -f default_branch=x'; eval \"$X\"", "refuse"),
     refuseBranch("curl -X PATCH -d '{\"default_branch\":\"x\"}' https://api.github.com/repos/o/r"),
@@ -574,6 +575,12 @@ try {
     review("cp -r docs/repos/a/b out/ && gh pr view", "allow"),
     review("gh pr checkout 5 && npm run build -- --base repos/x/y", "allow"),
     review("eval \"$(ssh-agent -s)\" && gh pr view 5 && git mv src/rename src/x", "allow"),
+    review("python3 -c 'subprocess.run([\"gh\",\"api\",\"-X\",\"PATCH\",\"repos/o/r\"])'", "refuse"),
+    review("python3 -c \"subprocess.run(['gh', 'api', '-X', 'PATCH', 'repos/o/r'])\"", "refuse"),
+    refuseSays("echo -X PATCH | xargs gh api repos/o/r", "xargs builds"),
+    refuseSays("echo repos/o/r | xargs gh api -X PATCH", "xargs builds"),
+    refuseSays("echo merge 5 | xargs gh pr", "xargs builds"),
+    review("echo 5 | xargs gh pr view", "allow"),
     // gh repo commands that change or remove the repository ask the user first.
     asks("gh repo edit --default-branch dev"),
     asks("gh repo edit o/r --visibility public --accept-visibility-change-consequences"),
@@ -596,6 +603,8 @@ try {
     asks("X='gh repo delete o/r --yes'; eval \"$X\"", "cannot read"),
     asks("python3 -c \"import os; os.system('gh repo delete o/r --yes')\"", "cannot read"),
     asks("gh repo --description x edit o/r --visibility public", "a flag comes before it"),
+    asks("gh repo delete o/r --yes", "cannot be undone"),
+    asks("gh repo archive o/r -y", "read-only"),
     asks("X='gh repo --description x edit o/r'; eval \"$X\"", "cannot read"),
     asks("X='gh -R o/r repo delete --yes'; eval \"$X\"", "cannot read"),
     asks("python3 -c \"import os; os.system('gh -R o/r repo delete')\"", "cannot read"),
@@ -664,6 +673,13 @@ try {
     review("X='gh -R o/r m 5'; eval \"$X\"", "refuse"),
     review("X='gh --repo=o/r m 5'; eval \"$X\"", "refuse"),
     review("brew install gh jq", "allow"),
+    review("eval \"$(ssh-agent -s)\" && brew install gh jq", "allow"),
+    review("eval \"$(ssh-agent -s)\" && git commit -m \"Let gh handle auth\"", "allow"),
+    review("X='gh co 5'; eval \"$X\"", "refuse"),
+    review("Y=\" gh m 5\"; eval \"$Y\"", "refuse"),
+    review("find . -exec gh co {} \\;", "refuse"),
+    review("python3 -c 'subprocess.run([\"/opt/homebrew/bin/gh\",\"co\",\"5\"])'", "refuse"),
+    review("ls docs/gh notes", "allow"),
     review("which gh node", "allow"),
     review("gh a11y", "allow"),
     // A git shell alias may run gh in a way the gate cannot read.
@@ -678,6 +694,12 @@ try {
     review("git --config-env alias.m=X m", "refuse"),
     review("git --config-env Alias.M=X M", "refuse"),
     review("git -c alias.lg=log commit -m \"$MSG\"", "allow"),
+    review("git -c 'alias.x=-c \"alias.y=!echo hi\" y' x", "refuse"),
+    review("git config alias.x '-c \"alias.y=!gh pr merge 5\" y'", "refuse"),
+    refuseSays("git -c core.pager='gh pr merge 5; cat' log", "from its config"),
+    refuseSays("git -c core.sshCommand='gh pr merge 5; ssh' fetch", "from its config"),
+    refuseSays("git -c core.editor='gh api -X PATCH repos/o/r' commit", "from its config"),
+    review("git -c core.pager=less log", "allow"),
     // gh's own commands, alias reads and plain git aliases still pass.
     review("gh alias list", "allow"),
     review("gh alias ls", "allow"),

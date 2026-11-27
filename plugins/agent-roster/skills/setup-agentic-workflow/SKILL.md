@@ -154,9 +154,9 @@ For each file below: if it is missing, create it. If it exists and is identical,
 
 ### 7. Repo settings (ask first)
 
-These change GitHub settings for everyone, so ask before you run them. Say what they do in the question. One question:
+These change GitHub settings for everyone, so ask first. Say what they do in the question. The review gate hook refuses these writes from an agent, so the owner runs them: never run them yourself, and never look for another way to make them. One question:
 
-- **A (recommended):** add a ruleset on the default branch, and allow only the merge style from step 3. Nobody can push straight to `main`, force push or delete it, admins included; every change lands as a PR merged in that style. The other two merge methods are turned off for the repo. The owner can change or remove this under Settings, Rules.
+- **A (recommended):** add a ruleset on the default branch, and allow only the merge style from step 3. Nobody can push straight to `main`, force push or delete it, admins included; every change lands as a PR merged in that style. The other two merge methods are turned off for the repo. The owner can change or remove this under Settings, Rules. On A, give the owner the commands below, filled in, to run in their own terminal. When they say they ran them, check the result with the reads from step 1.8.
 - **B:** skip; the owner will do it by hand.
 
 The commands below are for `squash`, the style the ruleset template allows. For `merge` or `rebase`:
@@ -172,7 +172,7 @@ gh api -X POST repos/{owner}/{repo}/rulesets --input <skill folder>/templates/gi
 gh api -X PATCH repos/{owner}/{repo} -F allow_squash_merge=true -F allow_rebase_merge=false -F allow_merge_commit=false
 ```
 
-If a ruleset named `main` already exists (any repo set up before agent-roster 1.9.0 has one that allows only `rebase`), show it and ask before changing it. On a yes, update it in place with its ID from step 1.8, instead of the POST: `gh api -X PUT repos/{owner}/{repo}/rulesets/<id> --input <file>`.
+If a ruleset named `main` already exists (any repo set up before agent-roster 1.9.0 has one that allows only `rebase`), show it and ask before changing it. On a yes, give the owner the command that updates it in place with its ID from step 1.8, instead of the POST: `gh api -X PUT repos/{owner}/{repo}/rulesets/<id> --input <file>`.
 
 When this changes the merge style of a repo that already has a coordinator chat, say in the report: that chat still has the old merge step, so it merges the setup PR and every open PR with `gh pr merge N --<new style>`. Once the setup PR merges, start a new coordinator chat from the new `docs/agents/coordinator-prompt.md`. A private repo on a free plan cannot use rulesets; report that rather than work around it.
 

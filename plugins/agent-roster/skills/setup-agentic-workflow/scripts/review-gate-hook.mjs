@@ -254,21 +254,25 @@ const plain = (text) =>
 // The words of text as a token scan reads them (commas and brackets split
 // too, so python's ["gh","pr","merge"] is seen), and for each word whether a
 // command may start there: first, after a comma or bracket, after a word
-// that ends in ; & | or a backtick, or after a word that runs the next one.
-const RUNS_NEXT = new Set(["xargs", "exec", "env", "command", "nohup", "sudo", "then", "do", "else", "-c"]);
+// that ends in ; & | = or a backtick, or after a word that runs the next one.
+const RUNS_NEXT = new Set(["xargs", "exec", "env", "command", "nohup", "sudo", "eval", "then", "do", "else", "-c",
+  "-exec", "-execdir", "-ok", "-okdir"]);
 function scanWords(text) {
   const parts = text.split(/([\s,()[\]]+)/);
   const words = [];
   const atStart = [];
   for (let i = 0; i < parts.length; i += 2) {
     const prev = words.at(-1);
-    atStart.push(!prev || /[,([]/.test(parts[i - 1]) || /[;&|`]$/.test(prev) || RUNS_NEXT.has(prev));
+    atStart.push(!prev || /[,([]/.test(parts[i - 1]) || /[;&|`=]$/.test(prev) || RUNS_NEXT.has(prev));
     words.push(parts[i]);
   }
   return { words, atStart };
 }
-// A word that runs gh: gh itself, or X=gh, ;gh, `gh.
-const GH_START = /(?:^|[=;&|`])gh$/;
+// A word that runs gh: gh itself, a path to it, or X=gh, ;gh, `gh.
+const GH_START = /(?:^|[=;&|`/])gh$/;
+// How many words a -R/--repo flag takes: 2 with its value, 1 for --repo=x,
+// 0 for any other word.
+const repoFlagWords = (word) => (REPO_FLAGS.includes(word) ? 2 : word.startsWith("--repo=") ? 1 : 0);
 // The indexes of the words from start on that may be a gh subcommand. Flags
 // may come first; each may take the next word as its value, so a word may be
 // the subcommand when no more words than flags come before it. The value of
@@ -278,8 +282,8 @@ function subcommandAt(words, start) {
   const found = [];
   let flags = 0;
   for (let i = start; i < words.length; i++) {
-    if (REPO_FLAGS.includes(words[i])) i++;
-    else if (words[i].startsWith("--repo=")) continue;
+    const skip = repoFlagWords(words[i]);
+    if (skip) i += skip - 1;
     else if (words[i].startsWith("-")) flags++;
     else if (found.push(i) > flags) break; // no flag left to take this word as its value
   }
@@ -289,13 +293,14 @@ function subcommandAt(words, start) {
 // between them (`pr -R o/r merge`), as parsePrArgs reads them. `gh <word>
 // <action>` counts too, so `gh $P merge` is seen, and so does a gh command
 // that runs or changes an alias (runsAlias). A token scan, not a regex.
-// strict: count an alias only where a command may start, so the text of
-// another program (`brew install gh jq`) does not count.
-function prActions(text, strict = false) {
+// An alias counts only where a command may start, so text that only names gh
+// (`brew install gh jq`, a commit message) does not count.
+function prActions(text) {
   const { words, atStart } = scanWords(text);
   let found = 0;
   for (let i = 0; i < words.length; i++) {
-    const startsGh = GH_START.test(words[i]) && (!strict || words[i] !== "gh" || atStart[i]);
+    const bare = words[i] === "gh" || words[i].endsWith("/gh");
+    const startsGh = GH_START.test(words[i]) && (!bare || atStart[i]);
     if (startsGh && runsAlias(words, subcommandAt(words, i + 1))) {
       found++;
       continue;
@@ -320,11 +325,11 @@ function branchPaths(said) {
   }
   return found;
 }
-// True when a call's text names a PR or branch write. strict as in prActions;
-// a branch path counts there only next to `gh api` or GitHub.
-const namesWrite = (said, strict = false) =>
-  prActions(said, strict) > 0 || MERGE_MUTATIONS.test(said) || BRANCH_MUTATIONS.test(said)
-  || (branchPaths(said) > 0 && (!strict || /\bgh\s+api\b|github/i.test(said)));
+// True when a call's text names a PR or branch write. A branch path counts
+// only next to `gh api` (python's "gh","api" too) or GitHub.
+const namesWrite = (said) =>
+  prActions(said) > 0 || MERGE_MUTATIONS.test(said) || BRANCH_MUTATIONS.test(said)
+  || (branchPaths(said) > 0 && /\bgh[\s,]+api\b|github/i.test(said));
 const hintCount = (text) => {
   const said = plain(text);
   return prActions(said) + (said.match(PR_HINT)?.length ?? 0) + branchPaths(said);
@@ -411,12 +416,33 @@ const changesAlias = (rest) => rest.length > 0 && !ALIAS_READS.has(rest[0]) && !
 // alias action, not the rest of the line.
 const runsAlias = (words, at) => at.some((k) => /^[a-z][\w-]*$/i.test(words[k])
   && (!GH_COMMANDS.has(words[k]) || (words[k] === "alias" && changesAlias(words.slice(k + 1, k + 2)))));
-// `gh repo` actions that change or remove the repository. The gate asks the
-// user before them, rather than refusing them.
-const REPO_ADMIN = new Set(["edit", "rename", "delete", "archive", "unarchive"]);
+// `gh repo` actions that change or remove the repository, and what each
+// does. The gate asks the user before them, rather than refusing them.
+const REPO_ADMIN_DOES = {
+  edit: "changes the repository's settings (its default branch, visibility and merge methods among them)",
+  rename: "renames the repository, which changes its URL",
+  delete: "deletes the repository for good; it cannot be undone",
+  archive: "archives the repository, which makes it read-only",
+  unarchive: "unarchives the repository, which makes it writable again",
+};
+const REPO_ADMIN = new Set(Object.keys(REPO_ADMIN_DOES));
+// Where the `gh repo` action is in texts, from start on: { at, flagFirst }.
+// flagFirst: a flag other than -R/--repo came first, and gh may take the
+// next word as its value (`gh repo --description x edit`).
+function repoAction(texts, start) {
+  let at = start;
+  let flagFirst = false;
+  while (at < texts.length && texts[at].startsWith("-")) {
+    const skip = repoFlagWords(texts[at]);
+    if (!skip) flagFirst = true;
+    at += skip || 1;
+  }
+  return { at, flagFirst };
+}
 // How many `gh repo <action>` in plain text may change or remove the
-// repository: an action from REPO_ADMIN, or one after a flag that may take it
-// as its value (`gh repo --description x edit`). A token scan like prActions.
+// repository: an action from REPO_ADMIN, or one after another flag. A token
+// scan like prActions. It counts `--help` too, since the rest of the line is
+// not this command's.
 function repoAdminCount(said) {
   const { words } = scanWords(said);
   let found = 0;
@@ -424,14 +450,8 @@ function repoAdminCount(said) {
     if (!GH_START.test(words[i])) continue;
     const repo = subcommandAt(words, i + 1).find((k) => words[k] === "repo");
     if (repo === undefined) continue;
-    let j = repo + 1;
-    let flagFirst = false;
-    while (j < words.length && words[j].startsWith("-")) {
-      if (REPO_FLAGS.includes(words[j])) j++;
-      else if (!words[j].startsWith("--repo=")) flagFirst = true;
-      j++;
-    }
-    if (flagFirst || REPO_ADMIN.has(words[j])) found++;
+    const { at, flagFirst } = repoAction(words, repo + 1);
+    if (flagFirst || REPO_ADMIN.has(words[at])) found++;
   }
   return found;
 }
@@ -699,7 +719,7 @@ function classifyHttp(request, call) {
 
 // A call the user approves first: { kind: "ask", reason }.
 const ask = (reason) => ({ kind: "ask", reason });
-const REPO_ASK = (command) => `\`${command}\` can change or remove the repository (its settings, name, visibility, archive state or existence), so the review gate asks you first.`;
+const REPO_ASK = (action) => `\`gh repo ${action}\` ${REPO_ADMIN_DOES[action]}, so the review gate asks you first.`;
 const REPO_UNREAD_ASK = (what) => `The review gate cannot read ${what}, and it may be a \`gh repo\` command that changes or removes the repository (edit, rename, delete, archive or unarchive), so it asks you first.`;
 
 // A refusal about how the command is written, not about the record.
@@ -725,25 +745,24 @@ const namesAdminMerge = (said) => /(?:^|[^\w-])--admin(?![\w-])/.test(said) && /
 const unread = (what) => ({ kind: "unread", what });
 
 // gh: `gh pr merge|ready|create|new`, and `gh api` merges, PR opens and GraphQL.
-// The words that may be the gh subcommand when flags come first (subcommandAt).
-const leadingSubcommandWords = (args) => subcommandAt(args.map((w) => w.text), 0).map((i) => args[i]);
 function classifyGh(call) {
   const text = call.args.map((w) => w.text);
   if (text.length === 1 && wantsHelp(text)) return null;
   if (call.args[0] && expands(call.args[0])) return refuse("it cannot read which gh command this is. Write the gh subcommand out in full.");
+  // xargs adds words gh reads: the subcommand, an alias action, or a gh api method or endpoint.
   const xargs = call.wrappers.includes("xargs");
-  if (xargs && (text.length === 0 || (text[0] === "alias" && text.length === 1))) {
+  if (xargs && (text.length === 0 || (text[0] === "alias" && text.length === 1) || (text[0] === "api" && !wantsHelp(text)))) {
     return refuse("it cannot read which gh command xargs builds. Write the gh command out in full.");
   }
   // gh finds the subcommand past leading flags (`gh -R o/r pr merge 5`), and the gate does not follow it.
-  const leading = text[0]?.startsWith("-") ? leadingSubcommandWords(call.args) : null;
-  if (leading?.some((w) => ["pr", "api", "alias"].includes(w.text) || !GH_COMMANDS.has(w.text) || expands(w))) {
+  const leading = text[0]?.startsWith("-") ? subcommandAt(text, 0) : null;
+  if (leading?.some((k) => ["pr", "api", "alias"].includes(text[k]) || !GH_COMMANDS.has(text[k]) || expands(call.args[k]))) {
     return refuse("it cannot tell which gh command this is when flags come before the subcommand. Write the subcommand first and the flags after it (`gh pr merge 5 -R o/r`).");
   }
   if (text[0] === "alias" && changesAlias(text.slice(1))) return refuse(ALIAS_REASON);
   if (text[0] !== undefined && !text[0].startsWith("-") && !GH_COMMANDS.has(text[0])) return refuse(NOT_GH_COMMAND(text[0]));
   // `gh repo` after any leading flags (`gh -R o/r repo delete`).
-  const sub = leading ? call.args.indexOf(leading[0]) : 0;
+  const sub = leading ? leading[0] : 0;
   if (call.args[sub]?.text === "repo") {
     const found = classifyGhRepo(call.args.slice(sub + 1), xargs);
     if (found) return found;
@@ -758,19 +777,14 @@ function classifyGh(call) {
 // repository, or cannot be read (built at run time, left to xargs, or after
 // a flag that may take it as its value).
 function classifyGhRepo(words, xargs) {
-  if (wantsHelp(words.map((w) => w.text))) return null;
-  let i = 0;
-  let flagFirst = false;
-  while (i < words.length && words[i].text.startsWith("-")) {
-    if (REPO_FLAGS.includes(words[i].text)) i++;
-    else if (!words[i].text.startsWith("--repo=")) flagFirst = true;
-    i++;
-  }
-  const action = words[i];
+  const texts = words.map((w) => w.text);
+  if (wantsHelp(texts)) return null;
+  const { at, flagFirst } = repoAction(texts, 0);
+  const action = words[at];
   if (action === undefined) return xargs ? ask(REPO_UNREAD_ASK("which `gh repo` action xargs builds")) : null;
   if (flagFirst) return ask(REPO_UNREAD_ASK("which `gh repo` action this is when a flag comes before it"));
   if (expands(action)) return ask(REPO_UNREAD_ASK("the `gh repo` action, which is built at run time"));
-  return REPO_ADMIN.has(action.text) ? ask(REPO_ASK(`gh repo ${action.text}`)) : null;
+  return REPO_ADMIN.has(action.text) ? ask(REPO_ASK(action.text)) : null;
 }
 
 const unreadMergeWord = (word, why) =>
@@ -790,8 +804,12 @@ function classifyGhPr(call) {
   if ((pr.action === null || pr.action.text === "merge") && pr.splitValues.length > 0) {
     return refuse(unreadMergeWord(pr.splitValues[0], "the shell splits it and the parts may include `--admin`"));
   }
+  const xargs = call.wrappers.includes("xargs");
+  if (xargs && pr.action === null && !pr.boolean("--help", "-h")) {
+    return refuse("it cannot read which gh pr action xargs builds. Run gh with the action and the PR number written out.");
+  }
   if (!PR_ACTIONS.includes(pr.action?.text) || pr.boolean("--help", "-h")) return null;
-  if (call.wrappers.includes("xargs")) {
+  if (xargs) {
     return refuse("it cannot read a PR command whose arguments come from xargs. Run gh with the PR number written out.");
   }
   const action = pr.action.text;
@@ -847,40 +865,57 @@ function classifyGhApi(call) {
 // node -e, alias, a wrapper the walk does not know) is refused.
 function classifyOther(call, prog) {
   if (prog === null) return unread("a command whose program is built at run time");
-  if (prog === "git" && setsGitShellAlias(call)) {
-    return refuse("it cannot read what a git shell alias (a value that starts with `!`) runs, and it may run gh. Run the command directly, not through a git alias.");
+  if (prog === "git") {
+    const found = classifyGitConfig(call);
+    if (found) return found;
   }
   if (READERS.has(prog)) return null;
   const said = plain(wordsText(call));
-  if (!namesWrite(said, true)) {
+  if (!namesWrite(said)) {
     return repoAdminCount(said) > 0 ? ask(REPO_UNREAD_ASK("a gh command run through another program")) : null;
   }
   return namesAdminMerge(said) ? refuse(`${ADMIN_REASON} Run gh directly, not through another program.`, true) : refuse("it cannot read a gh or GitHub API command run through another program. Run gh directly, in its own Bash call.");
 }
 
-// True when a git call sets an alias whose value may start with `!`, which
-// runs a shell command: `git -c alias.x=!...`, `git config alias.x '!...'`,
-// a value built at run time, or one read from the environment
-// (`--config-env alias.x=VAR`, either spelling).
-function setsGitShellAlias(call) {
+// The config a git call sets, as [{ key, value }]: `-c key=value`,
+// `git config [options] key value`, and `--config-env key=VAR` (either
+// spelling), whose value comes from the environment (value null).
+function gitConfigSets(call) {
   const words = call.args;
+  const isConfig = words.some((w) => w.text === "config");
+  const sets = [];
   for (let i = 0; i < words.length; i++) {
     const text = plain(words[i].text);
     const env = /^--config-env(?:=(.*))?$/i.exec(text);
     if (env) {
-      const key = env[1] ?? words[i + 1];
-      if (key === undefined) continue;
-      if (typeof key !== "string" && expands(key)) return true;
-      if (/^alias\./i.test(typeof key === "string" ? key : plain(key.text))) return true;
+      const key = env[1] !== undefined ? { text: env[1], dynamic: words[i].dynamic } : words[i + 1];
+      if (key) sets.push({ key, value: null });
+      if (env[1] === undefined) i++;
       continue;
     }
-    if (!/^alias\./i.test(text)) continue;
-    // -c alias.x=VALUE holds its value; git config alias.x VALUE has it next.
-    const eq = text.indexOf("=");
-    const value = eq === -1 ? words[i + 1] : { text: text.slice(eq + 1), dynamic: words[i].dynamic };
-    if (value && (expands(value) || /^\s*!/.test(plain(value.text)))) return true;
+    const pair = /^([a-z][\w-]*(?:\.[^=\s]+)?\.[\w-]+)=(.*)$/is.exec(text);
+    if (pair) sets.push({ key: { text: pair[1], dynamic: false }, value: { text: pair[2], dynamic: words[i].dynamic } });
+    else if (isConfig && /^[a-z][\w-]*\.\S+$/i.test(text) && words[i + 1]) sets.push({ key: { text, dynamic: false }, value: words[i + 1] });
   }
-  return false;
+  return sets;
+}
+
+// git config that runs a command the gate cannot read: an alias whose value
+// may run a shell command (`!...`) or set another alias, any alias from the
+// environment, or a value (core.pager, core.sshCommand, an alias) that names
+// a gh write.
+function classifyGitConfig(call) {
+  for (const { key, value } of gitConfigSets(call)) {
+    const isAlias = expands(key) || /^alias\./i.test(plain(key.text));
+    const said = value ? plain(value.text) : "";
+    if (isAlias && (value === null || expands(value) || /!|alias\.|--config-env/i.test(said))) {
+      return refuse("it cannot read what a git shell alias (a value that starts with `!`, or one read from the environment) runs, and it may run gh. Run the command directly, not through a git alias.");
+    }
+    if (value && (namesWrite(said) || repoAdminCount(said) > 0)) {
+      return refuse(`it cannot read a gh command that git runs from its config (\`${plain(key.text)}\`). Run gh directly, in its own Bash call.`);
+    }
+  }
+  return null;
 }
 
 // The HTTP clients the gate reads, by program name.
@@ -1064,7 +1099,7 @@ export function bashCheck(command, cwd, shell) {
     if (hintCount(command) > 0) {
       return refused("it cannot parse this command, and the command may write to a PR. Split it into simpler Bash calls, and run the gh PR command on its own.");
     }
-    return repoAdminHints(command) > 0 ? asking(REPO_UNREAD_ASK("this command, which it cannot parse")) : none;
+    return repoAdminHints(command) > 0 ? asking(REPO_UNREAD_ASK("this command")) : none;
   }
   const ops = steps.map((step) => ({
     step,
