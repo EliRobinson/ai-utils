@@ -2,6 +2,23 @@
 
 1.8.0 is the first version published in this public repo. Earlier entries are kept for reference.
 
+## 1.18.0
+
+**Upgrade steps:**
+
+1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
+2. Rerun `setup-agentic-workflow` in each repo set up before 1.18.0, and merge its setup PR. It refreshes `docs/agents/coordinator-prompt.md`, `docs/agents/git-workflow.md`, `docs/agents/multi-agent.md` and `scripts/check-agent-hooks.mjs`.
+3. Start a new coordinator chat from the new prompt, or paste its new "Cleanup after a merge" section into the open one.
+
+**Changes:**
+
+- **The coordinator cleans up after each merge** (#55). The coordinator prompt's merge steps gain step 7, "Clean up", and a new section, "Cleanup after a merge", which owns the rule. The coordinator runs it itself as part of closing the merge (merging is one of the things it does itself), and an agent that runs merge steps for it runs it too. It deletes the PR's branch on GitHub (only if GitHub has not already) and locally, removes the item's worktree and prunes, then says so in one line.
+- **Safeguards.** It touches only the branch and worktree that the item's registry row names, never the main checkout, a worktree it did not create, or someone else's branch. Before it deletes anything, it checks that the PR is merged (`gh pr view N --json state,mergedAt,headRefName,headRefOid`), that the worktree is on that branch with a clean `git status --porcelain`, that the worktree has no commit outside the merged PR's last commit, and that the remote branch is gone or still at that commit. If a check fails, it deletes nothing and adds a `do` row to the Asks board. It never forces: no force push, no `git branch -D`, no `git worktree remove --force`.
+- **Squash merges and `git branch -d`.** A squash or rebase merge leaves the branch's commits out of `main`, so `-d` would refuse. The cleanup detaches the worktree at the PR's last commit first, so `-d` checks the branch against that commit and deletes it only when nothing is missing from the PR. If it still refuses, the cleanup stops and asks.
+- **No hook override.** Every git command runs as `git -C <worktree>`, so the main-checkout guard allows it without `ALLOW_MAIN_CHECKOUT_WRITE`; in the main checkout the guard still refuses `git branch -d` and `git worktree prune` and `remove`.
+- `git-workflow.md`, `multi-agent.md`, the `route-work` skill and the README point to the new section; `multi-agent.md` tells agents to commit and push all their work before the merge.
+- `check-agent-hooks.mjs` pins the cleanup commands: both hooks allow each one from the main checkout and from the worktree, and the guard still refuses `git branch -d` and `git worktree prune` run in the main checkout.
+
 ## 1.16.0
 
 **Upgrade steps:**
