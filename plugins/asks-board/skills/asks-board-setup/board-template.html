@@ -206,7 +206,7 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
   <header>
     <h1>Asks for {{OWNER}}</h1>
     <p class="summary" id="summary"></p>
-    <p class="sub">Asks a click can settle. Tick it when done, pick an answer, or add a note. Each click is saved and sent to the chat that asked. Merges, tickets, opening PRs and other typed answers are asked in your chats, so check them too.</p>
+    <p class="sub">Asks a click can settle. Asks that need a typed answer, like a merge, a ticket or a new PR, come up in your chats. Tick one when done, pick an answer, or add a note. Each click is saved and sent to the chat that asked.</p>
   </header>
   <div class="banner" id="banner" role="alert" hidden></div>
   <div class="filters" id="projects" role="group" aria-label="Show project" hidden></div>
@@ -1043,11 +1043,11 @@ details.closed-wrap .list { margin-top: 8px; gap: 6px; }
     }
     if (!items.length) {
       const where = project === ALL ? "" : " in " + project;
-      if (!docs.length) box.append(empty("No asks yet", "When a chat needs something from you, it shows up here. You don’t need to reload."));
+      if (!docs.length) box.append(empty("No asks yet", "When a chat has an ask a click can settle, it shows up here. You don’t need to reload. Asks that need a typed answer come up in your chats."));
       else if (mine.open.length) box.append(empty("No " + KIND_LABEL[kind].toLowerCase() + " asks" + where, "",
         el("button", { class: "btn line", type: "button", "data-k": "empty-all",
           onclick: () => { focusNext = ALL_KINDS; setKind(ALL); } }, ["Show all kinds"])));
-      else box.append(empty("Nothing needs you" + where, "New asks show up here as soon as a chat adds them."));
+      else box.append(empty("Nothing here needs you" + where, "New click asks show up here as soon as a chat adds them. Asks that need a typed answer come up in your chats."));
     }
 
     // Waiting for the chat, and Closed (the newest 40; the count says when there are more).

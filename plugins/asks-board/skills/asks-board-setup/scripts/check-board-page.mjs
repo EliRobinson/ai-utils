@@ -335,6 +335,9 @@ each("tripwire:", [
   [/const text = pingText\(d, what\)/, "ping() builds its text with pingText()"],
   [/todoItems\(open,/, "render() draws To do from todoItems()"],
   [/role="status"/, "the page keeps its role=status line for screen readers"],
+  [/<p class="sub">Asks a click can settle\. Asks that need a typed answer, like a merge, a ticket or a new PR, come up in your chats\./, "the subtitle says the board holds click-settled asks and sends typed asks to the chats"],
+  [/empty\("Nothing here needs you"/, "the cleared state does not claim the board holds every ask"],
+  [/When a chat has an ask a click can settle/, "the first empty state does not claim the board holds every ask"],
 ], (re, behaviour) => (re.test(page) ? null : "missing: " + behaviour));
 // The click needs its user gesture for anchorFor: act() calls it first, before it saves,
 // shows a result or redraws, and ping() only awaits the promise act() made.
@@ -433,16 +436,6 @@ await eachAsync("within:", [
   ["gives the result when it comes in time", Promise.resolve("done"), "done"],
   ["gives the fallback when it never comes", new Promise(() => {}), "late"],
 ], (p) => within(p, 5, "late"));
-
-// The header subtitle says the board holds only click-settled asks and sends typed answers to the chats.
-const sub = (page.match(/<p class="sub">([^<]*)<\/p>/) || [])[1] || "";
-each("subtitle: says what the board holds and where typed asks go", [
-  ["says the board holds click-settled asks", /asks a click can settle/i],
-  ["names merges as asked in chat", /merges/i],
-  ["names tickets as asked in chat", /tickets/i],
-  ["names opening PRs as asked in chat", /opening PRs/i],
-  ["points the owner to their chats", /your chats/i],
-], (name, re) => (re.test(sub) ? null : "subtitle " + show(sub) + " does not match"));
 
 // Every function and const in the pure block is used by a case above, not only listed.
 const self = readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");

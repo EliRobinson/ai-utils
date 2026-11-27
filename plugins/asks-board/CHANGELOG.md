@@ -11,7 +11,7 @@ Entries start at 1.3.0. Earlier changes are in the git history of `plugins/asks-
 
 **Changes:**
 
-- **Board subtitle says what the board holds** (#39). It now reads "Asks a click can settle." and tells you that merges, tickets, opening PRs and other typed answers are asked in your chats. Before, it said the board held everything your chats need from you. No other text, layout or styling changed.
+- **Board subtitle says what the board holds** (#39). It now reads "Asks a click can settle." and tells you that asks needing a typed answer, like a merge, a ticket or a new PR, come up in your chats. Before, it said the board held everything your chats need from you. The two empty-state messages say the same. No layout or styling changed.
 
 ## 1.3.0
 
