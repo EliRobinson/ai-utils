@@ -1,6 +1,6 @@
 # ai-utils
 
-Claude Code plugins by Eli Robinson: `agent-roster` and `asks-board`.
+Claude Code plugins by Eli Robinson: `agent-roster`, `asks-board`, and the opt-in proof of concept `mutation-guided-testing`.
 
 ## Layout
 
@@ -14,6 +14,8 @@ plugins/
                                    thermo-nuclear-code-quality-review (Cursor's, vendored)
   asks-board/                    Asks board: one artifact for the asks chats need you to click
     skills/                        asks-board (daily rules), asks-board-setup (+ board page template)
+  mutation-guided-testing/       opt-in proof of concept: tests that catch bugs, not coverage
+    skills/                        mutation-guided-testing (+ scripts and their tests)
 .claude-plugin/marketplace.json  marketplace index, lists everything in plugins/
 .claude/agents/                  this repo's reviewer agents (symlinks into agent-roster)
 .claude/settings.json            wires the guard and review-gate hooks
@@ -41,6 +43,12 @@ Outside contributors: fork the repo, use any branch name, run `python3 scripts/v
 
 ```
 /plugin install asks-board@ai-utils
+```
+
+`mutation-guided-testing` is an opt-in proof of concept; install it only if you want to try it (see `plugins/mutation-guided-testing/README.md`):
+
+```
+/plugin install mutation-guided-testing@ai-utils
 ```
 
 Before you install agent-roster, install Community Access's `accessibility-agents@community-access` plugin, which it needs (see `plugins/agent-roster/README.md`, "Install"):
@@ -94,8 +102,8 @@ list exactly the read-only `accessibility-agents` MCP tools, that every agent
 that edits files can open that plugin's edit gate, that agent-roster declares
 the plugin at its pinned version, that every install command adds its
 marketplace at the pinned commit, and that no doc outside a changelog still
-mentions the accessibility plugin it replaced. It also runs the unit tests,
-the skill self-checks and the CI workflow rules
+mentions the accessibility plugin it replaced. It also runs the unit tests (including each
+skill's `scripts/tests/`), the skill self-checks and the CI workflow rules
 ([docs/agents/ci.md](docs/agents/ci.md)).
 
 ## Using these skills in the Claude apps

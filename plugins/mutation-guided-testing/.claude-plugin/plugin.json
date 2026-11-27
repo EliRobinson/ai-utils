@@ -1,0 +1,11 @@
+{
+  "name": "mutation-guided-testing",
+  "version": "0.1.0",
+  "description": "Opt-in proof of concept: makes the tests an agent writes catch bugs, not just raise coverage. Inside the red-green-refactor loop it names 3 to 5 concrete bugs from a risk checklist before the code, proves a test fails for each, runs Gremlins, mutmut or StrykerJS on the diff only, and triages a capped, ranked list of survivors. No percentage gate.",
+  "keywords": [
+    "testing",
+    "mutation-testing",
+    "tdd",
+    "property-based-testing"
+  ]
+}

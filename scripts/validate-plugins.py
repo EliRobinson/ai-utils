@@ -5,9 +5,9 @@ Checks the things that silently stop a plugin or skill from loading — a
 mangled frontmatter block, a manifest name, version or description that
 drifted from its marketplace entry, a ${CLAUDE_PLUGIN_ROOT} path left behind
 by a move. It also runs each skill's scripts/check-*.mjs self-check when node
-is installed, runs the unit tests in scripts/test_*.py, and checks the GitHub
-Actions workflows (rules in docs/agents/ci.md). It is the whole test gate,
-locally and in CI.
+is installed, runs the unit tests in scripts/test_*.py and in each skill's
+scripts/tests/, and checks the GitHub Actions workflows (rules in
+docs/agents/ci.md). It is the whole test gate, locally and in CI.
 
 Run from the repo root:
 
@@ -875,6 +875,30 @@ def run_unit_tests() -> None:
              f"`python3 -m unittest discover -s {rel(TESTS_DIR)} -p '{TEST_PATTERN}'`")
 
 
+SKILL_TESTS_GLOB = "plugins/*/skills/*/scripts/tests"
+
+
+def run_skill_tests() -> None:
+    """Run each skill's scripts/tests/test_*.py, each folder in its own process.
+
+    A process per folder keeps the skills' test modules, which may share
+    names, from clashing with each other and with scripts/test_*.py.
+    """
+    for tests in sorted(p for p in ROOT.glob(SKILL_TESTS_GLOB) if p.is_dir()):
+        where = f"{rel(tests)}/{TEST_PATTERN}"
+        cmd = [sys.executable, "-m", "unittest", "discover", "-s", str(tests), "-p", TEST_PATTERN]
+        try:
+            run = subprocess.run(cmd, cwd=tests, capture_output=True, text=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            fail(f"{where}: tests did not finish in 300 seconds")
+            continue
+        if re.search(r"^Ran 0 tests", run.stderr, re.M):
+            fail(f"{where}: found no tests; add them or remove the folder")
+        elif run.returncode != 0:
+            tail = "\n".join(run.stderr.strip().splitlines()[-15:])
+            fail(f"{where}: tests failed; run `python3 -m unittest discover -s {rel(tests)}`\n{tail}")
+
+
 def run_self_checks() -> None:
     """Run every skill's scripts/check-*.mjs, so a hook regression fails here.
 
@@ -1021,6 +1045,7 @@ def main() -> int:
     check_accessibility_agents(agents)
     check_workflows()
     run_unit_tests()
+    run_skill_tests()
     run_self_checks()
     report(skill_count, len(entries))
     return 1 if problems else 0

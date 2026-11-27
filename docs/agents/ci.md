@@ -10,7 +10,7 @@ GitHub Actions runs one workflow, `.github/workflows/ci.yml`, on every pull requ
 python3 scripts/validate-plugins.py
 ```
 
-It needs Python 3 and Node, with no packages and no `claude` CLI. It runs the plugin and skill checks, the unit tests in `scripts/test_*.py`, the workflow rules below, and every `plugins/*/skills/*/scripts/check-*.mjs` self-check. Locally it skips the self-checks with a note if Node is missing. In CI it fails instead, so CI never skips them.
+It needs Python 3 and Node, with no packages and no `claude` CLI. It runs the plugin and skill checks, the unit tests in `scripts/test_*.py` and in every `plugins/*/skills/*/scripts/tests/` folder (each folder in its own process), the workflow rules below, and every `plugins/*/skills/*/scripts/check-*.mjs` self-check. Locally it skips the self-checks with a note if Node is missing. In CI it fails instead, so CI never skips them.
 
 ## When `validate` fails
 
