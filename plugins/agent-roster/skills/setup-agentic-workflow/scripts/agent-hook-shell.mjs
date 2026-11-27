@@ -26,8 +26,9 @@ const WORD_END = /[\s;&|<>()]/;
 // Lex a command line into items:
 //   { type: "cmd", words, heredocs }  a simple command
 //   { type: "push" } / { type: "pop" } a ( ) subshell or a $(...) scope
-// A word is { text, dynamic }. dynamic is true when the shell builds it at
-// run time ($VAR, $(...), globs, ~). Commands inside $(...) and backticks run
+// A word is { text, dynamic, splits }. dynamic is true when the shell builds it at
+// run time ($VAR, $(...), globs, ~). splits is true when that happens outside
+// double quotes, so the result may split into several words. Commands inside $(...) and backticks run
 // before the command that holds them, so they come first, in their own scope.
 // `$(cat <<'X' ... X)` with a quoted delimiter is read as its literal body.
 // Throws on an unterminated quote, $( or backtick.
@@ -116,7 +117,9 @@ export function lex(line) {
       words = [];
       cmdHeredocs = [];
     };
-    const substitute = (inner) => {
+    // quoted: inside "...", where the result stays one word. Outside quotes
+    // the shell splits it, so it can become several words (and flags).
+    const substitute = (inner, quoted = false) => {
       startWord();
       const only = inner.length === 1 ? inner[0] : null;
       const doc = only?.words?.length === 1 && only.words[0].text === "cat" && only.heredocs.length === 1
@@ -126,6 +129,7 @@ export function lex(line) {
         word.text += doc.body;
       } else {
         word.dynamic = true;
+        if (!quoted) word.splits = true;
         pending.push({ type: "push" }, ...inner, { type: "pop" });
       }
     };
@@ -167,6 +171,7 @@ export function lex(line) {
         // Arithmetic: no commands, and `<<` in it is a shift, not a heredoc.
         startWord();
         word.dynamic = true;
+        word.splits = true;
         i = skipParens(i + (c === "$" ? 1 : 0));
       } else if (c === "(" && word !== null && word.text.endsWith("=")) {
         // name=(a b c): array elements, not a subshell.
@@ -218,9 +223,9 @@ export function lex(line) {
             i += 2;
           } else if (line.startsWith("$(", i)) {
             i += 2;
-            substitute(parse(true));
+            substitute(parse(true), true);
           } else if (line[i] === "`") {
-            substitute(backtick());
+            substitute(backtick(), true);
           } else {
             if (line[i] === "$") word.dynamic = true;
             word.text += line[i];
@@ -232,6 +237,7 @@ export function lex(line) {
       } else {
         startWord();
         if ("$*?[".includes(c) || (c === "~" && word.text === "")) word.dynamic = true;
+        if ("$*?[".includes(c)) word.splits = true;
         word.text += c;
         i++;
       }

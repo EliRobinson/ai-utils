@@ -106,7 +106,8 @@ try {
   // A PR whose body is empty, so a checked merge is refused.
   const noBody = (command, expect) => review(command, expect, { FAKE_PR_BODY: "" });
   // Refused, and the refusal says `phrase`: the record is complete, so only the form can refuse.
-  const refuseSays = (command, phrase, extra = { FAKE_PR_BODY: good }) => ({ ...review(command, "refuse", extra), says: phrase });
+  const says = (c, phrase) => ({ ...c, says: phrase });
+  const refuseSays = (command, phrase) => says(review(command, "refuse", { FAKE_PR_BODY: good }), phrase);
   const ASK_OWNER = "stop and ask the owner";
   const mcp = (tool, input, expect) => ({ hook: "review", hookDir: path.join(tree, "scripts"), cwd: tree, tool, input, expect });
   const fromTree = path.join(tree, "scripts");
@@ -418,16 +419,35 @@ try {
     refuseSays("X='gh pr merge 5 --admin'; eval \"$X\"", ASK_OWNER),
     refuseSays("python3 -c \"import os; os.system('gh pr merge 5 --admin')\"", ASK_OWNER),
     refuseSays("alias m='gh pr merge 5 --admin'", ASK_OWNER),
-    { ...inNamed("gh pr merge 5 -R other/repo --admin", "refuse"), says: ASK_OWNER },
-    { ...inNamed("gh pr merge https://github.com/other/repo/pull/5 --admin", "refuse"), says: ASK_OWNER },
+    says(inNamed("gh pr merge 5 -R other/repo --admin", "refuse"), ASK_OWNER),
+    says(inNamed("gh pr merge https://github.com/other/repo/pull/5 --admin", "refuse"), ASK_OWNER),
     // A merge word the gate cannot read may be --admin.
     refuseSays("gh pr merge 5 $FLAGS", "--admin"),
     refuseSays("gh pr merge 5 --squash \"$F\"", "--admin"),
-    { ...inNamed("gh pr merge 5 -R other/repo \"$F\"", "refuse"), says: "--admin" },
+    says(inNamed("gh pr merge 5 -R other/repo \"$F\"", "refuse"), "--admin"),
     // A REST merge skips gh's branch protection check, so it is refused like --admin.
     refuseSays("gh api -X PUT repos/o/r/pulls/5/merge", ASK_OWNER),
     refuseSays("gh api --method=PUT repos/o/r/pulls/5/merge -f merge_method=squash", ASK_OWNER),
-    { ...inNamed("gh api -X PUT repos/other/repo/pulls/5/merge", "refuse"), says: ASK_OWNER },
+    says(inNamed("gh api -X PUT repos/other/repo/pulls/5/merge", "refuse"), ASK_OWNER),
+    refuseSays("curl -X PUT https://api.github.com/repos/o/r/pulls/5/merge", ASK_OWNER),
+    // gh finds its subcommand and action past flags, so a flag first must not hide the merge.
+    refuseSays("gh --admin=true pr merge 5", "flags come before the subcommand"),
+    refuseSays("gh -R o/r pr merge 5 --admin", "flags come before the subcommand"),
+    refuseSays("gh --repo=o/r pr merge 5 --admin", "flags come before the subcommand"),
+    refuseSays("gh -X PUT api repos/o/r/pulls/5/merge", "flags come before the subcommand"),
+    refuseSays("gh -f merge_method=squash api repos/o/r/pulls/5/merge", "flags come before the subcommand"),
+    refuseSays("gh pr --body x merge 5 --admin", "right after `gh pr`"),
+    refuseSays("gh pr -t x merge 5 --admin", "right after `gh pr`"),
+    // An unquoted run-time flag value splits into words, so it may carry --admin.
+    refuseSays("gh pr merge 5 --body $B", "--admin"),
+    refuseSays("gh pr merge 5 -t $(echo x) --squash", "--admin"),
+    refuseSays("gh pr merge 5 --match-head-commit $S", "--admin"),
+    refuseSays("gh pr -R $R", "--admin"),
+    // python's list form names the merge too.
+    refuseSays("python3 -c \"import subprocess; subprocess.run(['gh','pr','merge','5','--admin'])\"", ASK_OWNER),
+    refuseSays("python3 -c \"import subprocess; subprocess.run(['gh', 'pr', 'merge', '5'])\"", "another program"),
+    // An unreadable step plus a commit message that names --admin gets the way out, not an --admin accusation.
+    refuseSays("eval \"$(ssh-agent -s)\"; git commit -m 'refuse gh pr merge --admin'", "in its own Bash call"),
     // Reads, plain merges and text that only names --admin still pass.
     review("gh pr merge 5 --squash --delete-branch --match-head-commit abc123", "allow", { FAKE_PR_BODY: good }),
     review("gh pr merge 5 --squash --subject \"$T\" --body \"$B\" -R o/r", "allow", { FAKE_PR_BODY: good }),

@@ -93,13 +93,16 @@ Rounds: 1
 It refuses, always, a merge that bypasses branch protection, whatever the record says and in any repo:
 
 - `gh pr merge` with `--admin`, in any position or spelling (`--admin`, `--admin=true`, even `--admin=false`), also inside `eval`, `bash -c`, a pipe into a shell, `python3 -c` or an `alias`. **Never use `--admin`.** When checks fail or a branch rule blocks a merge, stop and ask the owner.
-- `gh pr merge` with a word built at run time that is not a flag's value (`gh pr merge 5 $FLAGS`, `"$F"`), since it may expand to `--admin`. Write the PR number and every flag out in full.
-- `gh api` writes to a PR's `pulls/N/merge`. That endpoint skips the branch protection check `gh pr merge` makes, so with admin rights it bypasses branch protection like `--admin`. Use `gh pr merge`.
+- `gh pr merge` with a word built at run time that is not a flag's value (`gh pr merge 5 $FLAGS`, `"$F"`), or a flag's value the shell would split (`-t $T`, `-t $(cat f)`; a quoted `"$T"` passes), since it may expand to `--admin`. Write the PR number and every flag out in full.
+- `gh api`, or an HTTP client (`curl`, `wget`, `http`, `xh`), writing to a PR's `pulls/N/merge`. That endpoint skips the branch protection check `gh pr merge` makes, so with admin rights it bypasses branch protection like `--admin`. Use `gh pr merge`.
+- `gh pr merge` with a flag before the subcommand or action (`gh -R o/r pr merge 5`, `gh pr -t x merge 5`), because gh reads past it and the hook cannot tell where the action is. Write `gh pr merge 5 ...` with the flags after.
 
-It also refuses, always, three forms that would skip the record check:
+When it refuses one of these, the agent never retries another way. It stops and asks the owner, who can fix the check or the rule, or merge the PR themselves on GitHub.
+
+It also refuses these three forms, whatever the record says, because they would skip the record check:
 
 - `gh api graphql` with the query from a file, stdin or a variable (`-F query=@file`, `--input`, `-f query="$Q"`). Pass the query inline with `-f query='...'`.
-- An HTTP client (`curl`, `wget`, `http`, `xh`) that writes to a PR's `pulls/N/merge`, to `pulls` (opening a PR) or to `merges`. Use `gh pr merge` or `gh pr create`. Reads still pass. It reads the last `-X`, `--url` and `--expand-url`, and resolves `../` and `%`-encoding. A write whose URL is a variable or a curl glob (`{...}`, `[...]`, `{{var}}`) is refused when the URL names GitHub; otherwise it is an unread call (below). `gh api` writes to `merges` are refused too.
+- An HTTP client (`curl`, `wget`, `http`, `xh`) that writes to `pulls` (opening a PR) or to `merges`; a write to `pulls/N/merge` is refused as above. Use `gh pr merge` or `gh pr create`. Reads still pass. It reads the last `-X`, `--url` and `--expand-url`, and resolves `../` and `%`-encoding. A write whose URL is a variable or a curl glob (`{...}`, `[...]`, `{{var}}`) is refused when the URL names GitHub; otherwise it is an unread call (below). `gh api` writes to `merges` are refused too.
 - An HTTP client call to GitHub's GraphQL API (a host with `github` in its name). Use `gh api graphql`.
 
 It reads the script of `eval '...'`, `bash -c '...'` (also `sh`, `zsh`, `fish`, `busybox sh`, with options such as `-euo pipefail`) like any command. Some calls it cannot read: a script built at run time (`eval "$X"`), a script a shell reads from stdin, a pipe or `<(...)` (`... | bash`, `bash <<< '...'`, `bash -s`, `source /dev/stdin`), a program that is a variable or an `env -S` string, and an HTTP write whose URL it cannot read, or that uses curl `-K`, `--next` or `--variable` or wget `-i`. It refuses such a line when the line names a PR write (`gh pr merge|ready|create`, flags between them included, a `pulls`, `merges` or `graphql` path, or a GraphQL mutation) that it did not read in a plain `gh` or HTTP call. Text a `gh` call only prints (`-q`, `--jq`, `-t`, `--template`) does not count as read. So `eval "$(ssh-agent -s)" && gh pr merge 5` is checked like the merge alone.

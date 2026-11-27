@@ -694,12 +694,12 @@ def check_tracker_setting() -> None:
 MERGE_POLICIES = ("ask", "auto")
 DEFAULT_MERGE_POLICY = "ask"
 READS_MERGE_POLICY = "git show origin/main:docs/agents/git-workflow.md"
-MERGE_POLICY_COORDINATOR_TERMS = [READS_MERGE_POLICY, "what `auto` never covers"]
+MERGE_POLICY_COORDINATOR_TERMS = [READS_MERGE_POLICY, "what `auto` never covers", "never add `--admin`"]
 MERGE_POLICY_TERMS = {  # a template and its filled copy share one list
     GUARDRAILS: ["merge policy: {{merge_policy}}."],
     COORDINATOR_PROMPT: MERGE_POLICY_COORDINATOR_TERMS,
     REPO_COORDINATOR_PROMPT: MERGE_POLICY_COORDINATOR_TERMS,
-    GIT_WORKFLOW: [READS_MERGE_POLICY, "what `auto` never covers", "bash(gh pr merge *--admin*)"],
+    GIT_WORKFLOW: [READS_MERGE_POLICY, "what `auto` never covers", "bash(gh pr merge *--admin*)", "branch protection is never bypassed"],
     SETUP_SKILL_MD: ["## change the merge policy", "never add it for them"],
 }
 # Wording that puts a merge ask on the board: the phrasings before #24, or a line
