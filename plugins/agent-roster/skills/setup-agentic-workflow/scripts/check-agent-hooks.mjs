@@ -563,6 +563,12 @@ try {
     refuseBranch("curl -X POST -d '{}' https://api.github.com/repos/o/r/transfer"),
     review("X='gh api -X PATCH repositories/$ID -f default_branch=x'; eval \"$X\"", "refuse"),
     review("gh api -X HEAD \"repos/o/r/$P\"", "allow"),
+    refuseBranch("gh api -X PUT repos/o/r/actions/permissions/workflow -F can_approve_pull_request_reviews=true"),
+    review("node -e 'fetch(`https://api.github.com/repos/o/r/git/refs/heads/main`,{method:\"DELETE\"})'", "refuse"),
+    review("node -e 'go({url:\"https://api.github.com/repos/o/r/git/refs/heads/main\",method:\"PATCH\"})'", "refuse"),
+    review("python3 -c 'import subprocess as s; g=\"gh\"; s.run([g,\"api\",\"-X\",\"DELETE\",\"repos/o/r/git/refs/heads/main\"])'", "refuse"),
+    review("X='gh api -X PATCH repos/{owner}/{repo} -f default_branch=x'; eval \"$X\"", "refuse"),
+    review("rg repos/o/r/rulesets src/", "allow"),
     review("gh api -X GET search/code -f q=createRef", "allow"),
     // Local paths that look like API paths are not branch writes.
     review("ls .github/rulesets", "allow"),
@@ -680,6 +686,16 @@ try {
     review("find . -exec gh co {} \\;", "refuse"),
     review("python3 -c 'subprocess.run([\"/opt/homebrew/bin/gh\",\"co\",\"5\"])'", "refuse"),
     review("ls docs/gh notes", "allow"),
+    // gh behind a wrapper, an option or an assignment still starts a command.
+    ...["timeout 60 gh m 5", "GH_REPO=o/r gh m 5", "env GH_REPO=o/r gh m 5", "sudo -u x gh m 5", "nice -n 5 gh m 5",
+      "if gh m 5; then :; fi", "! gh m 5", "{ gh m 5; }", "xargs -n1 gh m < f", "timeout 60 gh alias set m x"]
+      .map((c) => review(`python3 -c 'import os; os.system("${c}")'`, "refuse")),
+    review("X='timeout 9 gh m 5'; eval \"$X\"", "refuse"),
+    review("X='GH_REPO=o/r gh m 5'; eval \"$X\"", "refuse"),
+    review("git -c core.pager='timeout 9 gh m 5' log", "refuse"),
+    review("git -c core.pager='env X=1 gh alias set m x' log", "refuse"),
+    review("timeout 30 gh pr view 5", "allow"),
+    review("sudo -u x ls && gh issue list", "allow"),
     review("which gh node", "allow"),
     review("gh a11y", "allow"),
     // A git shell alias may run gh in a way the gate cannot read.

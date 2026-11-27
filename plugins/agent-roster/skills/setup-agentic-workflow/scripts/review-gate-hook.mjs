@@ -254,17 +254,35 @@ const plain = (text) =>
 // The words of text as a token scan reads them (commas and brackets split
 // too, so python's ["gh","pr","merge"] is seen), and for each word whether a
 // command may start there: first, after a comma or bracket, after a word
-// that ends in ; & | = or a backtick, or after a word that runs the next one.
-const RUNS_NEXT = new Set(["xargs", "exec", "env", "command", "nohup", "sudo", "eval", "then", "do", "else", "-c",
-  "-exec", "-execdir", "-ok", "-okdir"]);
+// that ends in ; & | = or a backtick, after an assignment (`GH_REPO=x gh`),
+// or after a word that runs the next one with its options and their values
+// (`timeout 60 gh`, `sudo -u x gh`, `env X=1 gh`, `if gh`).
+const RUNS_NEXT = new Set(["xargs", "exec", "env", "command", "nohup", "sudo", "doas", "eval", "then", "do", "else",
+  "if", "elif", "while", "until", "time", "!", "{", "timeout", "nice",
+  "ionice", "stdbuf", "setsid", "caffeinate", "watch", "parallel", "chronic", "flock", "builtin"]);
+// Options whose next word is a command, wherever they stand (`bash -c gh`, `find -exec gh`).
+const OPTION_RUNS_NEXT = new Set(["-c", "-exec", "-execdir", "-ok", "-okdir"]);
 function scanWords(text) {
   const parts = text.split(/([\s,()[\]]+)/);
   const words = [];
   const atStart = [];
+  let next = true; // the next word may start a command
+  let wrapper = false; // inside a RUNS_NEXT word's options
+  let optionValue = false; // the word after an option may be its value
   for (let i = 0; i < parts.length; i += 2) {
+    const word = parts[i];
     const prev = words.at(-1);
-    atStart.push(!prev || /[,([]/.test(parts[i - 1]) || /[;&|`=]$/.test(prev) || RUNS_NEXT.has(prev));
-    words.push(parts[i]);
+    const start = next || /[,([]/.test(parts[i - 1] ?? "") || /[;&|`=]$/.test(prev ?? "");
+    atStart.push(start);
+    words.push(word);
+    if (word === "") continue;
+    const option = wrapper && (word.startsWith("-") || /^\d/.test(word) || optionValue);
+    optionValue = option && word.startsWith("-") && !word.includes("=");
+    // An assignment's value counts too, so X='timeout 9 gh m' is read like the command it holds.
+    const runsNext = start && RUNS_NEXT.has(word.replace(/^[A-Za-z_]\w*=/, ""));
+    if (runsNext) wrapper = true;
+    else if (!option) wrapper = false;
+    next = runsNext || (start && /^[A-Za-z_]\w*=/.test(word)) || option || OPTION_RUNS_NEXT.has(word);
   }
   return { words, atStart };
 }
@@ -314,22 +332,23 @@ function prActions(text) {
   }
   return found;
 }
-// How many words name a GitHub API path that API.branchWrite matches. Only a
-// word that starts with repos/, repositories/ or orgs/ (a slash or a URL's
-// scheme and host may come first) counts, so a local path such as
-// src/rename or .github/rulesets does not.
+// How many GitHub API paths that API.branchWrite matches the text names. A
+// path starts with repos/, repositories/ or orgs/, after a URL's host or
+// none, and after a character that is not part of a path, so a local path
+// such as src/rename, .github/rulesets or docs/repos/... does not count.
+const API_PATH = /(?:^|[^\w./-])((?:(?:[a-z][a-z0-9+.-]*:)?\/\/[^/\s]*|[\w.-]*github[\w.-]*)?\/?(?:repos|repositories|orgs)\/[^\s"'`,()[\]]*)/gi;
 function branchPaths(said) {
   let found = 0;
-  for (const word of said.split(/[\s,()[\]=]+/)) {
-    if (/^(?:[a-z][a-z0-9+.-]*:\/\/[^/\s]*)?\/?(?:repos|repositories|orgs)\//i.test(word) && API.branchWrite.test(apiPath(word))) found++;
+  for (const match of said.matchAll(API_PATH)) {
+    if (API.branchWrite.test(apiPath(match[1]))) found++;
   }
   return found;
 }
 // True when a call's text names a PR or branch write. A branch path counts
-// only next to `gh api` (python's "gh","api" too) or GitHub.
+// only next to the word gh or GitHub.
 const namesWrite = (said) =>
   prActions(said) > 0 || MERGE_MUTATIONS.test(said) || BRANCH_MUTATIONS.test(said)
-  || (branchPaths(said) > 0 && /\bgh[\s,]+api\b|github/i.test(said));
+  || (branchPaths(said) > 0 && /\bgh\b|github/i.test(said));
 const hintCount = (text) => {
   const said = plain(text);
   return prActions(said) + (said.match(PR_HINT)?.length ?? 0) + branchPaths(said);
@@ -357,8 +376,9 @@ const API = {
   // Writes here move, delete, create or rename a branch, commit to it
   // directly (contents), sync a fork's branch, or change branch protection
   // or rulesets, or write to the repository itself (its default branch and
-  // settings), or move it to another owner. A branch name may hold slashes.
-  branchWrite: /\/git\/refs?(?:\/|$)|\/branches\/.+\/(?:protection(?:\/.*)?|rename)$|\/rulesets(?:\/|$)|\/merge-upstream$|\/repos\/[^/]+\/[^/]+\/(?:contents(?:\/|$)|transfer$)|\/repos\/[^/]+\/[^/]+$|\/repositories\/[^/]+$/i,
+  // settings, Actions permissions among them), or move it to another owner.
+  // A branch name may hold slashes.
+  branchWrite: /\/git\/refs?(?:\/|$)|\/branches\/.+\/(?:protection(?:\/.*)?|rename)$|\/rulesets(?:\/|$)|\/merge-upstream$|\/repos\/[^/]+\/[^/]+\/(?:contents(?:\/|$)|transfer$|actions\/permissions(?:\/|$))|\/repos\/[^/]+\/[^/]+$|\/repositories\/[^/]+$/i,
 };
 // A merge path is refused earlier, as a bypass.
 const PR_WRITE_PATHS = [API.createPr, API.mergeBranch];
