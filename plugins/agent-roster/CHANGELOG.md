@@ -2,6 +2,31 @@
 
 1.8.0 is the first version published in this public repo. Earlier entries are kept for reference.
 
+## 1.18.0
+
+**Upgrade steps:**
+
+1. `claude plugin marketplace update ai-utils`, then `claude plugin update agent-roster@ai-utils`, then restart Claude Code.
+2. Rerun `setup-agentic-workflow` in each repo set up before 1.18.0, and merge its setup PR. It refreshes `docs/agents/coordinator-prompt.md`, `docs/agents/git-workflow.md`, `docs/agents/multi-agent.md` and `scripts/check-agent-hooks.mjs`.
+3. Start a new coordinator chat from the new prompt, or paste its new "Cleanup after a merge" section and merge steps 7 and 8 into the open one.
+
+**Changes:**
+
+- **The coordinator cleans up after each merge** (#55). The coordinator prompt's merge steps gain step 7, "Clean up", and step 8 reports the cleanup with the merge. A new section, "Cleanup after a merge", owns the rule. The coordinator runs it itself as the last part of the merge, and an agent that runs merge steps for it runs it too. It deletes the PR's branch on GitHub (unless GitHub already did) and locally, removes the item's worktree, and tells the owner in one line.
+- **Checks before it deletes anything.** It touches only the branch and worktree that the item's registry row names, and only after the item's agents have stopped. It checks six things, and deletes nothing if any fails:
+  - the PR is merged, and its head branch is the one the row names;
+  - the branch name, the head sha and the worktree path are safe to put in a command, and every command quotes them; the branch is not `main` or the PR's base;
+  - `git worktree list` shows the worktree as a linked worktree of this repo, on that branch, not the main checkout;
+  - the worktree has no uncommitted, untracked or ignored files, except files a build or install makes again;
+  - every commit in the worktree is in the merged PR;
+  - the branch on GitHub is gone or still at the PR's last commit (skipped for a PR from a fork).
+- **When it stops.** A failed check or command adds a `do` row to the Asks board that says what was found and what to do next. The registry row stays, marked `cleanup pending` with the step it stopped at, until the cleanup is done. After the owner ticks the row, a failed check starts again from the first check, and a failed delete resumes at that step after the checks for lost work run again. The cleanup removes the registry row when it is done. It never forces: no force push, no `git branch -D`, no `git worktree remove --force`.
+- **Squash merges and `git branch -d`.** A squash or rebase merge leaves the branch's commits out of `main`, and `git worktree add -b` often sets the branch's upstream to `origin/main`, so `-d` would refuse. The cleanup detaches the worktree at the PR's last commit and unsets the upstream if there is one, so `-d` checks the branch against that commit and deletes it only when nothing is missing from the PR.
+- **No hook override.** Every git command runs as `git -C '<worktree>'`, so the main-checkout guard allows it without `ALLOW_MAIN_CHECKOUT_WRITE`. The guard still refuses `git branch -d` and `git worktree remove` run in the main checkout.
+- `git-workflow.md`, `multi-agent.md`, the `route-work` skill, the setup skill and the README point to the new section. `multi-agent.md` tells agents to commit and push all their work before the merge, to keep nothing else in the worktree, and to leave their registry row for the coordinator to remove.
+- `check-agent-hooks.mjs` tests the cleanup commands: both hooks allow each one, as the prompt quotes it, from the main checkout and from the worktree, and the guard still refuses `git branch -d` and `git worktree remove` run in the main checkout.
+- **The validator checks the rule.** `validate-plugins.py` checks that the coordinator prompt and its filled copy keep the section and its no-force guards, that the prompt still gives each command the hook self-check tests, and that `git-workflow.md` and `multi-agent.md` keep their link to it.
+
 ## 1.17.0
 
 **Upgrade steps:**

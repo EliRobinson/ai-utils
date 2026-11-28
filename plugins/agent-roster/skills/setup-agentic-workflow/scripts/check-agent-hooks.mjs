@@ -33,6 +33,9 @@ const main = path.join(tmp, "repo");
 const tree = path.join(tmp, "repo-task");
 const bin = path.join(tmp, "bin");
 const lone = path.join(tmp, "lone");
+// The worktree's branch, and a PR head sha, for the cleanup cases.
+const BRANCH = "task";
+const HEAD = "0123456789abcdef0123456789abcdef01234567";
 const named = path.join(tmp, "named");
 try {
   fs.mkdirSync(path.join(main, "scripts"), { recursive: true });
@@ -40,7 +43,7 @@ try {
   git(main, "init", "-q", "-b", "main");
   git(main, "add", "-A");
   git(main, "commit", "-qm", "init");
-  git(main, "worktree", "add", "-q", tree, "-b", "task");
+  git(main, "worktree", "add", "-q", tree, "-b", BRANCH);
   // A repo whose origin is on GitHub, for the cases that name a repo.
   fs.mkdirSync(named);
   git(named, "init", "-q", "-b", "main");
@@ -104,7 +107,7 @@ try {
   // In the repo whose origin is Owner/Name; the PR body has no record unless given.
   const inNamed = (command, expect, body = "no record") => reviewIn(named, command, expect, { FAKE_PR_BODY: body });
   // A PR whose body is empty, so a checked merge is refused.
-  const noBody = (command, expect) => review(command, expect, { FAKE_PR_BODY: "" });
+  const noBody = (command, expect, cwd = tree) => reviewIn(cwd, command, expect, { FAKE_PR_BODY: "" });
   // Refused, and the refusal says `phrase`: the record is complete, so only the form can refuse.
   const says = (c, phrase) => ({ ...c, says: phrase });
   const refuseSays = (command, phrase) => says(review(command, "refuse", { FAKE_PR_BODY: good }), phrase);
@@ -116,6 +119,27 @@ try {
   const asks = (command, phrase = "asks you first") => says(review(command, "ask", { FAKE_PR_BODY: good }), phrase);
   const mcp = (tool, input, expect) => ({ hook: "review", hookDir: path.join(tree, "scripts"), cwd: tree, tool, input, expect });
   const fromTree = path.join(tree, "scripts");
+  // The commands of "Cleanup after a merge" in the coordinator prompt, in order,
+  // written exactly as the prompt writes them; validate-plugins.py checks that the
+  // prompt still has each one. `fill` turns a template into a command to run.
+  const wt = `'${tree}'`;
+  const fill = (template) => template.replaceAll("'<wt>'", wt).replaceAll("<head>", HEAD).replaceAll("<branch>", BRANCH)
+    .replaceAll(" N ", " 5 ").replaceAll("/N/", "/5/").replaceAll("{{GITHUB_REPO}}", "o/r");
+  const CLEANUP = [
+    "gh pr view N -R {{GITHUB_REPO}} --json state,headRefName,headRefOid,baseRefName,isCrossRepository",
+    "git -C '<wt>' worktree list --porcelain",
+    "git -C '<wt>' status --porcelain --ignored",
+    "git -C '<wt>' fetch --prune origin",
+    "git -C '<wt>' fetch origin pull/N/head",
+    "git -C '<wt>' rev-list --count <head>..HEAD",
+    "git -C '<wt>' ls-remote origin 'refs/heads/<branch>'",
+    "git -C '<wt>' push origin --delete '<branch>'",
+    "git -C '<wt>' switch --detach <head>",
+    "git -C '<wt>' rev-parse --verify --quiet '<branch>@{upstream}'",
+    "git -C '<wt>' branch --unset-upstream '<branch>'",
+    "git -C '<wt>' branch -d '<branch>'",
+    "git -C '<wt>' worktree remove '<wt>'",
+  ].map(fill);
 
   const cases = [
     // The guard refuses writes in the main checkout.
@@ -756,6 +780,13 @@ try {
     mcp("mcp__github__create_pull_request_review", { body: "LGTM" }, "allow"),
     mcp("mcp__db__create_project", { name: "x" }, "allow"),
     mcp("mcp__github__get_pull_request_merge_status", {}, "allow"),
+    // Cleanup after a merge (coordinator prompt): run with `git -C <worktree>`,
+    // both hooks allow every command from the main checkout and from the
+    // worktree, with no override. Its deletes run in the main checkout are refused.
+    ...CLEANUP.flatMap((command) =>
+      [main, tree].flatMap((cwd) => [guard(cwd, command, "allow"), noBody(command, "allow", cwd)])),
+    guard(main, `git branch -d '${BRANCH}'`, "refuse"),
+    guard(main, `git worktree remove ${wt}`, "refuse"),
   ];
 
   let failed = 0;

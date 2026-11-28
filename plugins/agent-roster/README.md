@@ -235,7 +235,7 @@ The full rule is the **Merge policy** section of [`git-workflow.md`](skills/setu
 
 ## Start a coordinator chat
 
-A coordinator is the main chat the owner talks to, not a subagent, so it starts from a prompt rather than an agent file. Paste `coordinator/coordinator-prompt.md` as the first message of a new chat, with its placeholders filled (`setup-agentic-workflow` fills them for a repo). It holds the start-up steps, the working rule (hand off every task, tickets in the configured tool), asking the owner (on the Asks board only when a board click can resolve the ask, in chat otherwise, "merge N" included, and a pointer to the `asks-board` skill for Board Router pings), the ownership registry, and the merge steps, which read the merge policy before each merge. The routing table stays in `route-work`, which the prompt links to.
+A coordinator is the main chat the owner talks to, not a subagent, so it starts from a prompt rather than an agent file. Paste `coordinator/coordinator-prompt.md` as the first message of a new chat, with its placeholders filled (`setup-agentic-workflow` fills them for a repo). It holds the start-up steps, the working rule (hand off every task, tickets in the configured tool), asking the owner (on the Asks board only when a board click can resolve the ask, in chat otherwise, "merge N" included, and a pointer to the `asks-board` skill for Board Router pings), the ownership registry, and the merge steps, which read the merge policy before each merge and include "Cleanup after a merge", where the coordinator itself deletes the merged branch and removes its worktree. The routing table stays in `route-work`, which the prompt links to.
 
 ## Override per repo
 

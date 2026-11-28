@@ -38,6 +38,7 @@ cd ../<repo>-<task>
 - [review-gate.md](review-gate.md) says when a catch-up needs review.
 - Review before you open the PR, drafts included: see [review-gate.md](review-gate.md).
 - Only the coordinator merges, and only as the merge policy below allows. It follows the merge steps in [coordinator-prompt.md](coordinator-prompt.md#merging): up to date with `main`, review record complete, test gate and CI passed on the exact head, merge lock, then `gh pr merge N --<style> --match-head-commit <sha>` in the merge style below.
+- After the merge the coordinator deletes the branch and removes the worktree, as the "Cleanup after a merge" section of [coordinator-prompt.md](coordinator-prompt.md#cleanup-after-a-merge) says.
 
 ## Merge style
 

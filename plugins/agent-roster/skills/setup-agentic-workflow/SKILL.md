@@ -185,7 +185,7 @@ If the repo has no pre-commit or pre-push hooks, recommend setting them up, and 
 - **Option A:** commit with a normal commit (never `--no-verify`) and push the branch. The change is new behaviour like any other: take the branch through the review gate (`agent-roster:pr-finisher`, or `docs/agents/review-gate.md`) before you open the PR. Never merge it. The setup PR changes the workflow files, so it waits for the owner's "merge N" under either merge policy.
 - **Option B:** the new hooks load only when Claude Code restarts, so they are not live in this session yet. After a restart, the guard refuses commits in this checkout. Commit before the restart, or prefix that one commit with `ALLOW_MAIN_CHECKOUT_WRITE=1` and say so in the report.
 
-For option A, the registry row stays until the PR merges; the report says so. Option B has no row.
+For option A, the registry row stays until the PR merges and the coordinator cleans up after it; the report says so. Option B has no row.
 
 ### 10. Report
 
@@ -199,7 +199,7 @@ Finish with a short report:
 - the merge policy. For `auto`, give the owner the permission rule from the **Merge policy** section of `templates/docs-agents/git-workflow.md`, word for word with this repo's `owner/name`, and say its entries are added to the `allow` and `deny` lists in the main checkout's `.claude/settings.local.json`, without replacing what is there. Never add it for them, and never suggest `~/.claude/settings.json`. A coordinator chat started before agent-roster 1.12.0 does not read the policy; start a new one;
 - the reviewer skills and the `accessibility-agents` plugin: which are ready and which are missing, and whether page scans can run;
 - `docs/agents/coordinator-prompt.md`: paste it as the first message of a new chat to start a coordinator, after filling in the job. Name that chat exactly as the board's route says (`<Repo name> Coordinator`). When it starts, it sets its `sessionId` on the route and adds a test ask, so the owner can check the ping;
-- for option A: delete the registry row when the setup PR merges;
+- for option A: the coordinator removes the registry row after the setup PR merges and its cleanup is done ("Cleanup after a merge" in the coordinator prompt);
 - what the owner must do by hand: anything from steps 2 and 4 they said no to (the commands are in the agent-roster README, under "Skills the agents need"), repo settings if they chose B, git hooks, the test gate in the coordinator prompt if you could not tell it, and restarting Claude Code so the new hooks load.
 
 ## The ticketing tool setting
